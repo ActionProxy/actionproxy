@@ -1,0 +1,164 @@
+name: security
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: tests, types, build (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22', '24']
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: corepack enable
+      - run: corepack pnpm verify:tracked-checkout
+      - run: corepack pnpm verify:oss-boundary
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm test
+      - run: corepack pnpm lint
+      - run: corepack pnpm build
+      - name: Install the pinned Community Playwright browser
+        if: matrix.node-version == '24'
+        run: corepack pnpm --filter @actionproxy/web exec playwright install --with-deps chromium
+      - name: Run generated-tree Community browser lifecycle
+        if: matrix.node-version == '24'
+        run: corepack pnpm test:e2e:community
+      - name: Smoke packaged MCP wrapper
+        if: matrix.node-version == '24'
+        run: corepack pnpm smoke:mcp-package
+      - name: Block high and critical dependency advisories
+        if: matrix.node-version == '24'
+        run: corepack pnpm supply-chain:audit
+      - name: Validate runtime dependency licenses
+        if: matrix.node-version == '24'
+        run: corepack pnpm supply-chain:licenses
+      - name: Generate and validate CycloneDX SBOM
+        if: matrix.node-version == '24'
+        run: corepack pnpm supply-chain:sbom
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: matrix.node-version == '24'
+        with:
+          name: actionproxy-supply-chain
+          path: |
+            bom.json
+            runtime-licenses.json
+          retention-days: 14
+
+  postgres-atomicity:
+    name: postgres storage and MCP conformance
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_DB: actionproxy_test
+          POSTGRES_PASSWORD: actionproxy
+          POSTGRES_USER: actionproxy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U actionproxy -d actionproxy_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - name: Install SQLite CLI for zero-skip storage coverage
+        run: sudo apt-get update && sudo apt-get install --yes sqlite3
+      - run: corepack enable
+      - run: corepack pnpm verify:tracked-checkout
+      - run: corepack pnpm install --frozen-lockfile
+      - name: Run Postgres storage and MCP integration tests without skips
+        env:
+          ACTIONPROXY_TEST_POSTGRES_URL: postgres://actionproxy:actionproxy@127.0.0.1:5432/actionproxy_test
+        run: corepack pnpm test:postgres:no-skip
+
+  docker-community:
+    name: Docker memory and SQLite smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: corepack pnpm verify:tracked-checkout
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm docker:smoke:community
+
+  codeql:
+    name: codeql (public repository only)
+    if: ${{ github.event.repository.visibility == 'public' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - run: node scripts/attest-public-checkout.mjs .
+      - uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+      - run: node scripts/attest-public-checkout.mjs .
+      - name: Scan full Git history with the pinned Gitleaks CLI
+        run: >-
+          docker run --rm
+          -v "$PWD:/repo"
+          -w /repo
+          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git
+          --no-banner
+          --no-color
+          --redact
+          .
+
+  workflow-lint:
+    name: workflow lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - run: node scripts/attest-public-checkout.mjs .
+      - name: Verify immutable action references
+        run: node scripts/check-workflow-actions.mjs
+      - name: Run actionlint 1.7.7
+        run: >-
+          docker run --rm
+          -v "$PWD:/repo"
+          -w /repo
+          rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
+          -color

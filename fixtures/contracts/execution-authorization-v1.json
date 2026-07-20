@@ -1,0 +1,155 @@
+{
+  "version": "actionproxy.execution-authorization.v1",
+  "binding": {
+    "action": {
+      "actionEnvelopeHash": "envelope_fixture_hash",
+      "inputHash": "input_fixture_hash",
+      "toolName": "gmail.send_email"
+    },
+    "approval": {
+      "approvalId": "approval_fixture",
+      "authorizationHash": "370bd0dba4a735fe273e3ab64261cc1dbc9b3d755f8818e9ef18a6f2415dea33",
+      "authorizationNonce": "approval_nonce_fixture",
+      "receiptHash": "receipt_fixture_hash",
+      "receiptId": "receipt_fixture"
+    },
+    "contentInfluence": {
+      "bindingHash": null,
+      "influenceScopeId": null,
+      "resultSourceHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    },
+    "decision": {
+      "decisionId": "decision_fixture",
+      "decisionInputHash": "decision_input_fixture_hash",
+      "outcome": "require_approval",
+      "version": "actionproxy.decision.v1"
+    },
+    "execution": {
+      "attemptId": "attempt_fixture",
+      "attemptNumber": 1,
+      "grantId": null,
+      "mode": "local_mock"
+    },
+    "executor": {
+      "id": "actionproxy.local-tool-registry"
+    },
+    "policy": {
+      "digest": "policy_digest_fixture",
+      "evaluatorVersion": "actionproxy.policy-evaluator.v1",
+      "providerId": "actionproxy.yaml",
+      "providerVersion": "actionproxy.yaml-provider.v1",
+      "version": "policy_version_fixture",
+      "versionHash": "policy_version_hash_fixture"
+    },
+    "request": {
+      "canonicalActionRequestHash": "canonical_request_fixture_hash",
+      "canonicalActionRequestVersion": "actionproxy.action-request.v1",
+      "toolCallId": "toolcall_fixture"
+    },
+    "tenant": {
+      "workspaceId": "tenant_fixture"
+    }
+  },
+  "capabilities": {
+    "automaticRetry": {
+      "supported": false
+    },
+    "cancellation": {
+      "supported": false
+    },
+    "credentialCustody": {
+      "acceptsRawCredentials": false,
+      "mode": "executor_boundary_only"
+    },
+    "providerIdempotency": {
+      "supported": false
+    },
+    "reconciliation": {
+      "supported": false
+    },
+    "timeout": {
+      "enforced": false,
+      "timeoutMs": null
+    },
+    "version": "actionproxy.executor-capabilities.v1"
+  },
+  "projection": {
+    "authorizationId": "execauth_fixture",
+    "binding": {
+      "action": {
+        "actionEnvelopeHash": "envelope_fixture_hash",
+        "inputHash": "input_fixture_hash",
+        "toolName": "gmail.send_email"
+      },
+      "approval": {
+        "approvalId": "approval_fixture",
+        "authorizationHash": "370bd0dba4a735fe273e3ab64261cc1dbc9b3d755f8818e9ef18a6f2415dea33",
+        "authorizationNonce": "approval_nonce_fixture",
+        "receiptHash": "receipt_fixture_hash",
+        "receiptId": "receipt_fixture"
+      },
+      "contentInfluence": {
+        "bindingHash": null,
+        "influenceScopeId": null,
+        "resultSourceHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+      },
+      "decision": {
+        "decisionId": "decision_fixture",
+        "decisionInputHash": "decision_input_fixture_hash",
+        "outcome": "require_approval",
+        "version": "actionproxy.decision.v1"
+      },
+      "execution": {
+        "attemptId": "attempt_fixture",
+        "attemptNumber": 1,
+        "grantId": null,
+        "mode": "local_mock"
+      },
+      "executor": {
+        "id": "actionproxy.local-tool-registry"
+      },
+      "policy": {
+        "digest": "policy_digest_fixture",
+        "evaluatorVersion": "actionproxy.policy-evaluator.v1",
+        "providerId": "actionproxy.yaml",
+        "providerVersion": "actionproxy.yaml-provider.v1",
+        "version": "policy_version_fixture",
+        "versionHash": "policy_version_hash_fixture"
+      },
+      "request": {
+        "canonicalActionRequestHash": "canonical_request_fixture_hash",
+        "canonicalActionRequestVersion": "actionproxy.action-request.v1",
+        "toolCallId": "toolcall_fixture"
+      },
+      "tenant": {
+        "workspaceId": "tenant_fixture"
+      }
+    },
+    "capabilities": {
+      "automaticRetry": {
+        "supported": false
+      },
+      "cancellation": {
+        "supported": false
+      },
+      "credentialCustody": {
+        "acceptsRawCredentials": false,
+        "mode": "executor_boundary_only"
+      },
+      "providerIdempotency": {
+        "supported": false
+      },
+      "reconciliation": {
+        "supported": false
+      },
+      "timeout": {
+        "enforced": false,
+        "timeoutMs": null
+      },
+      "version": "actionproxy.executor-capabilities.v1"
+    },
+    "expiresAt": "2026-07-12T00:01:00.000Z",
+    "issuedAt": "2026-07-12T00:00:00.000Z",
+    "version": "actionproxy.execution-authorization.v1"
+  }
+}

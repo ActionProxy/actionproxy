@@ -1,0 +1,19 @@
+actionproxy:
+  baseUrl: http://localhost:8787
+  requestedBy: mcp-host@example.com
+  agentId: actionproxy-mcp-wrapper
+  approvalPollIntervalMs: 1000
+  approvalTimeoutMs: 120000
+
+servers:
+  demo:
+    command: node
+    args: ["./server.mjs"]
+
+policies:
+  docs.search:
+    approval: never
+  gmail.send_email:
+    approval: required
+  dangerous.delete_customer:
+    approval: deny

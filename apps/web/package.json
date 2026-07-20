@@ -1,0 +1,38 @@
+{
+  "name": "@actionproxy/web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "lint": "tsc --noEmit",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "test": "vitest run --no-file-parallelism",
+    "test:e2e": "playwright test community.spec.ts",
+    "test:e2e:community": "playwright test community.spec.ts"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.48.2",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.6.3",
+    "vite": "^6.4.3",
+    "vitest": "^3.2.6"
+  }
+}

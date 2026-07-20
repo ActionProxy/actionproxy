@@ -1,0 +1,15 @@
+{
+  "toolName": "gmail.send_email",
+  "input": {
+    "to": "customer@example.com",
+    "subject": "Update on your billing question",
+    "body": "Thanks for reaching out. We reviewed your billing question and will follow up with the next step shortly."
+  },
+  "requestedBy": "support-agent@example.com",
+  "agentId": "support-demo-agent",
+  "reason": "Send drafted customer response after human approval",
+  "metadata": {
+    "ticketId": "TICKET-123",
+    "customerId": "cus_demo_123"
+  }
+}

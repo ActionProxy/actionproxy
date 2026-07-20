@@ -1,0 +1,219 @@
+{
+  "version": "actionproxy.http-sdk-conformance.v1",
+  "contractVersions": {
+    "approvalAuthorization": "actionproxy.approval-authorization.v1",
+    "canonicalRequest": "actionproxy.action-request.v1",
+    "decision": "actionproxy.decision.v1",
+    "executionAttempt": "actionproxy.execution-attempt.v1",
+    "executionAuthorization": "actionproxy.execution-authorization.v1",
+    "executorCapabilities": "actionproxy.executor-capabilities.v1"
+  },
+  "scenarios": [
+    {
+      "name": "allow",
+      "flow": "submit",
+      "request": {
+        "agentId": "sdk-conformance-agent",
+        "input": { "query": "refund" },
+        "reason": "Find the refund policy",
+        "requestedBy": "sdk-user@example.com",
+        "toolName": "docs.search"
+      },
+      "expected": {
+        "httpStatus": 200,
+        "decision": "allow",
+        "toolCallStatus": "executed",
+        "attemptState": "succeeded",
+        "authorizedDispatches": 1
+      }
+    },
+    {
+      "name": "deny",
+      "flow": "submit",
+      "request": {
+        "agentId": "sdk-conformance-agent",
+        "input": { "customerId": "customer-fixture" },
+        "reason": "Delete a customer",
+        "requestedBy": "sdk-user@example.com",
+        "toolName": "dangerous.delete_customer"
+      },
+      "expected": {
+        "httpStatus": 200,
+        "decision": "deny",
+        "toolCallStatus": "blocked",
+        "attemptCount": 0,
+        "authorizedDispatches": 0
+      }
+    },
+    {
+      "name": "require-approval",
+      "flow": "submit",
+      "request": {
+        "agentId": "sdk-conformance-agent",
+        "input": {
+          "body": "Your request is ready.",
+          "subject": "Status update",
+          "to": "customer@example.com"
+        },
+        "reason": "Send a customer update",
+        "requestedBy": "sdk-user@example.com",
+        "toolName": "gmail.send_email"
+      },
+      "expected": {
+        "httpStatus": 200,
+        "decision": "require_approval",
+        "toolCallStatus": "pending_approval",
+        "attemptCount": 0,
+        "authorizedDispatches": 0
+      }
+    },
+    {
+      "name": "approval-execution",
+      "flow": "submit-and-approve",
+      "request": {
+        "agentId": "sdk-conformance-agent",
+        "input": {
+          "body": "Your request is ready.",
+          "subject": "Approved status update",
+          "to": "customer@example.com"
+        },
+        "reason": "Send an approved customer update",
+        "requestedBy": "sdk-user@example.com",
+        "toolName": "gmail.send_email"
+      },
+      "approval": { "approvedBy": "manager@example.com" },
+      "expected": {
+        "httpStatus": 200,
+        "approvalStatus": "approved",
+        "toolCallStatus": "executed",
+        "attemptState": "succeeded",
+        "authorizedDispatches": 1
+      }
+    },
+    {
+      "name": "external-grant",
+      "flow": "submit-and-run-external",
+      "request": {
+        "agentId": "sdk-conformance-agent",
+        "input": { "query": "external execution" },
+        "metadata": { "actionproxyExecution": "external" },
+        "reason": "Run through an external executor",
+        "requestedBy": "sdk-user@example.com",
+        "toolName": "docs.search"
+      },
+      "outcome": { "result": { "rows": 1 }, "status": "succeeded" },
+      "expected": {
+        "httpStatus": 200,
+        "decision": "allow",
+        "toolCallStatus": "authorized",
+        "consumeHttpStatus": 200,
+        "outcomeHttpStatus": 200,
+        "finalToolCallStatus": "executed",
+        "attemptState": "succeeded",
+        "authorizedDispatches": 1
+      }
+    },
+    {
+      "name": "same-request-replay",
+      "flow": "submit-twice",
+      "idempotencyKey": "sdk-conformance-replay",
+      "request": {
+        "agentId": "sdk-conformance-agent",
+        "input": { "query": "one logical action" },
+        "reason": "Replay one request",
+        "requestedBy": "sdk-user@example.com",
+        "toolName": "docs.search"
+      },
+      "expected": {
+        "httpStatus": 200,
+        "replayHttpStatus": 200,
+        "sameRequestId": true,
+        "attemptCount": 1,
+        "authorizedDispatches": 1
+      }
+    },
+    {
+      "name": "payload-conflict",
+      "flow": "submit-conflict",
+      "idempotencyKey": "sdk-conformance-conflict",
+      "request": {
+        "agentId": "sdk-conformance-agent",
+        "input": { "query": "original action" },
+        "reason": "Reserve one request",
+        "requestedBy": "sdk-user@example.com",
+        "toolName": "docs.search"
+      },
+      "conflictingInput": { "query": "different action" },
+      "expected": {
+        "httpStatus": 200,
+        "conflictHttpStatus": 409,
+        "error": "conflict",
+        "attemptCount": 1,
+        "authorizedDispatches": 1
+      }
+    },
+    {
+      "name": "policy-provider-failure",
+      "flow": "submit-with-failing-provider",
+      "request": {
+        "agentId": "sdk-conformance-agent",
+        "input": { "query": "provider failure" },
+        "reason": "Exercise fail-closed policy evaluation",
+        "requestedBy": "sdk-user@example.com",
+        "toolName": "docs.search"
+      },
+      "fault": { "policyProvider": "throws" },
+      "expected": {
+        "httpStatus": 200,
+        "decision": "deny",
+        "toolCallStatus": "blocked",
+        "reasonCodes": ["policy_outcome_deny", "policy_provider_error"],
+        "attemptCount": 0,
+        "authorizedDispatches": 0
+      }
+    },
+    {
+      "name": "external-input-mutation-rejection",
+      "flow": "submit-and-mutate-external-input",
+      "request": {
+        "agentId": "sdk-conformance-agent",
+        "input": { "query": "authorized input" },
+        "metadata": { "actionproxyExecution": "external" },
+        "reason": "Reject a mutated external action",
+        "requestedBy": "sdk-user@example.com",
+        "toolName": "docs.search"
+      },
+      "mutatedInput": { "query": "mutated input" },
+      "expected": {
+        "httpStatus": 200,
+        "mutationHttpStatus": 403,
+        "attemptState": "reserved",
+        "authorizedDispatches": 0
+      }
+    },
+    {
+      "name": "unknown-outcome-non-retry",
+      "flow": "submit-and-report-unknown",
+      "idempotencyKey": "sdk-conformance-unknown-outcome",
+      "request": {
+        "agentId": "sdk-conformance-agent",
+        "input": { "query": "unknown provider outcome" },
+        "metadata": { "actionproxyExecution": "external" },
+        "reason": "Preserve an unknown provider outcome",
+        "requestedBy": "sdk-user@example.com",
+        "toolName": "docs.search"
+      },
+      "outcome": { "error": "Runner disconnected after dispatch", "status": "unknown_outcome" },
+      "expected": {
+        "httpStatus": 200,
+        "consumeHttpStatus": 200,
+        "outcomeHttpStatus": 200,
+        "retryConsumeHttpStatus": 409,
+        "finalToolCallStatus": "failed",
+        "attemptState": "unknown_outcome",
+        "retryDisposition": "manual_reconciliation_required",
+        "authorizedDispatches": 1
+      }
+    }
+  ]
+}

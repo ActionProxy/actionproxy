@@ -1,0 +1,9 @@
+.actionproxy*
+.git
+.pnpm-store
+**/dist
+**/dist-ssr
+**/node_modules
+**/playwright-report
+**/test-results
+node_modules

@@ -1,0 +1,81 @@
+version: 1
+default:
+  approval: required
+  resultSource:
+    integrity: unknown
+  risk: unknown
+  reason: Unknown tools require approval by default.
+tools:
+  docs.search:
+    approval: never
+    resultSource:
+      integrity: organization_managed
+      sourceId: local-docs
+    risk: read_only
+    reason: Search is read-only.
+  jira.create_issue:
+    approval: never
+    influence:
+      allowFrom: [none, organization_managed, verified_publisher]
+      otherwise: required
+    resultSource: none
+    risk: internal_write
+    reason: Creating an issue is automatic only from reviewed content.
+  gmail.send_email:
+    approval: required
+    resultSource: none
+    risk: external_communication
+    reason: External messages require human approval.
+  payments.issue_refund:
+    approval: never
+    conditions:
+      amount:
+        lte: 50
+    influence:
+      allowFrom: [none, organization_managed]
+      otherwise: required
+    resultSource: none
+    risk: financial_write
+    reason: Demo refunds up to 50 may run only from reviewed content.
+  payments.*:
+    approval: required
+    risk: financial_write
+    reason: Other payment actions require human approval.
+  salesforce.update_opportunity:
+    approval: required
+    resultSource: none
+    risk: record_update
+    reason: Demo record changes require human approval.
+  salesforce.restore_opportunity:
+    approval: required
+    resultSource: none
+    risk: record_update
+    reason: Demo remediation changes require human approval.
+  web.fetch:
+    approval: required
+    resultSource:
+      integrity: public_untrusted
+      sourceId: public-web
+    risk: open_world_read
+    reason: Unknown public content requires approval before retrieval.
+  research.notes.append:
+    approval: never
+    influence:
+      allowFrom: [none, organization_managed, verified_publisher]
+      otherwise: required
+    resultSource: none
+    risk: low_risk_write
+    reason: Notes may be appended automatically only from reviewed content.
+  memory.write:
+    approval: required
+    influence:
+      allowFrom: [none, organization_managed]
+      otherwise: deny
+    resultSource: none
+    risk: persistent_memory
+    reason: Persistent memory writes are denied after untrusted content exposure.
+  dangerous.delete_customer:
+    approval: deny
+    resultSource: none
+    risk: destructive
+    reason: Destructive customer deletion is blocked.

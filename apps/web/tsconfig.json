@@ -1,0 +1,29 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vitest/globals", "@testing-library/jest-dom"]
+  },
+  "include": [
+    "src/App.test.tsx",
+    "src/App.tsx",
+    "src/community-boundary.test.ts",
+    "src/components/AgentDemoPanel.test.tsx",
+    "src/components/AgentDemoPanel.tsx",
+    "src/components/Dashboard.community.test.tsx",
+    "src/components/Dashboard.tsx",
+    "src/components/PolicyEditor.tsx",
+    "src/components/ToolIntegrationsCard.tsx",
+    "src/lib/actionproxy-client.test.ts",
+    "src/lib/actionproxy-client.ts",
+    "src/lib/api.ts",
+    "src/main.tsx",
+    "src/test-setup.ts",
+    "src/types.ts",
+    "src/vite-env.d.ts",
+    "tests/e2e/community.spec.ts",
+    "playwright.config.ts",
+    "vite.config.ts"
+  ]
+}

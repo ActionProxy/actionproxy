@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "actionproxy-demo": {
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "<repo>/packages/mcp-wrapper/dist/index.js",
+        "wrap",
+        "--config",
+        "<repo>/examples/mcp-demo/actionproxy.mcp.yaml"
+      ]
+    }
+  }
+}

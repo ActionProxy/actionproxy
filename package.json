@@ -1,0 +1,50 @@
+{
+  "name": "actionproxy",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Open-source approval gateway for AI agent tool calls",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ActionProxy/actionproxy.git"
+  },
+  "homepage": "https://github.com/ActionProxy/actionproxy#readme",
+  "bugs": {
+    "url": "https://github.com/ActionProxy/actionproxy/issues"
+  },
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "packageManager": "pnpm@11.10.0",
+  "scripts": {
+    "benchmark:content-influence": "corepack pnpm --filter @actionproxy/server benchmark:content-influence",
+    "build": "corepack pnpm -r build",
+    "demo:chatgpt": "corepack pnpm --filter @actionproxy/server build && node examples/chatgpt-app/run-local-protocol-smoke.mjs",
+    "demo:chatgpt:tunnel": "node examples/chatgpt-tunnel/run-tunnel.mjs",
+    "demo:mcp": "corepack pnpm --filter @actionproxy/mcp-wrapper build && node examples/mcp-demo/run-smoke-test.mjs",
+    "demo:mcp:hosts": "corepack pnpm --filter @actionproxy/mcp-wrapper build && node examples/mcp-hosts/print-host-configs.mjs",
+    "demo:mcp:manual": "corepack pnpm --filter @actionproxy/mcp-wrapper build && node examples/mcp-demo/run-smoke-test.mjs --manual-approval",
+    "dev": "node scripts/dev.mjs",
+    "dev:proxy": "node scripts/dev.mjs --server-only --proxy",
+    "dev:server": "node scripts/dev.mjs --server-only",
+    "dev:web": "node scripts/dev.mjs --web-only",
+    "docker:build": "docker build -t actionproxy:local .",
+    "docker:smoke:community": "node scripts/smoke-community-docker.mjs",
+    "lint": "corepack pnpm -r lint",
+    "manifest:refresh": "node scripts/refresh-public-manifest.mjs .",
+    "smoke:mcp-package": "node scripts/smoke-packaged-mcp-wrapper.mjs",
+    "supply-chain:audit": "node scripts/check-dependency-audit.mjs",
+    "supply-chain:licenses": "node scripts/check-runtime-licenses.mjs",
+    "supply-chain:sbom": "corepack pnpm --filter @actionproxy/server --filter @actionproxy/mcp-wrapper sbom --prod --sbom-format cyclonedx --out bom.json && node scripts/validate-sbom.mjs bom.json",
+    "test": "corepack pnpm test:dev && corepack pnpm test:supply-chain && corepack pnpm -r --workspace-concurrency=1 test && corepack pnpm test:mcp-hosts",
+    "test:dev": "node --test scripts/dev.test.mjs",
+    "test:e2e": "corepack pnpm --filter @actionproxy/web test:e2e:community",
+    "test:e2e:community": "corepack pnpm --filter @actionproxy/web test:e2e:community",
+    "test:mcp-hosts": "node --test examples/mcp-hosts/print-host-configs.test.mjs examples/chatgpt-app/example.test.mjs examples/chatgpt-tunnel/run-tunnel.test.mjs",
+    "test:postgres:no-skip": "node scripts/run-postgres-release-tests.mjs",
+    "test:supply-chain": "node --test scripts/supply-chain.test.mjs scripts/run-postgres-release-tests.test.mjs",
+    "verify:oss-boundary": "node scripts/verify-public-export.mjs . --checkout --strict",
+    "verify:tracked-checkout": "node scripts/attest-public-checkout.mjs .",
+    "workflow:check": "node scripts/check-workflow-actions.mjs"
+  }
+}

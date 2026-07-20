@@ -1,0 +1,6 @@
+# Replace <repo> with the absolute path to this trusted ActionProxy checkout.
+# Keep this as the only host entry for the downstream demo; never register the
+# downstream server directly alongside the wrapper.
+[mcp_servers."actionproxy-demo"]
+command = "node"
+args = ["<repo>/packages/mcp-wrapper/dist/index.js", "wrap", "--config", "<repo>/examples/mcp-demo/actionproxy.mcp.yaml"]

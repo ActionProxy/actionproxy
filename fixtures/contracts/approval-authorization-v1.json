@@ -1,0 +1,69 @@
+{
+  "version": "actionproxy.approval-authorization.v1",
+  "vectors": [
+    {
+      "name": "canonical-http-two-party-approval",
+      "input": {
+        "approvalId": "approval_fixture_001",
+        "approverGroups": ["finance", "security", "finance"],
+        "approverUsers": ["user_b", "user_a"],
+        "expiresAt": "2026-07-12T10:00:00.000Z",
+        "issuedAt": "2026-07-11T10:00:00.000Z",
+        "nonce": "fixture_nonce_001",
+        "originalEnvelopeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "originalInputHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "requestedBy": "requester@example.com",
+        "requestedByPrincipalId": "user_requester",
+        "requiredApprovals": 2,
+        "reviewHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "separationOfDuties": true,
+        "toolCall": {
+          "agentId": "asserted-agent",
+          "actionEnvelopeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "canonicalActionRequestHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "canonicalActionRequestVersion": "actionproxy.action-request.v1",
+          "canonicalDecisionInputHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "createdAt": "2026-07-11T10:00:00.000Z",
+          "decision": "require_approval",
+          "decisionTrace": {
+            "decisionV1": {
+              "decisionId": "decision_fixture_001",
+              "decisionInputHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "evaluatorVersion": "actionproxy.policy-evaluator.v1",
+              "policy": {
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "provider": {
+                  "id": "actionproxy.yaml",
+                  "status": "ok",
+                  "version": "actionproxy.yaml-provider.v1"
+                },
+                "version": "policy_fixture_001"
+              },
+              "version": "actionproxy.decision.v1"
+            }
+          },
+          "id": "toolcall_fixture_001",
+          "input": {
+            "amount": 1250,
+            "currency": "USD"
+          },
+          "inputHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "metadata": {},
+          "policyVersionHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "policyVersionId": "policy_fixture_001",
+          "reason": "Issue refund",
+          "requestedBy": "requester@example.com",
+          "status": "pending_approval",
+          "toolName": "stripe.refund",
+          "updatedAt": "2026-07-11T10:00:00.000Z",
+          "workspaceId": "workspace_fixture"
+        }
+      },
+      "expected": {
+        "authorizationHash": "ec4c3ab27ff93023c9043d0ec5b760ba93f3645c55d329e2b49906cb2fa7caec",
+        "eligibleGroups": ["finance", "security"],
+        "eligibleUsers": ["user_a", "user_b"]
+      }
+    }
+  ]
+}

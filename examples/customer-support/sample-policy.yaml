@@ -1,0 +1,27 @@
+version: 1
+
+default:
+  approval: required
+  risk: unknown
+  reason: "Unknown support tools require approval."
+
+tools:
+  docs.search:
+    approval: never
+    risk: read_only
+    reason: "Support docs search is read-only."
+
+  jira.create_issue:
+    approval: never
+    risk: internal_write
+    reason: "Creating internal support escalations is allowed."
+
+  gmail.send_email:
+    approval: required
+    risk: external_communication
+    reason: "Customer-facing email requires human approval."
+
+  salesforce.update_opportunity:
+    approval: required
+    risk: crm_write
+    reason: "CRM changes require human approval."

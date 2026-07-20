@@ -1,0 +1,48 @@
+{
+  "version": "actionproxy.execution-attempt.v1",
+  "reserved": {
+    "attemptNumber": 1,
+    "binding": {
+      "actionEnvelopeHash": "envelope_fixture_hash",
+      "approvalAuthorizationHash": null,
+      "approvalAuthorizationNonce": null,
+      "approvalId": null,
+      "canonicalActionRequestHash": "request_fixture_hash",
+      "canonicalActionRequestVersion": "actionproxy.action-request.v1",
+      "canonicalDecisionInputHash": "decision_input_fixture_hash",
+      "contentInfluenceBindingHash": null,
+      "decisionId": "decision_fixture_id",
+      "decisionVersion": "actionproxy.decision.v1",
+      "influenceScopeId": null,
+      "policyVersionHash": "policy_fixture_hash",
+      "receiptHash": null,
+      "receiptId": null,
+      "resultSourceHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    },
+    "executionMode": "local_mock",
+    "executorId": "actionproxy.local-tool-registry",
+    "id": "attempt_fixture",
+    "inputHash": "input_fixture_hash",
+    "providerIdempotency": "none",
+    "reservedAt": "2026-07-12T00:00:00.000Z",
+    "reservationOwner": "reservation_fixture",
+    "retryPolicy": "never_automatic",
+    "state": "reserved",
+    "toolCallId": "toolcall_fixture",
+    "updatedAt": "2026-07-12T00:00:00.000Z",
+    "version": "actionproxy.execution-attempt.v1",
+    "workspaceId": "tenant_fixture"
+  },
+  "hashVector": {
+    "remediationHash": "018f997ff3e79b359ed4126978b24bf64c221b3ec22037d5c9b1f5a897df143e",
+    "resultHash": "74e2d27c7e03e296805655ddfae226dbae96b8a79693f8d6c403115a3e2e2bbc"
+  },
+  "terminalOutcomeMatrix": {
+    "cancelled": { "certainty": "known", "remediationHash": null, "retryDisposition": "none" },
+    "failed_after_dispatch": { "certainty": "known", "remediationHash": null, "retryDisposition": "none" },
+    "failed_before_dispatch": { "certainty": "known", "remediationHash": null, "retryDisposition": "explicit_new_attempt_required" },
+    "succeeded": { "certainty": "known", "remediationHash": null, "retryDisposition": "none" },
+    "timed_out": { "certainty": "unknown", "remediationHash": null, "retryDisposition": "manual_reconciliation_required" },
+    "unknown_outcome": { "certainty": "unknown", "remediationHash": null, "retryDisposition": "manual_reconciliation_required" }
+  }
+}

@@ -1,0 +1,19 @@
+actionproxy:
+  baseUrl: http://127.0.0.1:8787
+  requestedBy: chatgpt-tunnel-demo@example.local
+  agentId: actionproxy-chatgpt-tunnel-demo
+  approvalPollIntervalMs: 1000
+  approvalTimeoutMs: 120000
+
+servers:
+  chatgpt-tunnel-demo:
+    command: node
+    args: ["../mcp-demo/server.mjs"]
+
+policies:
+  docs.search:
+    approval: never
+  gmail.send_email:
+    approval: required
+  dangerous.delete_customer:
+    approval: deny

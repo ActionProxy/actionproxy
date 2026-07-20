@@ -1,0 +1,49 @@
+services:
+  actionproxy:
+    build:
+      context: .
+    image: actionproxy:local
+    environment:
+      ACTIONPROXY_AUTH_MODE: none
+      ACTIONPROXY_ALLOW_UNSAFE_LOCAL_BIND: "true"
+      ACTIONPROXY_DATA_DIR: /data
+      ACTIONPROXY_HOST: 0.0.0.0
+      ACTIONPROXY_LOCAL_EXECUTION: mock
+      ACTIONPROXY_STORAGE: memory
+      ACTIONPROXY_WEB_DIST_PATH: apps/web/dist
+    ports:
+      - "127.0.0.1:${ACTIONPROXY_DOCKER_PORT:-8787}:8787"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/health').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    volumes:
+      - actionproxy_data:/data
+
+  # Optional Postgres storage for local durable-storage validation.
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: actionproxy
+      POSTGRES_PASSWORD: actionproxy
+      POSTGRES_DB: actionproxy
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - actionproxy_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U actionproxy -d actionproxy"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  actionproxy_data:
+  actionproxy_pg:

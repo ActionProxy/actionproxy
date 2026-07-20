@@ -1,0 +1,127 @@
+{
+  "version": "actionproxy.decision.v1",
+  "providerIdentity": {
+    "policyVersionHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "policyVersionId": "policy_fixture_v1"
+  },
+  "policy": {
+    "version": 1,
+    "default": {
+      "approval": "required",
+      "risk": "unknown",
+      "reason": "Unknown tools require approval."
+    },
+    "tools": {
+      "docs.search": {
+        "approval": "never",
+        "risk": "read_only",
+        "reason": "Search is read-only."
+      },
+      "dangerous.delete_customer": {
+        "approval": "deny",
+        "risk": "destructive",
+        "reason": "Destructive customer deletion is blocked."
+      },
+      "gmail.send_email": {
+        "approval": "required",
+        "risk": "external_communication",
+        "reason": "External messages require human approval.",
+        "approvers": {
+          "groups": ["support", "security"],
+          "users": ["approver-b", "approver-a"],
+          "requiredApprovals": 2,
+          "separationOfDuties": true
+        }
+      },
+      "custom.conditional": {
+        "approval": "never",
+        "risk": "read_only",
+        "reason": "Trusted workflow reads may run.",
+        "conditions": {
+          "workflowId": "trusted-workflow"
+        }
+      }
+    }
+  },
+  "scenarios": [
+    {
+      "name": "allow-exact",
+      "requestId": "request_allow",
+      "tenantId": "tenant_fixture",
+      "decisionInputHash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "decidedAt": "2026-07-11T00:00:00.000Z",
+      "toolName": "docs.search",
+      "context": {},
+      "expected": {
+        "decisionId": "decision_90622d30496a256e63440eadd881c8f3b699304e3c9a31bd74cd7c7780166d6c",
+        "outcome": "allow",
+        "matchType": "exact",
+        "ruleId": "docs.search",
+        "reasonCodes": ["policy_outcome_allow", "policy_match_exact"],
+        "obligations": ["record_decision_evidence", "revalidate_policy_before_execution"],
+        "approvalRequired": false,
+        "requiredApprovals": 0
+      }
+    },
+    {
+      "name": "deny-exact",
+      "requestId": "request_deny",
+      "tenantId": "tenant_fixture",
+      "decisionInputHash": "2222222222222222222222222222222222222222222222222222222222222222",
+      "decidedAt": "2026-07-11T00:00:01.000Z",
+      "toolName": "dangerous.delete_customer",
+      "context": {},
+      "expected": {
+        "decisionId": "decision_e0f6fe9cd5d0117ea31e4c3df7f2188e7bd0d218fcd9f063a31fe852b996cff3",
+        "outcome": "deny",
+        "matchType": "exact",
+        "ruleId": "dangerous.delete_customer",
+        "reasonCodes": ["policy_outcome_deny", "policy_match_exact"],
+        "obligations": ["record_decision_evidence", "do_not_execute"],
+        "approvalRequired": false,
+        "requiredApprovals": 0
+      }
+    },
+    {
+      "name": "require-approval-exact",
+      "requestId": "request_approval",
+      "tenantId": "tenant_fixture",
+      "decisionInputHash": "3333333333333333333333333333333333333333333333333333333333333333",
+      "decidedAt": "2026-07-11T00:00:02.000Z",
+      "toolName": "gmail.send_email",
+      "context": {},
+      "expected": {
+        "decisionId": "decision_4be0f542efb756c26370ba0e026becc03f60d7ac47b40db829fcb795ffdcd404",
+        "outcome": "require_approval",
+        "matchType": "exact",
+        "ruleId": "gmail.send_email",
+        "reasonCodes": ["policy_outcome_require_approval", "policy_match_exact"],
+        "obligations": ["record_decision_evidence", "require_human_approval", "revalidate_policy_before_execution"],
+        "approvalRequired": true,
+        "requiredApprovals": 2,
+        "eligibleGroups": ["security", "support"],
+        "eligibleUsers": ["approver-a", "approver-b"],
+        "separationOfDuties": true
+      }
+    },
+    {
+      "name": "conditional-fallback-default",
+      "requestId": "request_fallback",
+      "tenantId": "tenant_fixture",
+      "decisionInputHash": "4444444444444444444444444444444444444444444444444444444444444444",
+      "decidedAt": "2026-07-11T00:00:03.000Z",
+      "toolName": "custom.conditional",
+      "context": {},
+      "expected": {
+        "decisionId": "decision_fb3f5b2ed506f2eadb8a1b8a51587e4e1e921b16fed83e29f34f7c57921cca85",
+        "outcome": "require_approval",
+        "matchType": "default",
+        "ruleId": "default",
+        "reasonCodes": ["policy_outcome_require_approval", "policy_match_default", "policy_conditional_fallback"],
+        "obligations": ["record_decision_evidence", "require_human_approval", "revalidate_policy_before_execution"],
+        "approvalRequired": true,
+        "requiredApprovals": 1
+      }
+    }
+  ]
+}

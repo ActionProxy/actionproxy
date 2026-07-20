@@ -1,0 +1,88 @@
+{
+  "version": "actionproxy.mcp-conformance.v1",
+  "protocolVersion": "2025-06-18",
+  "contracts": {
+    "actionRequest": "actionproxy.action-request.v1",
+    "approvalAuthorization": "actionproxy.approval-authorization.v1",
+    "decision": "actionproxy.decision.v1",
+    "executionAttempt": "actionproxy.execution-attempt.v1",
+    "executionAuthorization": "actionproxy.execution-authorization.v1",
+    "executorCapabilities": "actionproxy.executor-capabilities.v1"
+  },
+  "authoritativeContext": [
+    "tenant",
+    "actor",
+    "adapterId",
+    "sourceProtocol",
+    "environment",
+    "idempotencyKey"
+  ],
+  "clientAssertionsNeverAuthoritative": [
+    "tenant",
+    "actor",
+    "agentVerification",
+    "adapterId",
+    "sourceProtocol",
+    "environment",
+    "trustedPolicyContext",
+    "executionAuthorization"
+  ],
+  "scenarios": [
+    {
+      "id": "allow",
+      "toolName": "docs.search",
+      "expectedDecision": "allow",
+      "expectedStatus": "executed",
+      "expectedDispatches": 1
+    },
+    {
+      "id": "deny",
+      "toolName": "dangerous.delete_customer",
+      "expectedDecision": "deny",
+      "expectedStatus": "blocked",
+      "expectedDispatches": 0
+    },
+    {
+      "id": "require-approval",
+      "toolName": "gmail.send_email",
+      "expectedDecision": "require_approval",
+      "expectedStatus": "pending_approval",
+      "expectedDispatches": 0
+    },
+    {
+      "id": "approval-execution",
+      "toolName": "gmail.send_email",
+      "expectedDecision": "require_approval",
+      "expectedStatus": "executed",
+      "expectedDispatches": 1
+    },
+    {
+      "id": "same-request-replay",
+      "expectedBehavior": "same_tool_call_no_new_dispatch"
+    },
+    {
+      "id": "payload-conflict",
+      "expectedBehavior": "conflict_no_new_dispatch"
+    },
+    {
+      "id": "policy-provider-failure",
+      "expectedDecision": "deny",
+      "expectedStatus": "blocked",
+      "expectedDispatches": 0
+    },
+    {
+      "id": "approval-mutation",
+      "expectedBehavior": "revalidate_rebind_or_reject_no_stale_dispatch"
+    },
+    {
+      "id": "timeout-after-dispatch",
+      "expectedAttemptState": "timed_out",
+      "expectedRetryPolicy": "never_automatic"
+    },
+    {
+      "id": "unknown-outcome",
+      "expectedAttemptState": "unknown_outcome",
+      "expectedRetryPolicy": "never_automatic"
+    }
+  ]
+}

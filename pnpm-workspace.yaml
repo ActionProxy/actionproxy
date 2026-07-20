@@ -1,0 +1,12 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "examples/*"
+
+overrides:
+  "bundle-require>esbuild": "^0.28.1"
+  "tsup>esbuild": "^0.28.1"
+
+# pnpm 11 blocks dependency lifecycle scripts unless explicitly reviewed.
+allowBuilds:
+  esbuild: true

@@ -1,0 +1,34 @@
+-- Declarative reconciliation list for databases created before the immutable
+-- migration ledger existed. The migrator checks table metadata and executes
+-- only additions that are actually missing.
+ALTER TABLE tool_calls ADD COLUMN action_envelope_hash TEXT;
+ALTER TABLE tool_calls ADD COLUMN action_envelope_json TEXT;
+ALTER TABLE tool_calls ADD COLUMN canonical_action_request_hash TEXT;
+ALTER TABLE tool_calls ADD COLUMN canonical_action_request_version TEXT;
+ALTER TABLE tool_calls ADD COLUMN canonical_decision_input_hash TEXT;
+ALTER TABLE tool_calls ADD COLUMN canonical_policy_context_json TEXT;
+ALTER TABLE tool_calls ADD COLUMN decision_trace_json TEXT;
+ALTER TABLE tool_calls ADD COLUMN governance_state_json TEXT;
+ALTER TABLE approvals ADD COLUMN approved_envelope_hash TEXT;
+ALTER TABLE approvals ADD COLUMN approved_input_hash TEXT;
+ALTER TABLE approvals ADD COLUMN authorization_consumed_at TEXT;
+ALTER TABLE approvals ADD COLUMN authorization_consumed_reason TEXT;
+ALTER TABLE approvals ADD COLUMN authorization_json TEXT;
+ALTER TABLE approvals ADD COLUMN cancellation_reason TEXT;
+ALTER TABLE approvals ADD COLUMN cancelled_at TEXT;
+ALTER TABLE approvals ADD COLUMN cancelled_by TEXT;
+ALTER TABLE approvals ADD COLUMN expired_at TEXT;
+ALTER TABLE approvals ADD COLUMN finalized_at TEXT;
+ALTER TABLE approvals ADD COLUMN original_envelope_hash TEXT;
+ALTER TABLE approvals ADD COLUMN original_input_hash TEXT;
+ALTER TABLE approvals ADD COLUMN review_hash TEXT;
+ALTER TABLE approval_deliveries ADD COLUMN recipient_telegram_chat_id TEXT;
+ALTER TABLE approval_deliveries ADD COLUMN recipient_telegram_user_id TEXT;
+ALTER TABLE approver_users ADD COLUMN telegram_chat_id TEXT;
+ALTER TABLE approver_users ADD COLUMN telegram_username TEXT;
+ALTER TABLE approver_users ADD COLUMN telegram_user_id TEXT;
+ALTER TABLE execution_grants ADD COLUMN approved_envelope_hash TEXT;
+ALTER TABLE execution_grants ADD COLUMN approved_input_hash TEXT;
+ALTER TABLE execution_grants ADD COLUMN receipt_hash TEXT;
+ALTER TABLE execution_grants ADD COLUMN receipt_id TEXT;
+ALTER TABLE observed_tools ADD COLUMN schema_change_json TEXT;

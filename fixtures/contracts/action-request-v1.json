@@ -1,0 +1,60 @@
+{
+  "version": "actionproxy.action-request.v1",
+  "canonicalization": "actionproxy.canonical-json.v1",
+  "canonicalJsonVectors": [
+    {
+      "name": "object-key-order",
+      "values": [
+        { "b": 2, "a": 1 },
+        { "a": 1, "b": 2 }
+      ],
+      "canonical": "{\"a\":1,\"b\":2}",
+      "sha256": "43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777"
+    },
+    {
+      "name": "arrays-unicode-null-and-negative-zero",
+      "values": [
+        { "z": null, "a": [3, -0, "é"] }
+      ],
+      "canonical": "{\"a\":[3,0,\"é\"],\"z\":null}",
+      "sha256": "d947e07b1553148fa0643c958e43caa54c6dbf572436e393815d05dda154c848"
+    }
+  ],
+  "httpRequestVector": {
+    "ingress": {
+      "environment": "self_hosted",
+      "protocol": "actionproxy_http",
+      "source": "http"
+    },
+    "receivedAt": "2026-07-11T00:00:00.000Z",
+    "request": {
+      "agentId": "agent-α",
+      "input": {
+        "amount": 1250,
+        "items": ["a", "β"],
+        "note": null,
+        "to": "buyer@example.com"
+      },
+      "metadata": { "workflowId": "forged" },
+      "reason": "Issue refund",
+      "requestedBy": "dev@example.com",
+      "toolName": "stripe.create_refund"
+    },
+    "requestId": "request_01",
+    "workspaceId": "workspace_01",
+    "expected": {
+      "decisionInputHash": "005d928759c38c32f6ebb4ed608b01fcb316fd8cde6d495f74043eeb9b092fad",
+      "requestHash": "fcf5706f5e63034cf1dff19dfaac76236bba5517bf20a25be271041c6ab31e8d"
+    }
+  },
+  "rawIngressRejections": [
+    {
+      "name": "duplicate-nested-key",
+      "json": "{\"input\":{\"query\":\"first\",\"query\":\"second\"}}"
+    },
+    {
+      "name": "duplicate-escaped-equivalent-key",
+      "json": "{\"a\":1,\"\\u0061\":2}"
+    }
+  ]
+}
