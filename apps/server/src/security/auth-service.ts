@@ -299,8 +299,12 @@ export class AuthService {
     }
 
     const now = Math.floor(Date.now() / 1000);
-    if (typeof payload.exp === 'number' && payload.exp <= now) throw new UnauthorizedError('JWT is expired.');
-    if (typeof payload.nbf === 'number' && payload.nbf > now) throw new UnauthorizedError('JWT is not active yet.');
+    if (!isNumericDate(payload.exp) || payload.exp <= now) {
+      throw new UnauthorizedError('JWT expiry is missing or invalid.');
+    }
+    if (payload.nbf !== undefined && (!isNumericDate(payload.nbf) || payload.nbf > now)) {
+      throw new UnauthorizedError('JWT is not active yet.');
+    }
     if (this.config.oidc.issuer && payload.iss !== this.config.oidc.issuer) {
       throw new UnauthorizedError('JWT issuer is not trusted.');
     }

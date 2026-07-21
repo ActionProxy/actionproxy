@@ -458,7 +458,7 @@
     },
     {
       "path": "apps/server/src/security/auth-service.ts",
-      "sha256": "c35280e97d09a21acb8893bed56b0546e423fd47a33d79a7393f60a93d5e8afd"
+      "sha256": "ba97aaf1a470a810781c67cbc70e43c1212136bb2c8f00feb5cbf827f0f63abf"
     },
     {
       "path": "apps/server/src/security/crypto.ts",
@@ -486,7 +486,7 @@
     },
     {
       "path": "apps/server/src/security/mcp-oauth.test.ts",
-      "sha256": "c7a39aa642425e6e0d68f02f184e710a7b8a8089694c3ba01fcab3531674e24e"
+      "sha256": "6ba408524034517032fc5eeacafd02e1801ef1eadf79d68a4b6ba59140119060"
     },
     {
       "path": "apps/server/src/security/mcp-session.test.ts",

@@ -216,22 +216,40 @@ describe('strict MCP OAuth bearer validation', () => {
     expect(message).not.toContain('secret-account');
   });
 
-  it('preserves the generic OIDC verifier compatibility contract', async () => {
+  it('accepts valid numeric time bounds for generic OIDC JWTs', async () => {
     const service = authService({ audience: RESOURCE, jwksJson: jwks(firstKey), mode: 'oidc_jwt' });
-    const legacyTokenWithoutExpiry = signToken(firstKey, {
+    const token = signToken(firstKey, {
       aud: RESOURCE,
+      exp: now() + 300,
       iss: ISSUER,
+      nbf: now() - 1,
       scope: 'tool_call:read',
-      sub: 'legacy-api-user',
+      sub: 'api-user-with-numeric-time-bounds',
     });
 
-    await expect(service.authenticateAuthorizationHeader(`Bearer ${legacyTokenWithoutExpiry}`)).resolves.toMatchObject({
-      principalId: 'legacy-api-user',
+    await expect(service.authenticateAuthorizationHeader(`Bearer ${token}`)).resolves.toMatchObject({
+      principalId: 'api-user-with-numeric-time-bounds',
       scopes: ['tool_call:read'],
     });
-    await expect(service.authenticateMcpAuthorizationHeader(`Bearer ${legacyTokenWithoutExpiry}`, RESOURCE)).rejects.toThrow(
-      /expiry is missing or invalid/u,
-    );
+  });
+
+  it.each([
+    ['missing expiry', { exp: undefined }, /expiry is missing or invalid/u],
+    ['string expiry', { exp: String(now() + 300) }, /expiry is missing or invalid/u],
+    ['expired token', { exp: now() - 1 }, /expiry is missing or invalid/u],
+    ['string not-before', { exp: now() + 300, nbf: 'soon' }, /not active yet/u],
+    ['future not-before', { exp: now() + 300, nbf: now() + 60 }, /not active yet/u],
+  ])('rejects %s for generic OIDC JWTs before trusting scopes', async (_name, claims, message) => {
+    const service = authService({ audience: RESOURCE, jwksJson: jwks(firstKey), mode: 'oidc_jwt' });
+    const token = signToken(firstKey, {
+      aud: RESOURCE,
+      iss: ISSUER,
+      scope: 'tool_call:submit',
+      sub: 'api-user-with-invalid-time-bounds',
+      ...claims,
+    });
+
+    await expect(service.authenticateAuthorizationHeader(`Bearer ${token}`)).rejects.toThrow(message);
   });
 });
 
