@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ExecutionGrantService } from '../security/execution-grants';
 import { requireScope } from '../security/scopes';
 import { remediationDescriptorSchema } from '../services/remediation';
+import { redactReceiptSignature, redactToolCallResult } from '../security/redaction';
 import { authContext, mapKnownError } from './route-utils';
 import { headerValue } from './route-utils';
 import { parseMcpWrapperSessionId } from '../security/influence-scope';
@@ -91,13 +92,24 @@ export async function registerExecutionGrantRoutes(
           toolName: result.grant.toolName,
         },
         ok: true,
-        receipt: result.receipt,
-        toolCall: result.toolCall,
+        receipt: result.receipt
+          ? redactReceiptSignature(result.receipt)
+          : result.receipt,
+        toolCall: {
+          ...result.toolCall,
+          result: isJsonObject(result.toolCall.result)
+            ? redactToolCallResult(result.toolCall.result)
+            : result.toolCall.result,
+        },
       };
     } catch (error) {
       return mapKnownError(reply, error);
     }
   });
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function optionalWrapperSessionId(value: string | string[] | undefined): string | null | undefined {

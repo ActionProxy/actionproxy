@@ -663,6 +663,82 @@ describe('tool call routes', () => {
     expect(fetched.json().actionEnvelope.input.nested.accessToken).toBe('[REDACTED]');
   });
 
+  it('redacts persisted execution authorization material from every tool-call read projection', async () => {
+    const server = await makeApp();
+    const submitted = await server.inject({
+      method: 'POST',
+      payload: {
+        action: { executionMode: 'external_grant' },
+        agentId: 'external-runner',
+        input: { query: 'authorization redaction' },
+        reason: 'Prove tool-call reads do not expose grant authorization material',
+        requestedBy: 'runner@example.com',
+        toolName: 'docs.search',
+      },
+      url: '/v1/tool-calls',
+    });
+    const submittedBody = submitted.json();
+
+    expect(submitted.statusCode).toBe(200);
+    expect(submittedBody).toMatchObject({
+      result: {
+        grant: { nonce: '[REDACTED]', signature: '[REDACTED]' },
+        receipt: { signature: '[REDACTED]' },
+      },
+      status: 'authorized',
+      toolCall: {
+        result: {
+          grant: { nonce: '[REDACTED]', signature: '[REDACTED]' },
+          receipt: { signature: '[REDACTED]' },
+        },
+      },
+    });
+
+    const fetched = await server.inject({ method: 'GET', url: `/v1/tool-calls/${submittedBody.id}` });
+    expect(fetched.statusCode).toBe(200);
+    expect(fetched.json().result).toMatchObject({
+      grant: { nonce: '[REDACTED]', signature: '[REDACTED]' },
+      receipt: { signature: '[REDACTED]' },
+    });
+
+    const listed = await server.inject({ method: 'GET', url: '/v1/tool-calls' });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().toolCalls[0].result).toMatchObject({
+      grant: { nonce: '[REDACTED]', signature: '[REDACTED]' },
+      receipt: { signature: '[REDACTED]' },
+    });
+
+    const remediationPlan = await server.inject({
+      method: 'GET',
+      url: `/v1/tool-calls/${submittedBody.id}/remediation-plan`,
+    });
+    expect(remediationPlan.statusCode).toBe(200);
+    expect(remediationPlan.json().receipt.signature).toBe('[REDACTED]');
+
+    const pending = await server.inject({
+      method: 'POST',
+      payload: {
+        action: { executionMode: 'external_grant' },
+        agentId: 'external-runner',
+        input: { body: 'Body', subject: 'Subject', to: 'customer@example.com' },
+        reason: 'Prove approval responses do not expose grant authorization material',
+        requestedBy: 'runner@example.com',
+        toolName: 'gmail.send_email',
+      },
+      url: '/v1/tool-calls',
+    });
+    const approved = await server.inject({
+      method: 'POST',
+      payload: { approvedBy: 'manager@example.com' },
+      url: `/v1/approvals/${pending.json().approval.id}/approve`,
+    });
+    expect(approved.statusCode).toBe(200);
+    expect(approved.json().toolCall.result).toMatchObject({
+      grant: { nonce: '[REDACTED]', signature: '[REDACTED]' },
+      receipt: { signature: '[REDACTED]' },
+    });
+  });
+
   it('renders unavailable remediation plans for non-executed and failed tool calls', async () => {
     const server = await makeApp();
 

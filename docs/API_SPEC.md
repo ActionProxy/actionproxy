@@ -223,7 +223,10 @@ Reporting appends evidence and never authorizes another dispatch.
 ### `GET /v1/receipts/:id`
 
 Returns a signed action receipt with policy/approval binding and immutable
-outcome history. Receipts authorize only the exact hashed action instance.
+outcome history. This audit-scoped evidence endpoint intentionally includes the
+receipt signature; unlike tool-call projections, it never returns an execution
+grant nonce or signature. Receipts authorize only the exact hashed action
+instance.
 
 ## Audit
 

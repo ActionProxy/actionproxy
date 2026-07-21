@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AuditEvent } from '../models';
 import { verifyAuditStore } from '../security/audit-chain';
-import { redactJsonObject, type RedactionOptions } from '../security/redaction';
+import { redactJsonObject, redactToolCallResult, type RedactionOptions } from '../security/redaction';
 import { requireScope } from '../security/scopes';
 import type { AuditStore } from '../storage/audit-store';
 import { noopTelemetry, type TelemetryRecorder } from '../telemetry/telemetry';
@@ -118,10 +118,17 @@ function auditExportFilename(exportedAt: string, extension: 'json' | 'ndjson'): 
 }
 
 function redactAuditEvent(event: AuditEvent, redaction: RedactionOptions): AuditEvent {
+  const data = redactJsonObject(event.data, redaction);
   return {
     ...event,
-    data: redactJsonObject(event.data, redaction),
+    data: event.type === 'tool_call.authorized' && isJsonObject(data.result)
+      ? { ...data, result: redactToolCallResult(data.result) }
+      : data,
   };
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function toSiemEvent(event: AuditEvent): Record<string, unknown> {

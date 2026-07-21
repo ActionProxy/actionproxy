@@ -98,6 +98,61 @@ describe('audit routes', () => {
       events: [expect.objectContaining({ id: 'evt_target_old', toolCallId: 'toolcall/target' })],
     });
   });
+
+  it('redacts authorization material from legacy audit rows while preserving provider evidence', async () => {
+    const auditStore = new JsonlAuditStore(tempDir());
+    const legacyAuthorized = auditEvent('evt_legacy_authorized', 'tool_call.authorized', '2026-06-20T09:00:00.000Z');
+    legacyAuthorized.data = {
+      result: {
+        externalExecutionOutcome: {
+          nonce: 'provider-nonce',
+          signature: 'provider-signature',
+        },
+        grant: {
+          id: 'grant_legacy',
+          nonce: 'raw-grant-nonce',
+          signature: 'raw-grant-signature',
+        },
+        receipt: {
+          id: 'receipt_legacy',
+          signature: 'raw-receipt-signature',
+        },
+      },
+    };
+    await auditStore.append(legacyAuthorized);
+
+    app = Fastify({ logger: false });
+    await registerAuditRoutes(app, auditStore);
+
+    const responses = await Promise.all([
+      app.inject({ method: 'GET', url: '/v1/audit?limit=10' }),
+      app.inject({ method: 'GET', url: '/v1/audit?format=siem&limit=10' }),
+      app.inject({ method: 'GET', url: '/v1/audit/export?format=json' }),
+      app.inject({ method: 'GET', url: '/v1/audit/export?format=siem' }),
+    ]);
+
+    for (const response of responses) {
+      expect(response.statusCode).toBe(200);
+      expect(response.body).not.toMatch(/raw-(?:grant-nonce|grant-signature|receipt-signature)/u);
+      expect(response.body).toContain('provider-nonce');
+      expect(response.body).toContain('provider-signature');
+    }
+    expect(responses[0].json().events[0].data.result).toMatchObject({
+      externalExecutionOutcome: {
+        nonce: 'provider-nonce',
+        signature: 'provider-signature',
+      },
+      grant: {
+        id: 'grant_legacy',
+        nonce: '[REDACTED]',
+        signature: '[REDACTED]',
+      },
+      receipt: {
+        id: 'receipt_legacy',
+        signature: '[REDACTED]',
+      },
+    });
+  });
 });
 
 function auditEvent(

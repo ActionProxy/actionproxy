@@ -22,4 +22,7 @@ All notable public changes to ActionProxy are documented here. The format is bas
 
 - Local unauthenticated mode is restricted to deliberate development use.
 - API-key and OIDC JWT modes are available for self-hosted evaluation.
+- Tool-call, approval, remediation, and execution-outcome projections withhold
+  internal execution-grant nonces and grant/receipt signatures without hiding
+  ordinary provider payload fields with the same names.
 - This release is a developer preview and is not presented as a complete production authorization or compliance boundary.

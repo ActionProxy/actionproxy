@@ -3,7 +3,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ActionProxyService } from '../services/action-gate';
 import type { ActionEnvelope, ActionReceiptRecord, PolicyDecision, RemediationDescriptor, RemediationPlan, ToolCallRecord, ToolCallStatus } from '../models';
-import { redactJsonObject, redactJsonObjectAtPath, type RedactionOptions } from '../security/redaction';
+import {
+  redactJsonObject,
+  redactJsonObjectAtPath,
+  redactReceiptSignature,
+  redactToolCallResult,
+  type RedactionOptions,
+} from '../security/redaction';
 import { requireScope } from '../security/scopes';
 import { authContext, headerValue, mapKnownError } from './route-utils';
 import { assertNoDuplicateJsonKeys, DuplicateJsonKeyError } from '../contracts/action-request';
@@ -386,7 +392,7 @@ function redactToolCall<T extends ToolCallRecord>(
     result: withholdModelResult
       ? undefined
       : isJsonObject(toolCall.result)
-        ? redactJsonObject(toolCall.result, redaction)
+        ? redactToolCallResult(toolCall.result, redaction)
         : toolCall.result,
   };
 }
@@ -417,9 +423,10 @@ function redactReceipt(
   redaction: RedactionOptions,
   resultWithheld = false,
 ): ActionReceiptRecord {
-  if (!receipt.outcome) return receipt;
+  const safeReceipt = redactReceiptSignature(receipt, redaction);
+  if (!receipt.outcome) return safeReceipt;
   return {
-    ...receipt,
+    ...safeReceipt,
     outcome: {
       ...receipt.outcome,
       error: resultWithheld && receipt.outcome.error ? WITHHELD_MODEL_RESULT_MESSAGE : receipt.outcome.error,

@@ -20,6 +20,12 @@ const DEFAULT_SENSITIVE_KEYS = new Set([
   'webhooksecret',
 ]);
 
+const TOOL_CALL_RESULT_AUTHORIZATION_PATHS = [
+  'grant.nonce',
+  'grant.signature',
+  'receipt.signature',
+] as const;
+
 export interface RedactionOptions {
   fields?: string[];
   replacement?: string;
@@ -44,6 +50,20 @@ export function redactJsonObjectAtPath(
 ): JsonObject {
   const path = rootPath.split('.').map((part) => part.trim()).filter(Boolean);
   return redactValue(value, pathSet(options.fields ?? []), options.replacement ?? '[REDACTED]', path) as JsonObject;
+}
+
+export function redactToolCallResult(value: JsonObject, options: RedactionOptions = {}): JsonObject {
+  return redactJsonObject(value, {
+    ...options,
+    fields: [...new Set([...(options.fields ?? []), ...TOOL_CALL_RESULT_AUTHORIZATION_PATHS])],
+  });
+}
+
+export function redactReceiptSignature<T extends { signature: string }>(
+  receipt: T,
+  options: RedactionOptions = {},
+): T {
+  return { ...receipt, signature: options.replacement ?? '[REDACTED]' };
 }
 
 function redactValue(value: unknown, redactedPaths: Set<string>, replacement: string, path: string[]): unknown {

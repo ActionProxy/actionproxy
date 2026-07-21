@@ -75,6 +75,7 @@ import type { ListToolCallsFilters } from '../storage/store';
 import { hashJson } from '../security/crypto';
 import { actionEnvelopeForInput, normalizeActionEnvelope, reviewHashFor } from '../security/action-envelope';
 import { ACTION_RECEIPT_KEY_ID, signReceipt } from '../security/action-receipts';
+import { redactToolCallResult } from '../security/redaction';
 import { hasAnyGroup, principalMatchesActor } from '../security/scopes';
 import type { ApprovalNotifier, ApprovalNotificationResult } from '../integrations/approval-notifications';
 import type { ApprovalNotificationRecipient, ApproverDirectoryService } from './approver-directory';
@@ -1984,13 +1985,13 @@ export class ActionProxyService {
       return this.failToolCall(baseToolCall, input, actor, message, auth, receipt);
     }
     attempt = binding.attempt;
-    const result = {
+    const result = redactToolCallResult({
       ok: true,
       externalExecution: true,
       note: 'Execution authorized for an external tool runner.',
       ...(receipt === undefined ? {} : { receipt }),
       ...(grant === undefined ? {} : { grant }),
-    };
+    } as JsonObject);
     const updated: ToolCallRecord = {
       ...baseToolCall,
       input,

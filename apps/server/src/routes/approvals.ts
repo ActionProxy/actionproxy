@@ -2,7 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ActionProxyService } from '../services/action-gate';
 import type { ActionEnvelope, ApprovalDecisionRecord, ApprovalDeliveryRecord, ApprovalRecord, ToolCallRecord } from '../models';
-import { redactJsonObject, redactJsonObjectAtPath, type RedactionOptions } from '../security/redaction';
+import {
+  redactJsonObject,
+  redactJsonObjectAtPath,
+  redactToolCallResult,
+  type RedactionOptions,
+} from '../security/redaction';
 import { requireScope } from '../security/scopes';
 import { isModelVisibleResultWithheld, WITHHELD_MODEL_RESULT_MESSAGE } from '../security/result-visibility';
 import { authContext, mapKnownError } from './route-utils';
@@ -206,7 +211,7 @@ function redactToolCall<T extends ToolCallRecord>(
     result: withholdModelResult
       ? undefined
       : isJsonObject(toolCall.result)
-        ? redactJsonObject(toolCall.result, redaction)
+        ? redactToolCallResult(toolCall.result, redaction)
         : toolCall.result,
   };
 }

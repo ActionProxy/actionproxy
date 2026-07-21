@@ -50,7 +50,7 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "190a69d5b617db2d68f42c467c108e2b018c6a5d3d934e83dd4c0f98207d9b65"
+      "sha256": "2c22755e2a70665a8f5c655ae1f4d717da905d28b044fc446d6fed66d78815fd"
     },
     {
       "path": "CODE_OF_CONDUCT.md",
@@ -310,7 +310,7 @@
     },
     {
       "path": "apps/server/src/routes/approvals.ts",
-      "sha256": "ffb809042f2f2dd6744977ff46fbc7bc68e046f051cba0e9dafbbe37c3e650bd"
+      "sha256": "3eeb19741ff75cea1e78cf96d926927ebd2e1a393e4d11d8e5e3e88fc8b2308b"
     },
     {
       "path": "apps/server/src/routes/approvers.test.ts",
@@ -322,11 +322,11 @@
     },
     {
       "path": "apps/server/src/routes/audit.test.ts",
-      "sha256": "cea0bd450b54c338109458d5c68af0136fe60b63386851352e98e5c9b4a23a85"
+      "sha256": "6c9fa1162eb0d534f01862803d6665cb4f608cae3dc23ee6044aafddeae7d814"
     },
     {
       "path": "apps/server/src/routes/audit.ts",
-      "sha256": "3cf54f274b4af1e3d792bcb474c794406e94696d38b0d116427f339470cfcf5e"
+      "sha256": "089453c43543aa47d93d3b870983d3ff64fa45b7f6f54b074f381a5437908a9b"
     },
     {
       "path": "apps/server/src/routes/auth.ts",
@@ -354,7 +354,7 @@
     },
     {
       "path": "apps/server/src/routes/execution-grants.ts",
-      "sha256": "dc7a48e19689e25f1dfdce3b217df2ff0923eeccfc483376fcf3a0767b8d25c6"
+      "sha256": "7abb66e0921daf54ea9790b0ed07ed04afce6dc842de5a336eb4a5ea54167187"
     },
     {
       "path": "apps/server/src/routes/health.ts",
@@ -426,11 +426,11 @@
     },
     {
       "path": "apps/server/src/routes/tool-calls.test.ts",
-      "sha256": "c61fb19f6fc1660e97a5a60a47ef6d5227d6d7f21f14dc1ff874b901d025a253"
+      "sha256": "eadbe399507d8348d75f4bd957077168a31126fe40680934262d1850a8b9f24f"
     },
     {
       "path": "apps/server/src/routes/tool-calls.ts",
-      "sha256": "74a1711ed83937201c24ad7b3712ba7f8131cc8aa5b3ffe1f410e39b120d8e55"
+      "sha256": "c2138173255f7792ea0b652ea256ff52a5b115906cb687949fb581dec09482c3"
     },
     {
       "path": "apps/server/src/routes/web.ts",
@@ -466,7 +466,7 @@
     },
     {
       "path": "apps/server/src/security/enterprise-security.test.ts",
-      "sha256": "ddceab052bab67edd68f7363d9a45cf747d8ed948fcdd673bfca587583187014"
+      "sha256": "a74f6c277d0f7d488df9a9a8af5db02c551aa079dd626611775034bb6439df01"
     },
     {
       "path": "apps/server/src/security/execution-grants.ts",
@@ -498,11 +498,11 @@
     },
     {
       "path": "apps/server/src/security/redaction.test.ts",
-      "sha256": "9e08c161887872ca65aa0b9c24ea51ffefeeaaee500c1d38274c0cf39bc16971"
+      "sha256": "7e3ab5c005f8376536e7f0387cb2cc78f4b185dafda95a9900fa553d5a6ce557"
     },
     {
       "path": "apps/server/src/security/redaction.ts",
-      "sha256": "017d03b586c6720b9082687522652df5390e4a806a7619e9afaca3fcc8a07283"
+      "sha256": "f6c1b18b3b04bf11819f96b5f8d8acb22ec1f44eeb060f16a6e3bcff16cfde13"
     },
     {
       "path": "apps/server/src/security/result-visibility.ts",
@@ -514,11 +514,11 @@
     },
     {
       "path": "apps/server/src/services/action-gate.test.ts",
-      "sha256": "9280e3a91f9bf86844ea79edd934283d6596578b298e40b162c95c1561e8cdf1"
+      "sha256": "89b63650e07282d10ae42e844ac016250cc3f85b175f16cb919c6d1d69134388"
     },
     {
       "path": "apps/server/src/services/action-gate.ts",
-      "sha256": "b9dfed8707de675ede7bd7c61cce36a3c6e41feeb29cbfb51addb41215f2de1f"
+      "sha256": "77379451b0c53c937012bd10068f7ebc89c870077293a7c2fb3e93ff9c9b52df"
     },
     {
       "path": "apps/server/src/services/approver-directory.test.ts",
@@ -750,7 +750,7 @@
     },
     {
       "path": "docs/API_SPEC.md",
-      "sha256": "01e52e262b6cbe3b36d0d63474a0fe4c5d65ef7f35e4fce14994f2b84c7d4142"
+      "sha256": "58af0634d0b7a1ed11aa1fac02699aac896aa17b06cc0624ffcec2437ed2e4ce"
     },
     {
       "path": "docs/APPROVAL_CHANNELS.md",

@@ -3055,8 +3055,12 @@ describe('ActionProxyService', () => {
     expect(result.toolCall.result).toMatchObject({ externalExecution: true });
   });
 
-  it('reserves an external attempt before grant creation and binds the issued grant without dispatching it', async () => {
-    const createGrant = vi.fn(async () => ({ id: 'grant_attempt_bound' }));
+  it('reserves an external attempt and persists no raw grant or receipt authorization material', async () => {
+    const createGrant = vi.fn(async () => ({
+      id: 'grant_attempt_bound',
+      nonce: 'grant-nonce-secret',
+      signature: 'grant-signature-secret',
+    }));
     const execute = vi.fn(async () => ({ ok: true }));
     const tools = newTestToolRegistry();
     tools.register('docs.search', execute);
@@ -3075,6 +3079,17 @@ describe('ActionProxyService', () => {
     expect(createGrant).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalled();
     expect(result.toolCall.status).toBe('authorized');
+    expect(result.toolCall.result).toMatchObject({
+      grant: {
+        id: 'grant_attempt_bound',
+        nonce: '[REDACTED]',
+        signature: '[REDACTED]',
+      },
+      receipt: { signature: '[REDACTED]' },
+    });
+    expect(JSON.stringify(await service.getToolCall(result.toolCall.id))).not.toMatch(
+      /grant-(?:nonce|signature)-secret/u,
+    );
     expect(attempts).toEqual([
       expect.objectContaining({
         executionMode: 'external_grant',

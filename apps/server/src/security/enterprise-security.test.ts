@@ -375,7 +375,10 @@ describe('enterprise security controls', () => {
     const grant = body.toolCall.result.grant;
     const receipt = body.toolCall.result.receipt;
     expect(grant.id).toMatch(/^grant_/);
+    expect(grant.nonce).toBe('[REDACTED]');
+    expect(grant.signature).toBe('[REDACTED]');
     expect(receipt.id).toMatch(/^receipt_/);
+    expect(receipt.signature).toBe('[REDACTED]');
     expect(grant.receiptId).toBe(receipt.id);
     expect(grant.receiptHash).toBe(receipt.receiptHash);
 
@@ -385,8 +388,11 @@ describe('enterprise security controls', () => {
       approvedInputHash: receipt.approvedInputHash,
       decisionKind: 'policy_allow',
       receiptHash: receipt.receiptHash,
+      signature: expect.any(String),
       toolCallId: body.id,
     });
+    expect(fetchedReceipt.json().receipt.signature).not.toBe('[REDACTED]');
+    expect(fetchedReceipt.json().receipt).not.toHaveProperty('nonce');
 
     const consumed = await app.inject({
       method: 'POST',
@@ -404,19 +410,30 @@ describe('enterprise security controls', () => {
     const outcome = await app.inject({
       method: 'POST',
       payload: {
-        result: { rows: 1 },
+        result: { nonce: 'provider-nonce', rows: 1, signature: 'provider-signature' },
         status: 'succeeded',
       },
       url: `/v1/execution-grants/${grant.id}/outcome`,
     });
     expect(outcome.statusCode).toBe(200);
-    expect(outcome.json().receipt.outcome).toMatchObject({ result: { rows: 1 }, status: 'succeeded' });
+    expect(outcome.json().receipt).toMatchObject({
+      outcome: {
+        result: { nonce: 'provider-nonce', rows: 1, signature: 'provider-signature' },
+        status: 'succeeded',
+      },
+      signature: '[REDACTED]',
+    });
+    expect(outcome.json().toolCall.result).toMatchObject({
+      externalExecutionOutcome: { nonce: 'provider-nonce', rows: 1, signature: 'provider-signature' },
+      grant: { nonce: '[REDACTED]', signature: '[REDACTED]' },
+      receipt: { signature: '[REDACTED]' },
+    });
     expect(outcome.json().toolCall.status).toBe('executed');
 
     const idempotentOutcome = await app.inject({
       method: 'POST',
       payload: {
-        result: { rows: 1 },
+        result: { nonce: 'provider-nonce', rows: 1, signature: 'provider-signature' },
         status: 'succeeded',
       },
       url: `/v1/execution-grants/${grant.id}/outcome`,
