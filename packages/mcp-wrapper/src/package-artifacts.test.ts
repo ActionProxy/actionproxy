@@ -92,14 +92,10 @@ describe('independently packed npm artifacts', () => {
             version: '1.0.0',
             private: true,
             type: 'module',
+            packageManager: 'pnpm@11.10.0',
             dependencies: {
               '@actionproxy/mcp-wrapper': `file:${mcpTarball}`,
               '@actionproxy/sdk-js': `file:${sdkTarball}`,
-            },
-            pnpm: {
-              overrides: {
-                yaml: `file:${yamlTarball}`,
-              },
             },
           },
           null,
@@ -108,10 +104,25 @@ describe('independently packed npm artifacts', () => {
         'utf8',
       );
       fs.writeFileSync(
+        path.join(consumerDirectory, 'pnpm-workspace.yaml'),
+        [
+          'packages:',
+          '  - .',
+          'overrides:',
+          `  yaml: ${JSON.stringify(`file:${yamlTarball}`)}`,
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+      fs.writeFileSync(
         path.join(consumerDirectory, 'consumer.mjs'),
         consumerSource(),
         'utf8',
       );
+
+      expect(
+        run(corepack, ['pnpm', '--version'], consumerDirectory).stdout.trim(),
+      ).toBe('11.10.0');
 
       run(
         corepack,
