@@ -3,9 +3,12 @@ node_modules/
 dist/
 dist-ssr/
 dist-site-ssr/
+dist-parent-site/
+dist-parent-site-ssr/
 coverage/
 playwright-report/
 playwright-report-site/
+playwright-report-parent-site/
 lighthouse-report/
 .lighthouseci/
 test-results/
@@ -15,5 +18,7 @@ runtime-licenses.json
 .env.local
 .DS_Store
 .actionproxy*/
+.actiongate*/
 apps/server/.actionproxy*/
+apps/server/.actiongate*/
 *.log

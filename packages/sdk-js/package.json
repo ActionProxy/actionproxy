@@ -1,12 +1,36 @@
 {
   "name": "@actionproxy/sdk-js",
   "version": "0.1.0",
-  "private": true,
+  "description": "JavaScript client and external-runner helper for ActionProxy",
+  "keywords": [
+    "ai-agents",
+    "approval-gateway",
+    "audit",
+    "human-in-the-loop",
+    "tool-calls"
+  ],
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ActionProxy/actionproxy.git",
+    "directory": "packages/sdk-js"
+  },
+  "homepage": "https://github.com/ActionProxy/actionproxy#readme",
+  "bugs": {
+    "url": "https://github.com/ActionProxy/actionproxy/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "engines": {
     "node": ">=22 <25"
   },
   "type": "module",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -17,6 +41,7 @@
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --out-dir dist",
+    "prepack": "npm run build",
     "test": "vitest run",
     "lint": "tsc --noEmit"
   },

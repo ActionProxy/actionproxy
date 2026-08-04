@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "actionproxy.tunnel-client-distribution.v1",
+  "reviewedAt": "2026-08-03",
+  "repository": "openai/tunnel-client",
+  "releaseId": 348221172,
+  "releaseTag": "v0.0.10",
+  "releaseCommit": "105e17a79a36e4e5c897fd698ed2b8dbf935b144",
+  "releaseUrl": "https://github.com/openai/tunnel-client/releases/tag/v0.0.10",
+  "licenseUrl": "https://github.com/openai/tunnel-client/blob/v0.0.10/LICENSE",
+  "expectedVersion": "0.0.10+105e17a79a36e4e5c897fd698ed2b8dbf935b144",
+  "archiveEntry": "tunnel-client",
+  "assets": {
+    "darwin-amd64": {
+      "assetId": 464595694,
+      "name": "tunnel-client-v0.0.10-darwin-amd64.zip",
+      "url": "https://github.com/openai/tunnel-client/releases/download/v0.0.10/tunnel-client-v0.0.10-darwin-amd64.zip",
+      "archiveSize": 7672583,
+      "archiveSha256": "1a48616e584484f8bef4c1128d515ac96cf44d0d9609c1462abccc1793f4b847",
+      "binarySize": 20542944,
+      "binarySha256": "addc6fadb1ea504219e30a6ccad6dd832bf3fa1f3a4fddb6c9a39dc9b59d676a"
+    },
+    "darwin-arm64": {
+      "assetId": 464595695,
+      "name": "tunnel-client-v0.0.10-darwin-arm64.zip",
+      "url": "https://github.com/openai/tunnel-client/releases/download/v0.0.10/tunnel-client-v0.0.10-darwin-arm64.zip",
+      "archiveSize": 7100022,
+      "archiveSha256": "288accc7fd20cfee1d495adb933773af9e19ebc0cdef3173f7fb544afa5065b2",
+      "binarySize": 19192114,
+      "binarySha256": "5870da52ada51e96b32375a04fa112f3c0de7238cd76e8d1ed19b06fed6acbf2"
+    }
+  }
+}

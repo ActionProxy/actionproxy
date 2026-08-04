@@ -1,0 +1,50 @@
+actionproxy:
+  baseUrl: http://localhost:8787
+  requestedBy: local-google-workspace-mcp@example.local
+  agentId: actionproxy-google-workspace-mcp-demo
+  approvalPollIntervalMs: 1000
+  approvalTimeoutMs: 300000
+  cancelPendingOnAbort: true
+
+servers:
+  google-workspace:
+    command: uvx
+    stdioFraming: newline
+    requestTimeoutMs: 180000
+    envPassthrough:
+      - GOOGLE_OAUTH_CLIENT_ID
+      - GOOGLE_OAUTH_CLIENT_SECRET
+      - USER_GOOGLE_EMAIL
+      - OAUTHLIB_INSECURE_TRANSPORT
+      - WORKSPACE_MCP_CREDENTIALS_DIR
+      - GOOGLE_MCP_CREDENTIALS_DIR
+      - WORKSPACE_ATTACHMENT_DIR
+      - WORKSPACE_MCP_LOG_DIR
+      - WORKSPACE_MCP_BASE_URI
+      - WORKSPACE_MCP_HOST
+      - WORKSPACE_MCP_PORT
+      - ALLOWED_FILE_DIRS
+      - UV_CACHE_DIR
+      - UV_PYTHON_INSTALL_DIR
+      - UV_NO_PROGRESS
+    args:
+      - --from
+      - "https://files.pythonhosted.org/packages/c1/84/d6ea7b10c3e4213036964e81d4bd32a868b44f70ea84d88c13dc1a886c84/workspace_mcp-1.22.0-py3-none-any.whl#sha256=c17daecb5b3050f7e89019a1f364cf20e950ecadca9a705c1627387ebc987b21"
+      - workspace-mcp
+      - --single-user
+      - --permissions
+      - gmail:drafts
+      - --tool-tier
+      - extended
+
+policies:
+  search_gmail_messages:
+    approval: never
+  get_gmail_message_content:
+    approval: never
+  get_gmail_messages_content_batch:
+    approval: never
+  draft_gmail_message:
+    approval: required
+  send_gmail_message:
+    approval: deny

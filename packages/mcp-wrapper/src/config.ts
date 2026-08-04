@@ -21,7 +21,9 @@ export interface McpWrapperConfig {
     requestedBy?: string;
     approvalPollIntervalMs?: number;
     approvalTimeoutMs?: number;
+    cancelPendingOnAbort?: boolean;
     bearerTokenEnv?: string;
+    quickstartOriginTokenEnv?: string;
     requestTimeoutMs?: number;
   };
   servers: Record<string, McpServerConfig>;
@@ -67,7 +69,13 @@ function validateConfig(value: unknown): McpWrapperConfig {
       throw new Error(`MCP wrapper config must reference credentials with actionproxy.bearerTokenEnv, not actionproxy.${forbidden}.`);
     }
   }
-  const bearerTokenEnv = optionalEnvironmentVariableName(actionProxy.bearerTokenEnv);
+  if (actionProxy.quickstartOriginToken !== undefined) {
+    throw new Error(
+      'MCP wrapper config must reference Quickstart provenance with actionproxy.quickstartOriginTokenEnv, not actionproxy.quickstartOriginToken.',
+    );
+  }
+  const bearerTokenEnv = optionalEnvironmentVariableName(actionProxy.bearerTokenEnv, 'actionproxy.bearerTokenEnv');
+  const quickstartOriginTokenEnv = optionalEnvironmentVariableName(actionProxy.quickstartOriginTokenEnv, 'actionproxy.quickstartOriginTokenEnv');
   if (!isRecord(value.servers) || Object.keys(value.servers).length === 0) {
     throw new Error('MCP wrapper config requires at least one downstream server.');
   }
@@ -78,15 +86,12 @@ function validateConfig(value: unknown): McpWrapperConfig {
       throw new Error(`MCP server "${name}" requires a command.`);
     }
 
-    const serverEnvironment = isStringRecord(server.env) ? server.env : undefined;
-    const environmentPassthrough = environmentVariableNamesOrUndefined(
-      server.envPassthrough,
-      `servers.${name}.envPassthrough`,
-    );
+    const serverEnvironment = optionalStringRecord(server.env, `servers.${name}.env`);
+    const environmentPassthrough = environmentVariableNamesOrUndefined(server.envPassthrough, `servers.${name}.envPassthrough`);
     servers[name] = {
-      args: Array.isArray(server.args) ? server.args.map(String) : undefined,
+      args: optionalStringArray(server.args, `servers.${name}.args`),
       command: server.command,
-      cwd: typeof server.cwd === 'string' ? server.cwd : undefined,
+      cwd: optionalString(server.cwd, `servers.${name}.cwd`),
       env: serverEnvironment,
       envPassthrough: environmentPassthrough,
       requestTimeoutMs: positiveIntegerOrUndefined(server.requestTimeoutMs, `servers.${name}.requestTimeoutMs`),
@@ -98,6 +103,13 @@ function validateConfig(value: unknown): McpWrapperConfig {
     if (bearerTokenEnv && environmentPassthrough?.some((key) => sameEnvironmentName(key, bearerTokenEnv))) {
       throw new Error(`MCP server "${name}" must not pass through the ActionProxy bearer environment variable ${bearerTokenEnv}.`);
     }
+    if (
+      quickstartOriginTokenEnv &&
+      (Object.keys(serverEnvironment ?? {}).some((key) => sameEnvironmentName(key, quickstartOriginTokenEnv)) ||
+        environmentPassthrough?.some((key) => sameEnvironmentName(key, quickstartOriginTokenEnv)))
+    ) {
+      throw new Error(`MCP server "${name}" must not receive the Quickstart origin environment variable ${quickstartOriginTokenEnv}.`);
+    }
     const explicitNames = new Set(Object.keys(serverEnvironment ?? {}).map((key) => key.toLowerCase()));
     const duplicateName = environmentPassthrough?.find((key) => explicitNames.has(key.toLowerCase()));
     if (duplicateName) {
@@ -107,35 +119,61 @@ function validateConfig(value: unknown): McpWrapperConfig {
 
   return {
     actionproxy: {
-      agentId: typeof actionProxy.agentId === 'string' ? actionProxy.agentId : undefined,
-      approvalPollIntervalMs: numberOrUndefined(actionProxy.approvalPollIntervalMs),
-      approvalTimeoutMs: numberOrUndefined(actionProxy.approvalTimeoutMs),
+      agentId: optionalString(actionProxy.agentId, 'actionproxy.agentId'),
+      approvalPollIntervalMs: numberOrUndefined(actionProxy.approvalPollIntervalMs, 'actionproxy.approvalPollIntervalMs'),
+      approvalTimeoutMs: numberOrUndefined(actionProxy.approvalTimeoutMs, 'actionproxy.approvalTimeoutMs'),
       baseUrl: actionProxy.baseUrl,
       bearerTokenEnv,
-      requestedBy: typeof actionProxy.requestedBy === 'string' ? actionProxy.requestedBy : undefined,
+      cancelPendingOnAbort: optionalBoolean(actionProxy.cancelPendingOnAbort, 'actionproxy.cancelPendingOnAbort'),
+      quickstartOriginTokenEnv,
+      requestedBy: optionalString(actionProxy.requestedBy, 'actionproxy.requestedBy'),
       requestTimeoutMs: positiveIntegerOrUndefined(actionProxy.requestTimeoutMs, 'actionproxy.requestTimeoutMs'),
     },
-    policies: isRecord(value.policies) ? parsePolicies(value.policies) : undefined,
+    policies: optionalPolicies(value.policies),
     servers,
   };
 }
 
-function parsePolicies(value: Record<string, unknown>): McpWrapperConfig['policies'] {
+function optionalPolicies(value: unknown): McpWrapperConfig['policies'] {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error('policies must be an object.');
+
   return Object.fromEntries(
-    Object.entries(value)
-      .filter((entry): entry is [string, { approval: 'never' | 'required' | 'deny' }] => {
-        const policy = entry[1];
-        return (
-          isRecord(policy) &&
-          (policy.approval === 'never' || policy.approval === 'required' || policy.approval === 'deny')
-        );
-      })
-      .map(([toolName, policy]) => [toolName, { approval: policy.approval }]),
+    Object.entries(value).map(([toolName, policy]) => {
+      if (!isRecord(policy) || (policy.approval !== 'never' && policy.approval !== 'required' && policy.approval !== 'deny')) {
+        throw new Error(`policies.${toolName}.approval must be "never", "required", or "deny".`);
+      }
+      return [toolName, { approval: policy.approval }];
+    }),
   );
 }
 
-function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+function numberOrUndefined(value: unknown, path: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${path} must be a finite number.`);
+  }
+  return value;
+}
+
+function optionalString(value: unknown, path: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new Error(`${path} must be a string.`);
+  return value;
+}
+
+function optionalStringArray(value: unknown, path: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new Error(`${path} must contain only strings.`);
+  }
+  return value;
+}
+
+function optionalStringRecord(value: unknown, path: string): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (!isStringRecord(value)) throw new Error(`${path} must contain only string values.`);
+  return value;
 }
 
 function positiveIntegerOrUndefined(value: unknown, path: string): number | undefined {
@@ -146,10 +184,16 @@ function positiveIntegerOrUndefined(value: unknown, path: string): number | unde
   return value;
 }
 
-function optionalEnvironmentVariableName(value: unknown): string | undefined {
+function optionalBoolean(value: unknown, path: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') throw new Error(`${path} must be a boolean.`);
+  return value;
+}
+
+function optionalEnvironmentVariableName(value: unknown, path = 'actionproxy.bearerTokenEnv'): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value)) {
-    throw new Error('actionproxy.bearerTokenEnv must be an environment variable name.');
+    throw new Error(`${path} must be an environment variable name.`);
   }
   return value;
 }

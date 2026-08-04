@@ -1,14 +1,14 @@
 # Local curl demo
 
-Run the server first:
+Terminal 1 — run the gateway:
 
 ```bash
-corepack pnpm dev
+corepack pnpm dev:server
 ```
 
-If `pnpm` is available on your PATH, `pnpm dev` works too.
+If `pnpm` is available on your PATH, `pnpm dev:server` works too.
 
-Then run these scripts from the repo root:
+Terminal 2 — run these scripts from the repo root:
 
 ```bash
 bash examples/local-curl-demo/create-doc-search.sh
@@ -21,7 +21,7 @@ curl -s http://127.0.0.1:8787/v1/audit | jq
 
 The scripts default to `ACTIONPROXY_BASE_URL=http://127.0.0.1:8787`.
 
-You can also view the same lifecycle in the local dashboard:
+Optional Terminal 3 — start the local dashboard:
 
 ```bash
 corepack pnpm dev:web

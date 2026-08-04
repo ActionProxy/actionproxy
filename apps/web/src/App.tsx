@@ -43,8 +43,8 @@ function AdminApp() {
   const hasLoadedSnapshot = useRef(false);
   const refreshFailed = useRef(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
       const nextData = await fetchDashboardData();
       setData(nextData);
@@ -61,7 +61,7 @@ function AdminApp() {
       setSnapshotState(hasLoadedSnapshot.current ? "stale" : "unavailable");
       refreshFailed.current = true;
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, []);
 
@@ -71,9 +71,23 @@ function AdminApp() {
       // Keep an explicit retry available after a failed refresh. Automatically
       // replacing the error banner can detach its retry button while someone is
       // trying to use it, and it hides useful failure context.
-      if (!refreshFailed.current) void refresh();
+      // Poll silently so the status row does not appear and shift the entire
+      // dashboard every five seconds.
+      if (!refreshFailed.current) void refresh(false);
     }, 5_000);
-    return () => window.clearInterval(interval);
+    const refreshAfterReturn = () => {
+      if (!refreshFailed.current) void refresh(false);
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshAfterReturn();
+    };
+    window.addEventListener("focus", refreshAfterReturn);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshAfterReturn);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, [refresh]);
 
   if (authPromptVisible) {

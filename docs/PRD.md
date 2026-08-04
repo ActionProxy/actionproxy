@@ -60,7 +60,9 @@ Excluded:
 
 ## Success criteria
 
-A developer can understand, install, run, and demo the product locally in under 15 minutes.
+Target: an eligible developer can understand, install, run, and complete the
+local proof in under 15 minutes. This remains a usability target, not a current
+performance claim; release evidence records measured cold and warm timings.
 
 The demo should make the value obvious:
 

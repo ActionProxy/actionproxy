@@ -119,12 +119,13 @@ node examples/chatgpt-app/check-endpoint.mjs https://your-host.example/mcp
 
 ## Connect from ChatGPT
 
-OpenAI's current developer-mode setup is:
+OpenAI's developer-mode and app instructions change independently of this
+repository. The canonical links below were reviewed on **2026-08-03**:
 
-1. In ChatGPT, open **Settings → Security and login** and enable
-   **Developer mode**. A workspace administrator may need to allow it.
-2. Open **Settings → Plugins** or `https://chatgpt.com/plugins`.
-3. Select the plus button and create a developer-mode app.
+1. Follow OpenAI's current [developer-mode guidance](https://help.openai.com/en/articles/12584461-developer-mode-apps-and-full-mcp-connectors-in-chatgpt-beta).
+   A workspace administrator may need to allow it.
+2. Open [ChatGPT app settings](https://chatgpt.com/plugins).
+3. Create a developer-mode app using the controls currently shown there.
 4. Name it `ActionProxy Community Demo` and use the exact public MCP URL,
    such as `https://your-host.example/mcp`.
 5. Complete the external OAuth flow.

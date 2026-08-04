@@ -1,4 +1,16 @@
 .actionproxy*
+.env
+.env.*
+*.env
+*.env.*
+**/.env
+**/.env.*
+**/*.env
+**/*.env.*
+!.env.example
+!*.env.example
+!**/.env.example
+!**/*.env.example
 .git
 .pnpm-store
 **/dist

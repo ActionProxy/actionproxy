@@ -15,6 +15,14 @@ export interface TelemetryConfig {
   serviceName: string;
 }
 
+export interface QuickstartConfig {
+  enabled: boolean;
+  loopbackPublicationAttested?: boolean;
+  originToken?: string;
+  sessionId?: string;
+  updateToken?: string;
+}
+
 export interface SlackUserMapping {
   displayName?: string;
   email?: string;
@@ -65,6 +73,7 @@ export interface AppConfig {
   localExecution?: {
     mode: LocalExecutionMode;
   };
+  quickstart?: QuickstartConfig;
   mcp?: {
     stdioDiscoveryEnabled: boolean;
     streamableHttp?: {
@@ -120,13 +129,14 @@ export type ResolvedAppConfig = AppConfig & {
     >;
   };
   telemetry: TelemetryConfig;
+  quickstart: QuickstartConfig;
 };
 
 export function loadConfig(): AppConfig {
   const cwd = process.cwd();
   const repositoryRoot = findCommunityRepositoryRoot(cwd);
   const configRoot = repositoryRoot ?? cwd;
-  loadLocalEnvFiles(configRoot, cwd);
+  if (!localEnvFilesDisabled()) loadLocalEnvFiles(configRoot, cwd);
   const dataDir = resolveDataDir(configRoot);
   const storageMode = parseStorageMode(productEnv('STORAGE'));
   const authMode = parseAuthMode(productEnv('AUTH_MODE'));
@@ -169,6 +179,14 @@ export function loadConfig(): AppConfig {
     },
     localExecution: {
       mode: parseLocalExecutionMode(productEnv('LOCAL_EXECUTION')),
+    },
+    quickstart: {
+      enabled: parseBoolean(productEnv('QUICKSTART_MODE')) ?? false,
+      loopbackPublicationAttested:
+        parseBoolean(productEnv('QUICKSTART_LOOPBACK_PUBLISHED')) ?? false,
+      originToken: productEnv('QUICKSTART_ORIGIN_TOKEN'),
+      sessionId: productEnv('QUICKSTART_SESSION_ID'),
+      updateToken: productEnv('QUICKSTART_UPDATE_TOKEN'),
     },
     mcp: {
       stdioDiscoveryEnabled:
@@ -288,11 +306,13 @@ export function withConfigDefaults(config: AppConfig): ResolvedAppConfig {
         config.mcp?.streamableHttp ?? defaultMcpStreamableHttpConfig(config),
     },
     telemetry: config.telemetry ?? defaultTelemetryConfig(),
+    quickstart: config.quickstart ?? { enabled: false },
   };
 }
 
 export function assertSafeStartupConfig(config: AppConfig): void {
   assertSafeMcpStreamableHttpConfig(config);
+  assertSafeQuickstartConfig(config);
   if (
     !isUnauthenticatedWildcardBind(config) ||
     config.allowUnsafeLocalBind === true
@@ -300,6 +320,74 @@ export function assertSafeStartupConfig(config: AppConfig): void {
     return;
 
   throw new Error(unsafeLocalBindBlockedMessage(config.host));
+}
+
+function assertSafeQuickstartConfig(config: AppConfig): void {
+  if (config.quickstart?.enabled !== true) return;
+
+  const authMode = config.auth?.mode ?? 'none';
+  const deploymentMode =
+    config.deployment?.mode ?? (authMode === 'none' ? 'local' : 'self_hosted');
+  const localExecutionMode = config.localExecution?.mode ?? 'disabled';
+
+  if (deploymentMode !== 'local') {
+    throw new Error(
+      'ActionProxy Quickstart mode requires ACTIONPROXY_DEPLOYMENT_MODE=local.',
+    );
+  }
+  if (authMode !== 'none') {
+    throw new Error(
+      'ActionProxy Quickstart mode requires ACTIONPROXY_AUTH_MODE=none.',
+    );
+  }
+  if (localExecutionMode !== 'mock') {
+    throw new Error(
+      'ActionProxy Quickstart mode requires ACTIONPROXY_LOCAL_EXECUTION=mock.',
+    );
+  }
+  if (!isQuickstartLocalBind(config)) {
+    throw new Error(
+      'ActionProxy Quickstart mode requires a loopback server bind, or the explicit launcher-attested Docker demo bind ACTIONPROXY_HOST=0.0.0.0 with ACTIONPROXY_ALLOW_UNSAFE_LOCAL_BIND=true and ACTIONPROXY_QUICKSTART_LOOPBACK_PUBLISHED=true.',
+    );
+  }
+
+  const sessionId = config.quickstart.sessionId;
+  if (!sessionId || !isQuickstartSessionId(sessionId)) {
+    throw new Error(
+      'ActionProxy Quickstart mode requires ACTIONPROXY_QUICKSTART_SESSION_ID to be a canonical lowercase UUID v4.',
+    );
+  }
+
+  const updateToken = config.quickstart.updateToken;
+  if (
+    !updateToken ||
+    updateToken !== updateToken.trim() ||
+    updateToken.length < 32 ||
+    updateToken.length > 256 ||
+    /[\s\u0000-\u001f\u007f]/u.test(updateToken)
+  ) {
+    throw new Error(
+      'ActionProxy Quickstart mode requires a private 32-256 character ACTIONPROXY_QUICKSTART_UPDATE_TOKEN without whitespace or control characters.',
+    );
+  }
+
+  const originToken = config.quickstart.originToken;
+  if (
+    !originToken ||
+    originToken !== originToken.trim() ||
+    originToken.length < 32 ||
+    originToken.length > 256 ||
+    /[\s\u0000-\u001f\u007f]/u.test(originToken)
+  ) {
+    throw new Error(
+      'ActionProxy Quickstart mode requires a private 32-256 character ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN without whitespace or control characters.',
+    );
+  }
+  if (originToken === updateToken) {
+    throw new Error(
+      'ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN must be distinct from ACTIONPROXY_QUICKSTART_UPDATE_TOKEN.',
+    );
+  }
 }
 
 function assertSafeMcpStreamableHttpConfig(config: AppConfig): void {
@@ -466,6 +554,27 @@ function isWildcardBindHost(host: string): boolean {
   );
 }
 
+function isQuickstartLocalBind(config: AppConfig): boolean {
+  const normalized = config.host.trim().toLowerCase();
+  const loopback =
+    normalized === '127.0.0.1' ||
+    normalized === '::1' ||
+    normalized === '[::1]' ||
+    normalized === 'localhost';
+  return (
+    loopback ||
+    (normalized === '0.0.0.0' &&
+      config.allowUnsafeLocalBind === true &&
+      config.quickstart?.loopbackPublicationAttested === true)
+  );
+}
+
+function isQuickstartSessionId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+    value,
+  );
+}
+
 function unsafeLocalBindBlockedMessage(host: string): string {
   return `Unsafe ActionProxy startup blocked: ACTIONPROXY_AUTH_MODE=none with ACTIONPROXY_HOST=${host} would expose the implicit local-admin demo gateway on all network interfaces. Use ACTIONPROXY_HOST=127.0.0.1 for local demos, set ACTIONPROXY_AUTH_MODE=api_key or oidc_jwt for networked use, or set ACTIONPROXY_ALLOW_UNSAFE_LOCAL_BIND=true only for an intentionally localhost-published Docker/demo run.`;
 }
@@ -621,6 +730,12 @@ function loadLocalEnvFiles(configRoot: string, cwd: string): void {
   for (const filename of ['.env.local', '.env']) {
     for (const root of roots) loadLocalEnvFile(path.join(root, filename));
   }
+}
+
+function localEnvFilesDisabled(): boolean {
+  return /^(?:1|true|yes|on)$/iu.test(
+    process.env.ACTIONPROXY_DISABLE_LOCAL_ENV_FILES?.trim() ?? '',
+  );
 }
 
 function loadLocalEnvFile(envPath: string): void {

@@ -14,6 +14,8 @@ describe('loadMcpWrapperConfig', () => {
 actionproxy:
   baseUrl: http://localhost:8787
   bearerTokenEnv: ACTIONPROXY_MCP_BEARER_TOKEN
+  cancelPendingOnAbort: true
+  quickstartOriginTokenEnv: ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN
   requestedBy: dev@example.com
   requestTimeoutMs: 15000
 servers:
@@ -35,6 +37,8 @@ policies:
     expect(config.actionproxy.baseUrl).toBe('http://localhost:8787');
     expect(config.actionproxy).toMatchObject({
       bearerTokenEnv: 'ACTIONPROXY_MCP_BEARER_TOKEN',
+      cancelPendingOnAbort: true,
+      quickstartOriginTokenEnv: 'ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN',
       requestTimeoutMs: 15000,
     });
     expect(config.servers.demo).toMatchObject({
@@ -105,6 +109,22 @@ servers:
     );
 
     expect(() => loadMcpWrapperConfig(configPath)).toThrow('bearerTokenEnv');
+
+    const quickstartConfigPath = path.join(dir, 'inline-quickstart-origin.mcp.yaml');
+    fs.writeFileSync(
+      quickstartConfigPath,
+      `
+actionproxy:
+  baseUrl: http://localhost:8787
+  quickstartOriginToken: do-not-store-this
+servers:
+  demo:
+    command: node
+`,
+      'utf8',
+    );
+
+    expect(() => loadMcpWrapperConfig(quickstartConfigPath)).toThrow('quickstartOriginTokenEnv');
   });
 
   it('rejects invalid bearer references and forwarding the bearer variable to a child', () => {
@@ -158,6 +178,63 @@ servers:
     expect(() => loadMcpWrapperConfig(passedThroughPath)).toThrow('must not pass through');
   });
 
+  it('rejects invalid Quickstart origin references and forwarding the origin variable to a child', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'actionproxy-mcp-config-test-'));
+    const invalidNamePath = path.join(dir, 'invalid-quickstart-origin-name.mcp.yaml');
+    fs.writeFileSync(
+      invalidNamePath,
+      `
+actionproxy:
+  baseUrl: http://localhost:8787
+  quickstartOriginTokenEnv: NOT-A-VARIABLE
+servers:
+  demo:
+    command: node
+`,
+      'utf8',
+    );
+    expect(() => loadMcpWrapperConfig(invalidNamePath)).toThrow(
+      'actionproxy.quickstartOriginTokenEnv must be an environment variable name',
+    );
+
+    const forwardedPath = path.join(dir, 'forwarded-quickstart-origin.mcp.yaml');
+    fs.writeFileSync(
+      forwardedPath,
+      `
+actionproxy:
+  baseUrl: http://localhost:8787
+  quickstartOriginTokenEnv: ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN
+servers:
+  demo:
+    command: node
+    env:
+      actionproxy_quickstart_origin_token: forbidden
+`,
+      'utf8',
+    );
+    expect(() => loadMcpWrapperConfig(forwardedPath)).toThrow(
+      'must not receive the Quickstart origin environment variable',
+    );
+
+    const passedThroughPath = path.join(dir, 'passed-through-quickstart-origin.mcp.yaml');
+    fs.writeFileSync(
+      passedThroughPath,
+      `
+actionproxy:
+  baseUrl: http://localhost:8787
+  quickstartOriginTokenEnv: ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN
+servers:
+  demo:
+    command: node
+    envPassthrough: [actionproxy_quickstart_origin_token]
+`,
+      'utf8',
+    );
+    expect(() => loadMcpWrapperConfig(passedThroughPath)).toThrow(
+      'must not receive the Quickstart origin environment variable',
+    );
+  });
+
   it('rejects non-positive request timeouts', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'actionproxy-mcp-config-test-'));
     const configPath = path.join(dir, 'timeout.mcp.yaml');
@@ -175,6 +252,25 @@ servers:
     );
 
     expect(() => loadMcpWrapperConfig(configPath)).toThrow('positive integer');
+  });
+
+  it('requires cancelPendingOnAbort to be boolean', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'actionproxy-mcp-config-test-'));
+    const configPath = path.join(dir, 'cancel-pending.mcp.yaml');
+    fs.writeFileSync(
+      configPath,
+      `
+actionproxy:
+  baseUrl: http://localhost:8787
+  cancelPendingOnAbort: yes-please
+servers:
+  demo:
+    command: node
+`,
+      'utf8',
+    );
+
+    expect(() => loadMcpWrapperConfig(configPath)).toThrow('actionproxy.cancelPendingOnAbort must be a boolean');
   });
 
   it('validates passthrough names and rejects inline/passthrough ambiguity', () => {

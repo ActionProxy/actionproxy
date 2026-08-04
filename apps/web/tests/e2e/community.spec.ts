@@ -2,16 +2,27 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
 interface ToolCallRecord {
+  agentId?: string;
+  createdAt?: string;
   decision?: string;
   id: string;
+  input?: Record<string, unknown>;
   metadata: Record<string, unknown>;
+  reason?: string;
+  requestedBy?: string;
   status: string;
   toolName: string;
+  updatedAt?: string;
 }
 
 interface ApprovalRecord {
+  createdAt?: string;
   id: string;
+  originalInput?: Record<string, unknown>;
+  requestedBy?: string;
+  status?: string;
   toolCallId: string;
+  updatedAt?: string;
 }
 
 interface AuditRecord {
@@ -53,7 +64,7 @@ test("community console exposes only OSS surfaces", async ({ page }) => {
   await expect(nav.getByRole("link", { name: /^Runner queue/ })).toBeVisible();
   await expect(nav.getByRole("link", { name: /^Policy/ })).toBeVisible();
   await expect(nav.getByRole("link", { name: /^Integrations/ })).toBeVisible();
-  await expect(nav.getByRole("link", { name: /^Demo lab/ })).toBeVisible();
+  await expect(nav.getByRole("link", { name: /^Quickstart/ })).toBeVisible();
   await expect(nav.getByRole("link", { name: /^Agents/ })).toHaveCount(0);
   await expect(page.getByText(/control plane/i)).toHaveCount(0);
 
@@ -81,12 +92,57 @@ test("community console exposes only OSS surfaces", async ({ page }) => {
   ).toBeVisible();
 
   await page.goto("/app#/demo");
+  await expect(
+    page.getByRole("heading", {
+      name: "See ActionProxy control a tool call",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Local lifecycle proof" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Connect ChatGPT" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("link", { name: /Connect ChatGPT/ }).click();
+  await expect(page).toHaveURL(/#\/demo\?journey=chatgpt$/u);
   const tunnelPanel = page.locator(".chatgpt-tunnel-panel");
   await expect(
     tunnelPanel.getByRole("heading", { name: "Connect ChatGPT" }),
   ).toBeVisible();
-  await expect(tunnelPanel.getByText("Waiting for first call")).toBeVisible();
+  await expect(
+    tunnelPanel.locator(".status-badge", { hasText: "Setup not checked" }),
+  ).toBeVisible();
+  const tunnelDetails = tunnelPanel.locator(".chatgpt-tunnel-details");
+  await expect(tunnelDetails).not.toHaveAttribute("open", "");
+  await tunnelDetails.locator("summary").click();
+  await expect(
+    tunnelPanel.getByRole("heading", { name: "Confirm access first" }),
+  ).toBeVisible();
+  await expect(tunnelPanel).toContainText(
+    "ChatGPT workspace access and OpenAI Platform tunnel permissions are separate",
+  );
+  await expect(tunnelPanel).toContainText("target ChatGPT workspace");
+  await expect(
+    tunnelPanel.getByRole("heading", { name: "Exactly three mock tools" }),
+  ).toBeVisible();
+  const fixtureTools = tunnelPanel.locator(".chatgpt-tunnel-tools li code");
+  await expect(fixtureTools).toHaveText([
+    "docs.search",
+    "gmail.send_email",
+    "dangerous.delete_customer",
+  ]);
+  await expect(
+    tunnelPanel.getByRole("link", { name: /ChatGPT app settings/ }),
+  ).toHaveAttribute("href", "https://chatgpt.com/plugins");
+  await expect(tunnelPanel).toContainText(
+    "External setup links reviewed 2026-08-03.",
+  );
+  const manualSetup = tunnelPanel.locator(".chatgpt-manual-setup");
+  await expect(manualSetup).not.toHaveAttribute("open", "");
+  await manualSetup.locator("summary").click();
   await expect(tunnelPanel.getByLabel("OpenAI tunnel ID")).toBeVisible();
+  await expect(tunnelPanel.getByLabel(/runtime key/i)).toHaveCount(0);
   await expect
     .poll(() =>
       tunnelPanel.evaluate(
@@ -97,29 +153,15 @@ test("community console exposes only OSS surfaces", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Manual MCP action catalog" }),
   ).toHaveCount(0);
-  const guidedDemo = page.getByRole("heading", { name: "Agent demo" });
-  await expect(guidedDemo).toBeVisible();
-  expect(
-    await guidedDemo.evaluate(
-      (element, tunnel) =>
-        Boolean(
-          element.compareDocumentPosition(tunnel as Node) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-        ),
-      await tunnelPanel
-        .getByRole("heading", { name: "Connect ChatGPT" })
-        .elementHandle(),
-    ),
-  ).toBe(true);
-
-  const tunnelId = "tunnel_browsercheck123";
-  await tunnelPanel.getByLabel("OpenAI tunnel ID").fill(tunnelId);
-  await expect(tunnelPanel.locator(".chatgpt-tunnel-command")).toContainText(
-    tunnelId,
-  );
   await expect(
-    tunnelPanel.locator(".chatgpt-tunnel-command"),
-  ).not.toContainText(/runtime[-_ ]key/i);
+    page.getByRole("heading", { name: "Local lifecycle proof" }),
+  ).toHaveCount(0);
+
+  const tunnelId = "tunnel_0123456789abcdef0123456789abcdef";
+  await tunnelPanel.getByLabel("OpenAI tunnel ID").fill(tunnelId);
+  const manualCommand = manualSetup.locator(".chatgpt-tunnel-command");
+  await expect(manualCommand).toContainText(tunnelId);
+  await expect(manualCommand).not.toContainText(/runtime[-_ ]key/i);
   const tunnelSafety = await page.evaluate(() => ({
     dom: document.documentElement.innerHTML,
     storage: JSON.stringify({
@@ -144,7 +186,7 @@ test("community demo gates approval decisions and records audit evidence", async
 
   await page.goto("/app#/demo");
   const agentDemo = page.locator(".agent-demo-panel");
-  await agentDemo.getByRole("button", { name: "Run full demo" }).click();
+  await agentDemo.getByRole("button", { name: "Run guided proof" }).click();
   await expectStatus(
     agentDemo
       .locator(".agent-step")
@@ -160,6 +202,12 @@ test("community demo gates approval decisions and records audit evidence", async
   await expect(
     agentDemo.getByText("Paused as designed—no email was sent."),
   ).toBeVisible();
+  await expect(page).toHaveTitle("Approval waiting · ActionProxy");
+  await expect(
+    page
+      .locator(".quickstart-pending-banner")
+      .getByText(/Action paused. Nothing has executed./i),
+  ).toBeVisible();
   await expectStatus(
     agentDemo
       .locator(".agent-step")
@@ -170,13 +218,32 @@ test("community demo gates approval decisions and records audit evidence", async
   const created = await waitForNewDemoEmailApproval(page, existingToolCallIds);
   await expect(
     agentDemo.getByRole("link", { name: "Review this approval" }),
-  ).toHaveAttribute("href", `#/approvals/${created.approval.id}`);
+  ).toHaveAttribute(
+    "href",
+    `#/approvals/${created.approval.id}?returnTo=%23%2Fdemo%3Fjourney%3Dlocal%26guided%3D1`,
+  );
   const storedProgress = await page.evaluate(() =>
     window.localStorage.getItem("actionproxy.agentDemoRuns.v1"),
   );
   expect(storedProgress).not.toContain("response");
   expect(storedProgress).not.toContain("result");
   expect(storedProgress).not.toContain("customer@example.com");
+  const storedRunIds = JSON.parse(storedProgress ?? "{}") as Record<
+    string,
+    Record<string, unknown>
+  >;
+  for (const storedRun of Object.values(storedRunIds)) {
+    expect(
+      Object.keys(storedRun).every((key) =>
+        ["approvalId", "toolCallId"].includes(key),
+      ),
+    ).toBe(true);
+  }
+  expect(
+    await page.evaluate(() =>
+      window.localStorage.getItem("actionproxy.agentDemoAutoContinue.v1"),
+    ),
+  ).toBeNull();
 
   expect(await fetchExecutionAttempts(page, created.toolCall.id)).toEqual([]);
   const preApprovalEventTypes = (
@@ -187,20 +254,33 @@ test("community demo gates approval decisions and records audit evidence", async
   expect(preApprovalEventTypes).not.toContain("receipt.created");
   expect(preApprovalEventTypes).not.toContain("tool_call.executed");
 
-  await page.goto(`/app#/approvals/${created.approval.id}`);
-  await expect(
-    page.getByRole("heading", { name: "Approval detail" }),
-  ).toBeVisible();
-  await expect(page.locator(".approval-detail .status-badge")).toHaveText(
-    "pending",
+  await agentDemo.getByRole("link", { name: "Review this approval" }).click();
+  await expect(page).toHaveURL(
+    new RegExp(
+      `#\\/approvals\\/${created.approval.id}\\?returnTo=%23%2Fdemo%3Fjourney%3Dlocal%26guided%3D1$`,
+      "u",
+    ),
   );
   await expect(
-    page.getByRole("heading", { name: "Approval input comparison" }),
+    page.getByRole("heading", { name: "Review the proposed email" }),
+  ).toBeVisible();
+  await expect(page.locator(".approval-detail .status-badge")).toHaveText(
+    "Waiting for your decision",
+  );
+  await expect(
+    page.getByRole("heading", { name: "Email waiting for review" }),
   ).toBeVisible();
   await expect(
-    page.getByText(/"to": "customer@example.com"/).first(),
+    page.getByText("customer@example.com", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Approve" }).click();
+  await page.getByRole("button", { name: "Approve exact proposal" }).click();
+  await expect(
+    page.getByText("Executed successfully exactly once."),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Return now" })).toHaveAttribute(
+    "href",
+    "#/demo?journey=local&guided=1",
+  );
   await expect
     .poll(async () => (await fetchToolCall(page, created.toolCall.id)).status)
     .toBe("executed");
@@ -226,7 +306,8 @@ test("community demo gates approval decisions and records audit evidence", async
     ).toHaveLength(1);
   }
 
-  await page.goto("/app#/demo");
+  await page.getByRole("link", { name: "Return now" }).click();
+  await expect(page).toHaveURL(/#\/demo\?journey=local&guided=1$/u);
   await expectStatus(
     agentDemo
       .locator(".agent-step")
@@ -239,6 +320,11 @@ test("community demo gates approval decisions and records audit evidence", async
       .filter({ hasText: "Attempt unsafe customer deletion" }),
     "Blocked",
   );
+  await expect(
+    page.getByRole("heading", {
+      name: "Quickstart complete: audit chain verified",
+    }),
+  ).toBeVisible();
 
   const denied = await waitForNewDemoToolCall(
     page,
@@ -294,6 +380,62 @@ test("community demo gates approval decisions and records audit evidence", async
   ).toBeVisible();
 });
 
+test("deep-linked ChatGPT quickstart scopes progress to its live companion session", async ({
+  page,
+}) => {
+  const sessionId = "123e4567-e89b-42d3-a456-426614174000";
+  await page.route(`/v1/demo/quickstart/status/${sessionId}`, (route) =>
+    route.fulfill({
+      json: {
+        approvalTimeoutMs: 300_000,
+        checks: [
+          { id: "gateway", state: "pass" },
+          { id: "tool_discovery", state: "pass" },
+          { id: "tunnel_readiness", state: "pass" },
+        ],
+        journey: "chatgpt",
+        schemaVersion: "actionproxy.quickstart.v1",
+        sessionId,
+        setupDetails: {
+          composeVersion: "2.35.1",
+          dockerVersion: "28.1.1",
+          nodeVersion: "24.11.0",
+          port: 18787,
+          projectName: "actionproxy-first-run-0123456789",
+          runtimeKeyExcludedFromDocker: true,
+        },
+        setupStage: "tunnel_ready",
+        startedAt: "2999-08-02T08:00:00.000Z",
+        tunnelUiUrl: "http://127.0.0.1:4040",
+        updatedAt: "2999-08-02T08:00:01.000Z",
+      },
+    }),
+  );
+
+  await page.goto(
+    `/app#/demo?journey=chatgpt&session=${encodeURIComponent(sessionId)}`,
+  );
+
+  await expect(
+    page.getByRole("heading", { name: "Secure tunnel ready" }),
+  ).toBeVisible();
+  await expect(page.getByText("0/3 complete")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Copy allowed search prompt" }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole("button", {
+      name: "Copy approval-required email prompt",
+    }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Copy denied deletion prompt" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("link", { name: /Open tunnel health UI/ }),
+  ).toHaveAttribute("href", "http://127.0.0.1:4040");
+});
+
 test("pending approval survives reload and can be rejected without an email effect", async ({
   page,
 }) => {
@@ -302,7 +444,7 @@ test("pending approval survives reload and can be rejected without an email effe
   );
   await page.goto("/app#/demo");
   const agentDemo = page.locator(".agent-demo-panel");
-  await agentDemo.getByRole("button", { name: "Run full demo" }).click();
+  await agentDemo.getByRole("button", { name: "Run guided proof" }).click();
   const created = await waitForNewDemoEmailApproval(page, existingToolCallIds);
 
   await page.reload();
@@ -316,16 +458,19 @@ test("pending approval survives reload and can be rejected without an email effe
     agentDemo.getByText("Paused as designed—no email was sent."),
   ).toBeVisible();
 
-  await page.goto(`/app#/approvals/${created.approval.id}`);
+  await agentDemo.getByRole("link", { name: "Review this approval" }).click();
+  await page.getByRole("button", { name: "Reject" }).click();
   await page
     .getByLabel("Rejection reason")
     .fill("Intentional Community rejection-path test.");
-  await page.getByRole("button", { name: "Reject" }).click();
+  await page.getByRole("button", { name: "Confirm rejection" }).click();
+  await expect(page.getByText("Rejected. Nothing was sent.")).toBeVisible();
   await expect
     .poll(async () => (await fetchToolCall(page, created.toolCall.id)).status)
     .toBe("rejected");
 
-  await page.goto("/app#/demo");
+  await page.getByRole("link", { name: "Return now" }).click();
+  await expect(page).toHaveURL(/#\/demo\?journey=local&guided=1$/u);
   await expectStatus(
     agentDemo
       .locator(".agent-step")
@@ -422,7 +567,8 @@ test("corrupt demo progress recovers without retaining gateway payloads", async 
     demo.locator(".agent-step").filter({ hasText: "Search support policy" }),
     "Ready",
   );
-  await demo.getByRole("button", { name: "Run next" }).click();
+  await demo.getByText("Run step by step").click();
+  await demo.getByRole("button", { name: "Run next step" }).click();
   await expectStatus(
     demo.locator(".agent-step").filter({ hasText: "Search support policy" }),
     "Complete",
@@ -435,6 +581,11 @@ test("corrupt demo progress recovers without retaining gateway payloads", async 
   expect(stored).not.toContain("response");
   expect(stored).not.toContain("result");
   expect(stored).not.toContain("refund policy");
+  expect(
+    await page.evaluate(() =>
+      window.localStorage.getItem("actionproxy.agentDemoAutoContinue.v1"),
+    ),
+  ).toBeNull();
 });
 
 test("content-influence decisions are explained without rendering downstream hostile output", async ({
@@ -484,7 +635,7 @@ test("keyboard focus, reduced motion, Axe, and document width meet the Community
 
   const demoLink = page
     .getByRole("navigation", { name: "Admin view" })
-    .getByRole("link", { name: /^Demo lab/ });
+    .getByRole("link", { name: /^Quickstart/ });
   for (
     let index = 0;
     index < 8 &&
@@ -496,6 +647,8 @@ test("keyboard focus, reduced motion, Axe, and document width meet the Community
   await expect(demoLink).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/demo$/u);
+
+  await page.getByRole("link", { name: /Connect ChatGPT/ }).click();
 
   const motion = await page
     .locator(".chatgpt-tunnel-panel")
@@ -521,6 +674,7 @@ test("keyboard focus, reduced motion, Axe, and document width meet the Community
     "#/policy",
     "#/integrations",
     "#/demo",
+    "#/demo?journey=chatgpt",
     "#/missing",
   ]) {
     await page.goto(`/app${route}`);
@@ -534,6 +688,142 @@ test("keyboard focus, reduced motion, Axe, and document width meet the Community
       `${route}: ${serious.map((violation) => violation.id).join(", ")}`,
     ).toEqual([]);
   }
+});
+
+test("first-run visual states remain reviewable", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop" || process.platform !== "darwin",
+    "The four-project matrix checks responsive behavior; canonical release-quality visual baselines use desktop macOS.",
+  );
+
+  const sessionId = "123e4567-e89b-42d3-a456-426614174000";
+  let setupStage: "failed" | "tunnel_ready" = "failed";
+  let toolCalls: ToolCallRecord[] = [];
+  let approvals: ApprovalRecord[] = [];
+  let auditEvents: AuditRecord[] = [];
+  await page.route(`/v1/demo/quickstart/status/${sessionId}`, (route) =>
+    route.fulfill({
+      json: visualQuickstartStatus(sessionId, setupStage),
+    }),
+  );
+  await page.route(/\/v1\/tool-calls\?limit=100$/u, (route) =>
+    route.fulfill({ json: { toolCalls } }),
+  );
+  await page.route(/\/v1\/approvals\/pending$/u, (route) =>
+    route.fulfill({ json: { approvals } }),
+  );
+  await page.route(/\/v1\/audit\?limit=500$/u, (route) =>
+    route.fulfill({ json: { events: auditEvents } }),
+  );
+  await page.route("/v1/audit/verify", (route) =>
+    route.fulfill({
+      json: { checked: auditEvents.length, errors: [], valid: true },
+    }),
+  );
+
+  await page.goto("/app#/demo");
+  await expect(page.locator(".quickstart-chooser")).toHaveScreenshot(
+    "first-run-chooser.png",
+    visualSnapshotOptions,
+  );
+
+  await page.goto(
+    `/app#/demo?journey=chatgpt&session=${encodeURIComponent(sessionId)}`,
+  );
+  await expect(
+    page.getByRole("heading", { name: "Setup needs attention" }),
+  ).toBeVisible();
+  await expect(page.locator(".chatgpt-tunnel-panel")).toHaveScreenshot(
+    "first-run-remediation.png",
+    visualSnapshotOptions,
+  );
+
+  setupStage = "tunnel_ready";
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Secure tunnel ready" }),
+  ).toBeVisible();
+  await expect(page.locator(".chatgpt-tunnel-panel")).toHaveScreenshot(
+    "first-run-tunnel-ready.png",
+    visualSnapshotOptions,
+  );
+
+  const createdAt = new Date().toISOString();
+  const email = visualTunnelCall({
+    createdAt,
+    decision: "require_approval",
+    id: "visual_email_call",
+    sessionId,
+    status: "pending_approval",
+    toolName: "gmail.send_email",
+  });
+  toolCalls = [email];
+  approvals = [
+    {
+      createdAt,
+      id: "visual_email_approval",
+      originalInput: email.input ?? {},
+      requestedBy: email.requestedBy ?? "chatgpt-tunnel-demo@example.local",
+      status: "pending",
+      toolCallId: email.id,
+      updatedAt: createdAt,
+    },
+  ];
+  await page.reload();
+  await expect(page.locator(".quickstart-pending-banner")).toBeVisible();
+  await expect(page.locator(".quickstart-pending-banner")).toHaveScreenshot(
+    "first-run-approval-waiting.png",
+    visualSnapshotOptions,
+  );
+
+  const search = visualTunnelCall({
+    createdAt,
+    decision: "allow",
+    id: "visual_search_call",
+    sessionId,
+    status: "executed",
+    toolName: "docs.search",
+  });
+  const completedEmail = { ...email, status: "executed" as const };
+  const deletion = visualTunnelCall({
+    createdAt,
+    decision: "deny",
+    id: "visual_delete_call",
+    sessionId,
+    status: "blocked",
+    toolName: "dangerous.delete_customer",
+  });
+  toolCalls = [search, completedEmail, deletion];
+  approvals = [];
+  auditEvents = [
+    visualAuditEvent("search-allowed", "policy.allow", search.id),
+    visualAuditEvent("search-executed", "tool_call.executed", search.id),
+    visualAuditEvent("email-held", "policy.require_approval", email.id),
+    visualAuditEvent("email-created", "approval.created", email.id),
+    {
+      ...visualAuditEvent("email-approved", "approval.approved", email.id),
+      data: { inputDecision: "original" },
+    },
+    visualAuditEvent(
+      "email-dispatched",
+      "execution.attempt_dispatched",
+      email.id,
+    ),
+    visualAuditEvent("email-executed", "tool_call.executed", email.id),
+    visualAuditEvent("delete-denied", "policy.deny", deletion.id),
+  ];
+  await page.reload();
+  await expect(
+    page.getByRole("heading", {
+      name: "You governed three Quickstart MCP tool calls from your Mac",
+    }),
+  ).toBeVisible();
+  await expect(page.locator(".chatgpt-verified-proof")).toHaveScreenshot(
+    "first-run-completion.png",
+    visualSnapshotOptions,
+  );
 });
 
 async function expectCommunityRouteMissing(
@@ -682,6 +972,119 @@ function durationMilliseconds(value: string): number {
   const numeric = Number.parseFloat(first);
   if (!Number.isFinite(numeric)) return Number.POSITIVE_INFINITY;
   return first.endsWith("ms") ? numeric : numeric * 1_000;
+}
+
+const visualSnapshotOptions = {
+  animations: "disabled" as const,
+  caret: "hide" as const,
+  maxDiffPixelRatio: 0.01,
+  threshold: 0.2,
+};
+
+function visualQuickstartStatus(
+  sessionId: string,
+  setupStage: "failed" | "tunnel_ready",
+) {
+  const tunnelReady = setupStage === "tunnel_ready";
+  return {
+    approvalTimeoutMs: 300_000,
+    checks: [
+      { id: "node", state: "pass" },
+      { id: "docker_cli", state: "pass" },
+      tunnelReady
+        ? { id: "docker_daemon", state: "pass" }
+        : {
+            id: "docker_daemon",
+            remediationCode: "docker_not_running",
+            state: "action_required",
+          },
+      { id: "compose", state: tunnelReady ? "pass" : "pending" },
+      { id: "gateway", state: tunnelReady ? "pass" : "pending" },
+      { id: "storage", state: tunnelReady ? "pass" : "pending" },
+      { id: "loopback", state: tunnelReady ? "pass" : "pending" },
+      { id: "tool_discovery", state: tunnelReady ? "pass" : "pending" },
+      { id: "tunnel_client", state: tunnelReady ? "pass" : "pending" },
+      { id: "tunnel_doctor", state: tunnelReady ? "pass" : "pending" },
+      { id: "tunnel_readiness", state: tunnelReady ? "pass" : "pending" },
+    ],
+    journey: "chatgpt",
+    schemaVersion: "actionproxy.quickstart.v1",
+    sessionId,
+    setupDetails: tunnelReady
+      ? {
+          composeVersion: "2.35.1",
+          dockerVersion: "28.1.1",
+          nodeVersion: "24.11.0",
+          port: 18787,
+          projectName: "actionproxy-first-run-0123456789",
+          runtimeKeyExcludedFromDocker: true,
+        }
+      : undefined,
+    setupStage,
+    startedAt: "2026-08-02T08:00:00.000Z",
+    tunnelUiUrl: tunnelReady ? "http://127.0.0.1:4040/ui" : undefined,
+    updatedAt: "2026-08-02T08:00:01.000Z",
+  };
+}
+
+function visualTunnelCall({
+  createdAt,
+  decision,
+  id,
+  sessionId,
+  status,
+  toolName,
+}: {
+  createdAt: string;
+  decision: "allow" | "deny" | "require_approval";
+  id: string;
+  sessionId: string;
+  status: ToolCallRecord["status"];
+  toolName: string;
+}): ToolCallRecord {
+  const input =
+    toolName === "gmail.send_email"
+      ? {
+          body: "Your request is ready.",
+          subject: "Refund update",
+          to: "customer@example.com",
+        }
+      : {};
+  return {
+    agentId: "actionproxy-chatgpt-tunnel-demo",
+    createdAt,
+    decision,
+    id,
+    input,
+    metadata: {
+      actionproxyQuickstartOrigin: "secure_mcp_tunnel",
+      actionproxyQuickstartSessionId: sessionId,
+      mcpServer: "chatgpt-tunnel-demo",
+    },
+    reason: "Deterministic visual acceptance fixture",
+    requestedBy: "chatgpt-tunnel-demo@example.local",
+    status,
+    toolName,
+    updatedAt: createdAt,
+  };
+}
+
+function visualAuditEvent(
+  id: string,
+  type: string,
+  toolCallId: string,
+): AuditRecord & {
+  data: Record<string, unknown>;
+  id: string;
+  timestamp: string;
+} {
+  return {
+    data: {},
+    id: `visual-${id}`,
+    timestamp: "2026-08-02T08:00:02.000Z",
+    toolCallId,
+    type,
+  };
 }
 
 function influencedToolCallFixture() {

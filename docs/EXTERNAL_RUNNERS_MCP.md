@@ -40,7 +40,33 @@ await runExternalAction({
 For MCP, keep your existing downstream MCP server as the owner of real tool credentials. Put ActionProxy's MCP wrapper in front of it:
 
 ```bash
+/absolute/path/to/actionproxy/actionproxy integrate --mode mcp --json
+```
+
+That command creates a new, non-overwriting, credential-free starter with a
+three-tool downstream fixture. Its exact `@actionproxy/mcp-wrapper@0.1.0`
+dependency points to a local tarball that the generated preparer builds from
+the reviewed ActionProxy checkout; it neither assumes nor probes npm registry
+availability. The generated policy is a sample and is not loaded by
+`./actionproxy local`. Doctor proves exact mock-tool discovery only; complete
+the host-driven policy, approval, execution, and audit checks before replacing
+the fixture.
+
+The versioned MCP-wrapper configuration data model is
+[`schemas/actionproxy.mcp-wrapper.v1.schema.json`](../schemas/actionproxy.mcp-wrapper.v1.schema.json).
+It is draft 2020-12 generated output. Runtime parsing remains authoritative for
+environment-variable credential isolation and other checks JSON Schema cannot
+express.
+
+Terminal 1 — start ActionProxy without local tool execution:
+
+```bash
 corepack pnpm dev:proxy
+```
+
+Terminal 2 — build and run the wrapper:
+
+```bash
 corepack pnpm --filter @actionproxy/mcp-wrapper build
 ./packages/mcp-wrapper/dist/index.js wrap --config examples/mcp-demo/actionproxy.mcp.yaml
 ```
@@ -54,9 +80,25 @@ OpenAI `tunnel-client` exactly one stdio MCP command: this wrapper. The wrapper
 then mediates the three deterministic demo tools through the local gateway:
 
 ```bash
-export CONTROL_PLANE_API_KEY='<runtime-key-from-openai-platform>'
-corepack pnpm demo:chatgpt:tunnel -- --tunnel-id tunnel_...
+./actionproxy chatgpt
 ```
+
+The concierge guides tunnel access, tunnel-ID entry, and `tunnel-client`
+installation/recheck; `--tunnel-id` remains available for automation. A missing
+client offers an explicit `I` choice, and the same reviewed local operation is
+available as `./actionproxy tunnel-client install|status|remove [--json]`.
+Installation is limited to the checksum-pinned official OpenAI `v0.0.10` asset
+at `.actionproxy/bin/tunnel-client`, without `sudo`, a `PATH` change, or a
+Gatekeeper change. The upstream binary is ad-hoc signed rather than Developer
+ID-signed/notarized; it is optional, downloaded after checkout, and outside the
+repository SBOM. Receipt-bound removal refuses active, modified, and manually
+placed clients, while `stop` and `reset` retain it. This bootstrap convenience
+does not change the MCP governance or credential-custody boundary.
+
+The launcher requests the runtime key with hidden terminal input and gives
+`tunnel-client` a private temporary-file reference. The compatibility command
+`corepack pnpm demo:chatgpt:tunnel -- --tunnel-id tunnel_...` delegates to the
+same implementation.
 
 The tunnel profile never points directly at the downstream MCP server. See
 `examples/chatgpt-tunnel/README.md`. This is a local mock demonstration; use the

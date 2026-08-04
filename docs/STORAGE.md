@@ -27,7 +27,8 @@ ACTIONPROXY_STORAGE=memory
 ACTIONPROXY_APPROVER_DIRECTORY_PATH=.actionproxy/approver-directory.local.json
 ```
 
-This is the default. Tool-call and approval state is in memory. Audit events continue to append to `.actionproxy/audit.jsonl`.
+This is the source-development default. Tool-call and approval state is in
+memory. Audit events continue to append to `.actionproxy/audit.jsonl`.
 
 The approver directory is the exception: ActionProxy persists approver users and groups to `ACTIONPROXY_APPROVER_DIRECTORY_PATH` even in memory mode. The default path is `.actionproxy/approver-directory.local.json`. The file is written with atomic replacement and restrictive local file permissions where the filesystem supports them, so local approver identities, Slack IDs, Telegram IDs, and notification routing do not disappear on every dev-server restart.
 
@@ -62,7 +63,11 @@ The Community runtime Docker image installs `sqlite3` and packages the complete
 canonical `apps/server/src/storage/migrations/` directory. The Docker smoke
 creates SQLite state on a named volume, restarts the container against that same
 volume, and verifies approval, audit, MCP, and content-exposure persistence.
-The default Docker/Compose demo remains memory mode.
+The Docker image and Compose first-run path default to SQLite on the named
+`actionproxy_data` volume. `./actionproxy stop` retains that volume;
+`./actionproxy reset` removes only the recorded concierge-owned project and
+volume after the exact destructive confirmation. Pass
+`ACTIONPROXY_STORAGE=memory` only when intentionally testing ephemeral mode.
 
 On startup, ActionProxy verifies the ordered migration ledger and applies only pending migrations. SQLite serializes startup migration work with a database-adjacent process lock plus `BEGIN IMMEDIATE`. A dead lock owner is reclaimed; a live owner is allowed a bounded wait. Normal restart startup reads the ledger in one SQLite process instead of repeating table-by-table schema inspection.
 
@@ -150,6 +155,9 @@ Durable modes preserve pending approvals, approver directory records, and audit 
 
 Policy-detector observations use the same storage mode as tool calls and approvals. Detector rows store tool names, source metadata, schema hashes, coverage, status, and suggestions; they do not store raw tool-call inputs.
 
-Audit events written by the server include `eventHash` and `previousEventHash`. Existing pre-enterprise audit rows without those fields remain readable, but hash-chain verification only passes for events written through the chained audit writer.
+Audit events written by the server include `eventHash` and `previousEventHash`.
+Legacy rows created before hash chaining do not have those fields and remain
+readable, but hash-chain verification passes only for events written through
+the chained audit writer.
 
 Audit payloads are stored in full in JSONL, SQLite, and Postgres. Redaction applied by API/UI read routes is not storage redaction and does not alter existing rows, files, volumes, or backups.

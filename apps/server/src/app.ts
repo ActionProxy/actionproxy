@@ -30,6 +30,7 @@ import { registerApproverRoutes } from './routes/approvers';
 import { registerDashboardRoutes } from './routes/dashboard';
 import { registerWebAppRoutes } from './routes/web';
 import { registerMcpRoutes } from './routes/mcp';
+import { registerQuickstartStatusRoutes } from './routes/quickstart-status';
 import { IntegrationConfigService } from './integrations/integration-config';
 import { ApprovalNotificationFanout } from './integrations/approval-notifications';
 import { EmailService } from './integrations/email/email-service';
@@ -46,6 +47,7 @@ import { redactionOptionsFromPolicy } from './security/redaction';
 import { createTelemetryRecorder } from './telemetry/telemetry';
 import { createExecutionAuthorizationAuthority } from './contracts/execution-authorization';
 import type { ActionProxyAppContext } from './app-context';
+import { QuickstartStatusService } from './services/quickstart-status';
 
 export interface BuildAppOverrides {
   /** Test/conformance seam; production uses the built-in deterministic YAML provider. */
@@ -170,8 +172,23 @@ async function buildComposedApp<Modules>(
     : undefined;
   registerSecurityHooks(app, resolvedConfig, authService);
   await registerHealthRoutes(app);
+  if (resolvedConfig.quickstart.enabled) {
+    const quickstartStatus = new QuickstartStatusService({
+      sessionId: resolvedConfig.quickstart.sessionId!,
+      updateToken: resolvedConfig.quickstart.updateToken!,
+    });
+    await registerQuickstartStatusRoutes(app, quickstartStatus);
+  }
   await registerAuthRoutes(app, authService, auditStore);
-  await registerToolCallRoutes(app, actionProxy, redaction, { environment: resolvedConfig.deployment?.mode ?? 'local' });
+  await registerToolCallRoutes(app, actionProxy, redaction, {
+    environment: resolvedConfig.deployment?.mode ?? 'local',
+    quickstart: resolvedConfig.quickstart.enabled
+      ? {
+          originToken: resolvedConfig.quickstart.originToken!,
+          sessionId: resolvedConfig.quickstart.sessionId!,
+        }
+      : undefined,
+  });
   await registerApprovalRoutes(app, actionProxy, redaction);
   await registerAuditRoutes(app, auditStore, redaction, telemetry);
   await registerAuthorizedActionRoutes(app, store);

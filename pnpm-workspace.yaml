@@ -4,7 +4,12 @@ packages:
   - "examples/*"
 
 overrides:
+  "brace-expansion@1.1.16": "1.1.18"
   "bundle-require>esbuild": "^0.28.1"
+  "fast-uri": "3.1.5"
+  "fastify>find-my-way": "9.7.0"
+  "ip-address": "10.3.1"
+  "postcss": "8.5.23"
   "tsup>esbuild": "^0.28.1"
 
 # pnpm 11 blocks dependency lifecycle scripts unless explicitly reviewed.

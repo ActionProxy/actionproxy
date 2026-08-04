@@ -11,10 +11,13 @@ README explicitly says otherwise.
 | `framework-integrations/` | Framework-neutral external-runner patterns |
 | `mcp-demo/` | Three-tool downstream MCP wrapper lifecycle |
 | `mcp-hosts/` | Local stdio configuration for MCP hosts |
+| `google-workspace-mcp-demo/` | Opt-in real Gmail search and approval-gated draft through a third-party downstream MCP server |
 | `chatgpt-tunnel/` | ChatGPT Secure MCP Tunnel to the local Docker demo |
 | `chatgpt-app/` | Automated protocol smoke for experimental standard `/mcp` |
 | `customer-support/` | Narrative approval-gateway walkthrough |
 
-Start with the root [five-minute demo](../README.md#five-minute-demo). Real
-business-tool credentials should stay with an existing MCP server, internal
-API, or external runner rather than these examples.
+Start with the root [guided first run](../README.md#first-run). The Google
+Workspace reference is the only example here that intentionally reaches a real
+business tool. Its credentials remain with the operator-owned downstream MCP
+process; every other example uses deterministic mocks unless its README says
+otherwise.

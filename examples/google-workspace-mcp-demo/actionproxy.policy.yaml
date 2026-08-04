@@ -1,0 +1,32 @@
+version: 1
+default:
+  approval: required
+  risk: unknown
+  reason: Unknown Google Workspace MCP tools require approval by default.
+tools:
+  search_gmail_messages:
+    approval: never
+    risk: read_only
+    reason: Gmail search is read-only for the local Google Workspace MCP demo.
+  get_gmail_message_content:
+    approval: never
+    risk: read_only
+    reason: Reading Gmail message content is allowed for the local Google Workspace
+      MCP demo.
+  get_gmail_messages_content_batch:
+    approval: never
+    risk: read_only
+    reason: Reading Gmail message batches is allowed for the local Google Workspace
+      MCP demo.
+  draft_gmail_message:
+    approval: required
+    risk: external_communication
+    reason: Creating Gmail drafts requires human approval.
+  send_gmail_message:
+    approval: deny
+    risk: external_communication
+    reason: Sending live Gmail messages is blocked in the first real-Gmail demo.
+  gmail.send_email:
+    approval: required
+    risk: external_communication
+    reason: External communication should require human approval.

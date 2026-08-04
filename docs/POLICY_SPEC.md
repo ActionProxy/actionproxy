@@ -3,6 +3,27 @@
 ActionProxy policy is deterministic YAML. The loaded file is the enforcement
 source of truth for every proposed tool call.
 
+The versioned machine-readable data model is
+[`schemas/actionproxy.policy.v1.schema.json`](../schemas/actionproxy.policy.v1.schema.json).
+It uses JSON Schema draft 2020-12 and validates the JSON data model represented
+by YAML. Conventional editor associations for `actionproxy.policy.yaml`,
+`actionproxy.policy.yml`, `*.policy.yaml`, and `*.policy.yml` are in
+[`schemas/editor-associations.json`](../schemas/editor-associations.json).
+
+The schema is deterministic generated output. Change the runtime parser and
+generator together, then run:
+
+```bash
+node scripts/generate-config-schemas.mjs
+node scripts/generate-config-schemas.mjs --check
+node --test scripts/generate-config-schemas.test.mjs
+```
+
+The v1 parser retains compatibility for some unknown legacy fields, and JSON
+Schema cannot express every trusted-context or cross-field enforcement rule.
+Passing editor validation is useful authoring feedback; it is not a substitute
+for loading the policy through ActionProxy and proving the lifecycle.
+
 ## Minimal policy
 
 ```yaml
@@ -36,7 +57,8 @@ tools:
 ```
 
 `default` is mandatory. A rule must contain `approval`; every other field is
-optional. Unknown fields in the structured rule extensions fail parsing.
+optional. Unknown top-level, rule, and legacy extension fields are ignored in
+v1 for compatibility; `resultSource` and `influence` reject unknown fields.
 
 ## Decisions
 
