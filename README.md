@@ -43,7 +43,7 @@ From a fresh source download, start with one command:
 ./actionproxy
 ```
 
-The guided path is release-quality on macOS and requires Node.js 22–24 and
+The guided path is supported on macOS and requires Node.js 22–24 and
 Docker Desktop. Node.js 24 is recommended. It checks prerequisites before
 changing anything, builds the Community container, lets Docker assign a free
 loopback port, verifies the exact mock-tool inventory, and opens **Quickstart**.

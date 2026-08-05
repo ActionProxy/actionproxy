@@ -2993,7 +2993,7 @@ async function ensurePlatform(runtime, retry) {
   }
   if (runtime.platform === "linux") {
     runtime.stdout.write(
-      `! Linux ${architecture} — best-effort; release-quality First Run support targets macOS\n`,
+      `! Linux ${architecture} — best-effort; the supported v0.1 First Run path targets macOS\n`,
     );
     return;
   }
@@ -6332,7 +6332,7 @@ function doctorRemedy(code, links) {
         fix: "Use Node 22, 23, or 24; Node 24 is recommended.",
       },
       unsupported_os: {
-        cause: "This operating system is outside release-quality Mac support.",
+        cause: "This operating system is outside the supported v0.1 Mac path.",
         fix: "Use macOS, or continue on Linux knowing support is best-effort.",
       },
     }[code] ?? {

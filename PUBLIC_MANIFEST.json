@@ -98,7 +98,7 @@
     {
       "mode": "100644",
       "path": "README.md",
-      "sha256": "be606b32ce1c15f1009027c435de29304e02657451f281da07a6b7f29b20213f"
+      "sha256": "e3dbd1676a431f0bec04d1ec13eb0972b696465710dd50610798f3fd3706a5cc"
     },
     {
       "mode": "100644",
@@ -978,7 +978,7 @@
     {
       "mode": "100644",
       "path": "apps/web/tests/e2e/community.spec.ts-snapshots/first-run-tunnel-ready-desktop-darwin.png",
-      "sha256": "c36db341cba0d9bb74127e3a4cde0b6c3635d264c5383d528a5749413d632dba"
+      "sha256": "349fca377021558db2872a81514dceefdb2807decac8adecc0d07d589808f6e5"
     },
     {
       "mode": "100644",
@@ -1593,7 +1593,7 @@
     {
       "mode": "100644",
       "path": "scripts/first-run.mjs",
-      "sha256": "c7286d0a1c96d268df153ef4c0d053da93afa9f92b4621f3ae6fa72480edcf9f"
+      "sha256": "7e02e16fd7d0ea62c750c85dca3d3631180581588f879b1fa7a4ccc9731344e0"
     },
     {
       "mode": "100644",
