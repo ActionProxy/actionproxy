@@ -13,7 +13,7 @@ import {
 import { requireScope } from '../security/scopes';
 import { authContext, headerValue, mapKnownError } from './route-utils';
 import { assertNoDuplicateJsonKeys, DuplicateJsonKeyError } from '../contracts/action-request';
-import { sha256Hex } from '../security/crypto';
+import { safeEqual, sha256Hex } from '../security/crypto';
 import { deriveInfluenceScopeId, parseMcpWrapperSessionId } from '../security/influence-scope';
 import { isModelVisibleResultWithheld, WITHHELD_MODEL_RESULT_MESSAGE } from '../security/result-visibility';
 
@@ -90,7 +90,10 @@ export async function registerToolCallRoutes(
   app: FastifyInstance,
   actionProxy: ActionProxyService,
   redaction: RedactionOptions = {},
-  options: { environment?: 'local' | 'self_hosted' } = {},
+  options: {
+    environment?: 'local' | 'self_hosted';
+    quickstart?: { originToken: string; sessionId: string };
+  } = {},
 ): Promise<void> {
   app.get('/v1/tool-calls', async (request) => {
     const auth = requireScope(authContext(request), 'tool_call:read');
@@ -114,15 +117,18 @@ export async function registerToolCallRoutes(
     }
 
     try {
-      const result = await actionProxy.submitToolCall(parsed.data, {
-        auth,
-        idempotencyKey: headerValue(request.headers['idempotency-key']),
-        ingress: {
-          environment: options.environment ?? 'local',
-          protocol: 'actionproxy_http',
-          source: 'http',
+      const result = await actionProxy.submitToolCall(
+        stripReservedQuickstartOrigin(parsed.data),
+        {
+          auth,
+          idempotencyKey: headerValue(request.headers['idempotency-key']),
+          ingress: {
+            environment: options.environment ?? 'local',
+            protocol: 'actionproxy_http',
+            source: 'http',
+          },
         },
-      });
+      );
       return toToolCallResponse(result, redaction);
     } catch (error) {
       return mapKnownError(reply, error);
@@ -165,8 +171,13 @@ export async function registerToolCallRoutes(
       workspaceId: auth.workspaceId,
     });
     const idempotencyKey = `mcp-stdio-v1:${sha256Hex(`${influenceScopeId}\u0000${transportRequestId}`)}`;
+    const verifiedRequest = withVerifiedMcpQuickstartOrigin(
+      parsed.data,
+      request,
+      options.quickstart,
+    );
     const adaptedRequest = {
-      ...parsed.data,
+      ...verifiedRequest,
       action: {
         context: parsed.data.action?.context,
         executionMode: 'external_grant' as const,
@@ -177,7 +188,7 @@ export async function registerToolCallRoutes(
       },
       agentId: `mcp:${auth.clientId ?? auth.principalId}`,
       metadata: {
-        ...(parsed.data.metadata ?? {}),
+        ...(verifiedRequest.metadata ?? {}),
         actionproxyExecution: 'external',
         actionproxyMcp: { adapterId, transport: 'stdio' },
       },
@@ -319,6 +330,43 @@ export async function registerToolCallRoutes(
       return mapKnownError(reply, error);
     }
   });
+}
+
+const quickstartOriginKey = 'actionproxyQuickstartOrigin';
+const quickstartSessionKey = 'actionproxyQuickstartSessionId';
+
+function stripReservedQuickstartOrigin(
+  input: z.infer<typeof submitToolCallSchema>,
+): z.infer<typeof submitToolCallSchema> {
+  if (!input.metadata) return input;
+  const metadata = { ...(input.metadata ?? {}) };
+  delete metadata[quickstartOriginKey];
+  delete metadata[quickstartSessionKey];
+  return { ...input, metadata };
+}
+
+function withVerifiedMcpQuickstartOrigin(
+  input: z.infer<typeof submitToolCallSchema>,
+  request: { headers: Record<string, unknown> },
+  quickstart: { originToken: string; sessionId: string } | undefined,
+): z.infer<typeof submitToolCallSchema> {
+  const sanitized = stripReservedQuickstartOrigin(input);
+  const metadata = { ...(sanitized.metadata ?? {}) };
+  const suppliedToken = headerValue(
+    request.headers['x-actionproxy-quickstart-origin-token'] as
+      | string
+      | string[]
+      | undefined,
+  );
+  if (
+    quickstart &&
+    suppliedToken &&
+    safeEqual(sha256Hex(suppliedToken), sha256Hex(quickstart.originToken))
+  ) {
+    metadata[quickstartOriginKey] = 'secure_mcp_tunnel';
+    metadata[quickstartSessionKey] = quickstart.sessionId;
+  }
+  return { ...sanitized, metadata };
 }
 
 export async function rejectAmbiguousJson(request: { headers: Record<string, unknown> }, _reply: unknown, payload: AsyncIterable<unknown>) {

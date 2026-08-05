@@ -52,6 +52,7 @@ export interface HttpActionProxyGatewayOptions {
   bearerToken?: string;
   maxResponseBytes?: number;
   requestTimeoutMs?: number;
+  quickstartOriginToken?: string;
   sessionId?: string;
 }
 
@@ -81,6 +82,11 @@ export interface ActionProxyToolCall {
 }
 
 export interface ActionProxyGateway {
+  cancelApproval(
+    approvalId: string,
+    input: { cancelledBy: string; reason: string },
+    options?: ActionProxyGatewayRequestOptions,
+  ): Promise<unknown>;
   consumeExecutionGrant(
     grantId: string,
     input: {
@@ -156,6 +162,18 @@ export class HttpActionProxyGateway implements ActionProxyGateway {
     });
   }
 
+  async cancelApproval(
+    approvalId: string,
+    input: Parameters<ActionProxyGateway['cancelApproval']>[1],
+    options: ActionProxyGatewayRequestOptions = {},
+  ): Promise<unknown> {
+    return this.request(`/v1/approvals/${encodeURIComponent(approvalId)}/cancel`, {
+      body: input,
+      method: 'POST',
+      signal: options.signal,
+    });
+  }
+
   async consumeExecutionGrant(
     grantId: string,
     input: Parameters<ActionProxyGateway['consumeExecutionGrant']>[1],
@@ -194,7 +212,7 @@ export class HttpActionProxyGateway implements ActionProxyGateway {
       if (toolCall.status !== 'pending_approval' && toolCall.status !== 'submitted') return toolCall;
 
       if (Date.now() - startedAt >= options.timeoutMs) {
-        throw new Error(`Timed out waiting for ActionProxy approval for tool call ${id}.`);
+        throw new ApprovalWaitTimeoutError(`Timed out waiting for ActionProxy approval for tool call ${id}.`);
       }
 
       await delay(options.intervalMs, options.signal);
@@ -229,6 +247,12 @@ export class HttpActionProxyGateway implements ActionProxyGateway {
           'content-type': 'application/json',
           ...(this.options.bearerToken ? { authorization: `Bearer ${this.options.bearerToken}` } : {}),
           ...(init.idempotencyKey ? { 'idempotency-key': init.idempotencyKey } : {}),
+          ...(this.options.quickstartOriginToken
+            ? {
+                'X-ActionProxy-Quickstart-Origin-Token':
+                  this.options.quickstartOriginToken,
+              }
+            : {}),
           'X-ActionProxy-MCP-Session-Id': this.sessionId,
         },
         method: init.method ?? 'GET',
@@ -345,14 +369,35 @@ export class ActionProxyMcpWrapper {
       },
       { idempotencyKey, signal: options.signal },
     );
-    const finalToolCall =
-      submitted.status === 'pending_approval'
-        ? await this.actionProxy.waitForToolCall(submitted.id, {
-            intervalMs: this.config.actionproxy.approvalPollIntervalMs ?? 1000,
-            signal: options.signal,
-            timeoutMs: this.config.actionproxy.approvalTimeoutMs ?? 120_000,
-          })
-        : submitted.toolCall;
+    let finalToolCall = submitted.toolCall;
+    if (submitted.status === 'pending_approval') {
+      try {
+        finalToolCall = await this.actionProxy.waitForToolCall(submitted.id, {
+          intervalMs: this.config.actionproxy.approvalPollIntervalMs ?? 1000,
+          signal: options.signal,
+          timeoutMs: this.config.actionproxy.approvalTimeoutMs ?? 120_000,
+        });
+      } catch (error) {
+        if (
+          this.config.actionproxy.cancelPendingOnAbort === true &&
+          submitted.approval?.id &&
+          isAbandonedApprovalWait(error, options.signal)
+        ) {
+          try {
+            await this.actionProxy.cancelApproval(submitted.approval.id, {
+              cancelledBy: this.config.actionproxy.requestedBy ?? 'actionproxy-mcp-wrapper',
+              reason: options.signal?.aborted
+                ? 'Upstream MCP request was cancelled before approval completed.'
+                : 'Upstream MCP approval wait expired before approval completed.',
+            });
+          } catch {
+            // A concurrent human decision may have won the race. The aborted
+            // request still must not continue to downstream execution.
+          }
+        }
+        throw error;
+      }
+    }
 
     if (finalToolCall.status !== 'authorized' && finalToolCall.status !== 'executed') {
       return errorResult(formatDeniedResult(finalToolCall));
@@ -459,11 +504,18 @@ export async function createWrapperFromConfig(
 ): Promise<ActionProxyMcpWrapper> {
   const environment = options.env ?? process.env;
   const bearerToken = resolveBearerToken(config.actionproxy.bearerTokenEnv, environment);
+  const quickstartOriginToken = resolveOptionalEnvironmentSecret(
+    config.actionproxy.quickstartOriginTokenEnv,
+    environment,
+  );
   const downstreams: Record<string, DownstreamMcpClient> = {};
   try {
     for (const [name, serverConfig] of Object.entries(config.servers)) {
       downstreams[name] = await StdioMcpClient.start(serverConfig, {
-        forbiddenEnvironmentVariables: config.actionproxy.bearerTokenEnv ? [config.actionproxy.bearerTokenEnv] : [],
+        forbiddenEnvironmentVariables: [
+          config.actionproxy.bearerTokenEnv,
+          config.actionproxy.quickstartOriginTokenEnv,
+        ].filter((name): name is string => Boolean(name)),
         parentEnvironment: environment,
       });
     }
@@ -476,6 +528,7 @@ export async function createWrapperFromConfig(
     downstreams,
     new HttpActionProxyGateway(config.actionproxy.baseUrl, options.fetchFn ?? fetch, {
       bearerToken,
+      quickstartOriginToken,
       requestTimeoutMs: config.actionproxy.requestTimeoutMs,
     }),
   );
@@ -968,6 +1021,13 @@ class ActionProxyRequestTimeoutError extends Error {
   }
 }
 
+export class ApprovalWaitTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ApprovalWaitTimeoutError';
+  }
+}
+
 class McpFrameLimitError extends Error {
   constructor(message: string) {
     super(message);
@@ -1109,6 +1169,25 @@ function resolveBearerToken(
   return token;
 }
 
+function resolveOptionalEnvironmentSecret(
+  environmentVariable: string | undefined,
+  environment: Record<string, string | undefined>,
+): string | undefined {
+  if (!environmentVariable) return undefined;
+  const value = environment[environmentVariable];
+  if (value === undefined || value === '') return undefined;
+  if (
+    value.length > 8192 ||
+    value.trim() !== value ||
+    /\p{Cc}/u.test(value)
+  ) {
+    throw new Error(
+      `Quickstart origin environment variable ${environmentVariable} is missing or invalid.`,
+    );
+  }
+  return value;
+}
+
 function leastPrivilegeChildEnvironment(
   parent: Record<string, string | undefined>,
   explicit: Record<string, string> | undefined,
@@ -1207,6 +1286,16 @@ function formatExit(code: number | null, signal: NodeJS.Signals | null): string 
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isAbandonedApprovalWait(error: unknown, signal: AbortSignal | undefined): boolean {
+  return Boolean(
+    signal?.aborted ||
+      error instanceof ApprovalWaitTimeoutError ||
+      error instanceof McpRequestCancelledError ||
+      (error instanceof Error &&
+        (error.name === 'ApprovalWaitTimeoutError' || error.name === 'McpRequestCancelledError')),
+  );
 }
 
 function canonicalJsonStringify(value: unknown): string {

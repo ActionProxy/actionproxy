@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import { validateDependencyAudit } from './check-dependency-audit.mjs';
-import { validateRuntimeLicenses } from './check-runtime-licenses.mjs';
+import {
+  buildRuntimeLicenseReport,
+  validateRuntimeLicenses,
+} from './check-runtime-licenses.mjs';
 import { findMutableActionReferences } from './check-workflow-actions.mjs';
 import { validateSbom } from './validate-sbom.mjs';
 
@@ -69,6 +74,72 @@ test('runtime license validation rejects unreviewed and empty reports', () => {
     /Unreviewed runtime licenses: GPL/,
   );
   assert.throws(() => validateRuntimeLicenses({}), /inventory is empty/);
+});
+
+test('runtime license inventory walks only installed production dependency closures', (t) => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'actionproxy-runtime-licenses-'));
+  t.after(() => rmSync(fixtureRoot, { force: true, recursive: true }));
+
+  const writeManifest = (relativePath, manifest) => {
+    const directory = join(fixtureRoot, relativePath);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'package.json'), `${JSON.stringify(manifest)}\n`);
+  };
+  writeManifest('apps/server', {
+    dependencies: { alpha: '1.0.0' },
+    devDependencies: { excluded: '1.0.0' },
+    name: '@actionproxy/server',
+  });
+  writeManifest('packages/mcp-wrapper', {
+    dependencies: {},
+    name: '@actionproxy/mcp-wrapper',
+  });
+  writeManifest('apps/server/node_modules/alpha', {
+    dependencies: { beta: '2.0.0' },
+    homepage: 'https://example.test/alpha',
+    license: 'MIT',
+    name: 'alpha',
+    optionalDependencies: { unavailable: '1.0.0' },
+    version: '1.0.0',
+  });
+  writeManifest('apps/server/node_modules/beta', {
+    license: 'Apache-2.0',
+    name: 'beta',
+    version: '2.0.0',
+  });
+  writeManifest('apps/server/node_modules/excluded', {
+    license: 'GPL-3.0-only',
+    name: 'excluded',
+    version: '1.0.0',
+  });
+
+  assert.deepEqual(validateRuntimeLicenses(buildRuntimeLicenseReport(fixtureRoot)), [
+    {
+      homepage: 'https://example.test/alpha',
+      license: 'MIT',
+      name: 'alpha',
+      version: '1.0.0',
+    },
+    { license: 'Apache-2.0', name: 'beta', version: '2.0.0' },
+  ]);
+});
+
+test('runtime license inventory fails closed when a required dependency is absent', (t) => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'actionproxy-runtime-licenses-missing-'));
+  t.after(() => rmSync(fixtureRoot, { force: true, recursive: true }));
+  for (const [relativePath, manifest] of [
+    ['apps/server', { dependencies: { missing: '1.0.0' }, name: '@actionproxy/server' }],
+    ['packages/mcp-wrapper', { dependencies: {}, name: '@actionproxy/mcp-wrapper' }],
+  ]) {
+    const directory = join(fixtureRoot, relativePath);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'package.json'), `${JSON.stringify(manifest)}\n`);
+  }
+
+  assert.throws(
+    () => buildRuntimeLicenseReport(fixtureRoot),
+    /Runtime dependency missing required by @actionproxy\/server is not installed/u,
+  );
 });
 
 test('SBOM validation accepts a populated CycloneDX document', () => {

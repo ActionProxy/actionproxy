@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://actionproxy.com/schemas/actionproxy.policy.v1.schema.json",
+  "title": "ActionProxy policy v1",
+  "description": "Deterministic policy for ActionProxy tool-call allow, approval, and denial decisions. YAML files are validated against the equivalent JSON data model.",
+  "type": "object",
+  "required": [
+    "version",
+    "default"
+  ],
+  "properties": {
+    "version": {
+      "description": "Operator-managed policy version included in authorization evidence.",
+      "type": "number",
+      "examples": [
+        1
+      ]
+    },
+    "default": {
+      "$ref": "#/$defs/policyRule"
+    },
+    "tools": {
+      "description": "Exact tool names or terminal namespace wildcards such as payments.*.",
+      "type": "object",
+      "default": {},
+      "additionalProperties": {
+        "$ref": "#/$defs/policyRule"
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$comment": "The v1 runtime strips unknown top-level and policy-rule fields for legacy compatibility. resultSource and influence are intentionally strict.",
+  "$defs": {
+    "approvalMode": {
+      "type": "string",
+      "enum": [
+        "never",
+        "required",
+        "deny"
+      ],
+      "description": "never allows, required queues approval, and deny blocks before dispatch."
+    },
+    "approvers": {
+      "type": "object",
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "users": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "requiredApprovals": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "separationOfDuties": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "externalExecution": {
+      "type": "object",
+      "properties": {
+        "grantTtlSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "requireGrantConsumption": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "influence": {
+      "type": "object",
+      "required": [
+        "allowFrom",
+        "otherwise"
+      ],
+      "properties": {
+        "allowFrom": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "none",
+              "organization_managed",
+              "verified_publisher",
+              "authenticated_external",
+              "public_untrusted",
+              "unknown"
+            ]
+          }
+        },
+        "otherwise": {
+          "type": "string",
+          "enum": [
+            "required",
+            "deny"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "notification": {
+      "type": "object",
+      "properties": {
+        "channels": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "redaction": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "replacement": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "resultSource": {
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "The reviewed tool result cannot release external content to the model."
+        },
+        {
+          "$ref": "#/$defs/resultSourceDescriptor"
+        }
+      ]
+    },
+    "resultSourceDescriptor": {
+      "type": "object",
+      "required": [
+        "integrity"
+      ],
+      "properties": {
+        "integrity": {
+          "type": "string",
+          "enum": [
+            "organization_managed",
+            "verified_publisher",
+            "authenticated_external",
+            "public_untrusted",
+            "unknown"
+          ]
+        },
+        "sourceId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "policyRule": {
+      "type": "object",
+      "required": [
+        "approval"
+      ],
+      "properties": {
+        "approval": {
+          "$ref": "#/$defs/approvalMode"
+        },
+        "approvers": {
+          "$ref": "#/$defs/approvers"
+        },
+        "conditions": {
+          "type": "object",
+          "description": "Typed condition values evaluated against trusted adapter-derived context.",
+          "additionalProperties": true
+        },
+        "externalExecution": {
+          "$ref": "#/$defs/externalExecution"
+        },
+        "influence": {
+          "$ref": "#/$defs/influence"
+        },
+        "notify": {
+          "$ref": "#/$defs/notification"
+        },
+        "redaction": {
+          "$ref": "#/$defs/redaction"
+        },
+        "resultSource": {
+          "$ref": "#/$defs/resultSource"
+        },
+        "risk": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "risk"
+            ],
+            "properties": {
+              "risk": {
+                "const": "open_world_read"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "resultSource"
+            ],
+            "properties": {
+              "resultSource": {
+                "type": "object",
+                "required": [
+                  "integrity"
+                ],
+                "properties": {
+                  "integrity": {
+                    "const": "public_untrusted"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "version": 1,
+      "default": {
+        "approval": "required",
+        "risk": "unknown",
+        "reason": "Unknown tools require approval by default."
+      },
+      "tools": {
+        "docs.search": {
+          "approval": "never",
+          "risk": "read_only",
+          "reason": "Search is read-only."
+        },
+        "gmail.send_email": {
+          "approval": "required",
+          "risk": "external_communication",
+          "reason": "External email requires approval."
+        },
+        "dangerous.delete_customer": {
+          "approval": "deny",
+          "risk": "destructive",
+          "reason": "Customer deletion is blocked."
+        }
+      }
+    }
+  ]
+}

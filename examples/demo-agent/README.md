@@ -4,19 +4,19 @@ This is a deterministic local customer-support demo agent. It does not call an L
 
 ## Run
 
-Start the ActionProxy server:
+Terminal 1 — start the ActionProxy gateway:
 
 ```bash
-corepack pnpm dev
+corepack pnpm dev:server
 ```
 
-Start the dashboard in another terminal:
+Terminal 2 — start the dashboard:
 
 ```bash
 corepack pnpm dev:web
 ```
 
-Run the demo agent:
+Terminal 3 — run the demo agent:
 
 ```bash
 node examples/demo-agent/demo-agent.mjs

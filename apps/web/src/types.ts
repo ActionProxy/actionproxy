@@ -101,6 +101,20 @@ export interface ApprovalRecord {
 }
 
 export interface ApprovalReview {
+  actionEnvelope?: {
+    actor: { displayName?: string; email?: string; id: string; type: string };
+    agent: { id: string; name?: string };
+    context: { reason: string; risk?: string; sideEffects?: string };
+    envelopeHash: string;
+    executionMode: "external_grant" | "local_mock";
+    input: JsonObject;
+    inputHash: string;
+    operation: { kind?: string; name: string };
+    protocol: string;
+    source: { id?: string; name?: string; type: string };
+    toolName: string;
+    version: "actionproxy.action.v1";
+  };
   approval: ApprovalRecord;
   contentInfluence?: ContentInfluenceEvidence;
   freshness: {
@@ -120,6 +134,7 @@ export interface ApprovalReview {
     versionHash?: string;
     versionId?: string;
   };
+  proposerRationaleTrust?: "untrusted";
   reviewHash: string;
   toolCall: ToolCallRecord;
 }
@@ -319,6 +334,59 @@ export interface PolicySimulationResponse {
 export interface HealthResponse {
   ok: boolean;
   service: string;
+}
+
+export type QuickstartJourney = "local" | "chatgpt";
+export type QuickstartSetupStage =
+  | "gateway_starting"
+  | "gateway_ready"
+  | "tunnel_checking"
+  | "tunnel_ready"
+  | "tunnel_stopped"
+  | "failed";
+export type QuickstartCheckState =
+  | "pending"
+  | "running"
+  | "pass"
+  | "action_required"
+  | "fail";
+
+export interface QuickstartSetupDetails {
+  composeVersion: string;
+  dockerVersion: string;
+  nodeVersion: string;
+  port: number;
+  projectName: string;
+  runtimeKeyExcludedFromDocker?: boolean;
+}
+
+export interface QuickstartStatus {
+  approvalTimeoutMs: number;
+  checks: Array<{
+    id: string;
+    remediationCode?: string;
+    state: QuickstartCheckState;
+  }>;
+  journey: QuickstartJourney;
+  schemaVersion: string;
+  sessionId: string;
+  setupDetails?: QuickstartSetupDetails;
+  setupStage: QuickstartSetupStage;
+  startedAt: string;
+  tunnelUiUrl?: string;
+  updatedAt: string;
+}
+
+export interface AuditVerification {
+  checked: number;
+  errors: Array<{
+    eventId: string;
+    index: number;
+    reason: string;
+  }>;
+  firstEventHash?: string;
+  lastEventHash?: string;
+  valid: boolean;
 }
 
 export type IntegrationStatus = "disabled" | "partial" | "ready";

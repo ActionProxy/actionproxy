@@ -16,7 +16,13 @@ import {
 
 interface AgentDemoPanelProps {
   data: DashboardData;
+  guided?: boolean;
+  loading?: boolean;
+  onProofStateChange?: (ready: boolean) => void;
   onRefresh: () => Promise<void> | void;
+  returnTo?: string;
+  sessionId?: string;
+  sessionStartedAt?: string;
 }
 
 type StepState =
@@ -27,6 +33,9 @@ type StepState =
   | "needs_approval"
   | "rejected"
   | "running";
+
+const quickstartSessionIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 interface AgentStep {
   expected: string;
@@ -46,17 +55,7 @@ interface StepRun {
   toolCallId?: string;
 }
 
-const demoRunsStorageKey = "actionproxy.agentDemoRuns.v1";
-const demoAutoContinueStorageKey = "actionproxy.agentDemoAutoContinue.v1";
-const stepStates: StepState[] = [
-  "blocked",
-  "complete",
-  "error",
-  "idle",
-  "needs_approval",
-  "rejected",
-  "running",
-];
+const demoRunsStoragePrefix = "actionproxy.agentDemoRuns.v1";
 
 const agentSteps: AgentStep[] = [
   {
@@ -114,50 +113,115 @@ function redactSecretLikeValues(value: unknown): unknown {
   );
 }
 
-export function AgentDemoPanel({ data, onRefresh }: AgentDemoPanelProps) {
-  const [runs, setRunsState] =
-    useState<Record<string, StepRun>>(loadStoredRuns);
-  const [autoContinueFullDemo, setAutoContinueFullDemoState] = useState(
-    loadStoredAutoContinue,
+export function AgentDemoPanel({
+  data,
+  guided = false,
+  loading = false,
+  onProofStateChange,
+  onRefresh,
+  returnTo = "#/demo?journey=local",
+  sessionId,
+  sessionStartedAt,
+}: AgentDemoPanelProps) {
+  const storageKey = demoRunsStorageKey(sessionId);
+  const proofStartedAt = sessionId ? (sessionStartedAt ?? "") : undefined;
+  const [runs, setRunsState] = useState<Record<string, StepRun>>(() =>
+    loadStoredRuns(storageKey),
   );
+  const [autoContinueFullDemo, setAutoContinueFullDemoState] = useState(guided);
   const [runningAll, setRunningAll] = useState(false);
+  const hasUnresolvedStoredRun = Object.values(runs).some(
+    (run) =>
+      Boolean(run.toolCallId) &&
+      !findLiveToolCall(data.toolCalls, run.toolCallId, proofStartedAt),
+  );
+
+  useEffect(() => {
+    clearLegacyAutoContinueStorage();
+    clearOtherDemoRunStorage(storageKey);
+  }, [storageKey]);
 
   useEffect(() => {
     setRunsState((current) => {
-      const synced = syncRunsWithLiveToolCalls(current, data.toolCalls);
+      const synced = syncRunsWithLiveToolCalls(
+        current,
+        data.toolCalls,
+        proofStartedAt,
+      );
       if (synced === current) return current;
-      saveStoredRuns(synced);
+      saveStoredRuns(storageKey, synced);
       return synced;
     });
-  }, [data.toolCalls]);
+  }, [data.toolCalls, proofStartedAt, storageKey]);
 
   const nextStep = useMemo(
-    () => findNextRunnableStep(runs, data),
-    [data, runs],
+    () => findNextRunnableStep(runs, data, proofStartedAt),
+    [data, proofStartedAt, runs],
   );
   const lifecycleComplete = useMemo(() => {
-    const searchState = resolveStepState(agentSteps[0]!, runs, data);
-    const emailState = resolveStepState(agentSteps[1]!, runs, data);
-    const deleteState = resolveStepState(agentSteps[2]!, runs, data);
-    return (
-      searchState === "complete" &&
-      (emailState === "complete" || emailState === "rejected") &&
-      deleteState === "blocked"
+    const searchCall = findLiveToolCall(
+      data.toolCalls,
+      runs[agentSteps[0]!.id]?.toolCallId,
+      proofStartedAt,
     );
-  }, [data, runs]);
+    const emailCall = findLiveToolCall(
+      data.toolCalls,
+      runs[agentSteps[1]!.id]?.toolCallId,
+      proofStartedAt,
+    );
+    const deleteCall = findLiveToolCall(
+      data.toolCalls,
+      runs[agentSteps[2]!.id]?.toolCallId,
+      proofStartedAt,
+    );
+    return (
+      searchCall?.status === "executed" &&
+      (emailCall?.status === "executed" || emailCall?.status === "rejected") &&
+      deleteCall?.status === "blocked"
+    );
+  }, [data, proofStartedAt, runs]);
 
   useEffect(() => {
-    if (!autoContinueFullDemo || runningAll || !nextStep) return;
+    if (
+      !autoContinueFullDemo ||
+      loading ||
+      hasUnresolvedStoredRun ||
+      runningAll ||
+      !nextStep
+    )
+      return;
     void runAll();
-  }, [autoContinueFullDemo, nextStep, runningAll]);
+  }, [
+    autoContinueFullDemo,
+    hasUnresolvedStoredRun,
+    loading,
+    nextStep,
+    runningAll,
+  ]);
 
-  async function runStep(step: AgentStep): Promise<StepRun> {
+  useEffect(() => {
+    onProofStateChange?.(lifecycleComplete);
+  }, [lifecycleComplete, onProofStateChange]);
+
+  async function runStep(
+    step: AgentStep,
+    guidedRun = autoContinueFullDemo || guided,
+  ): Promise<StepRun> {
     setRuns((current) => ({ ...current, [step.id]: { state: "running" } }));
     try {
       const response = await submitToolCall({
         agentId: "customer-support-demo-agent",
         input: step.input,
-        metadata: { demo: "customer-support-agent", visualStep: step.id },
+        metadata: {
+          demo: "customer-support-agent",
+          ...(sessionId && quickstartSessionIdPattern.test(sessionId)
+            ? {
+                demoQuickstartGuided: guidedRun,
+                demoQuickstartSessionId: sessionId,
+              }
+            : {}),
+          visualStep: step.id,
+        },
         reason: step.reason,
         requestedBy: "demo-agent@example.com",
         toolName: step.toolName,
@@ -192,20 +256,21 @@ export function AgentDemoPanel({ data, onRefresh }: AgentDemoPanelProps) {
   }
 
   async function runAll() {
+    if (loading) return;
     setAutoContinueFullDemo(true);
     setRunningAll(true);
     let shouldKeepAutoContinuing = false;
     try {
       let currentRuns = runs;
       for (const step of agentSteps) {
-        const state = resolveStepState(step, currentRuns, data);
+        const state = resolveStepState(step, currentRuns, data, proofStartedAt);
         if (canAdvancePastState(state)) continue;
         if (!canRunState(state)) {
           shouldKeepAutoContinuing = true;
           break;
         }
 
-        const nextRun = await runStep(step);
+        const nextRun = await runStep(step, true);
         currentRuns = { ...currentRuns, [step.id]: nextRun };
         if (nextRun.state === "error") break;
         if (!canAdvancePastState(nextRun.state)) {
@@ -224,21 +289,26 @@ export function AgentDemoPanel({ data, onRefresh }: AgentDemoPanelProps) {
   ) {
     setRunsState((current) => {
       const next = update(current);
-      saveStoredRuns(next);
+      saveStoredRuns(storageKey, next);
       return next;
     });
   }
 
   function resetRuns() {
-    clearStoredRuns();
-    setAutoContinueFullDemo(false);
+    clearStoredRuns(storageKey);
+    setAutoContinueFullDemoState(false);
+    replaceGuidedRoute(returnTo, false);
     setRunsState({});
   }
 
   function setAutoContinueFullDemo(value: boolean) {
     setAutoContinueFullDemoState(value);
-    saveStoredAutoContinue(value);
+    if (value) replaceGuidedRoute(returnTo, true);
   }
+
+  const approvalReturnTo = autoContinueFullDemo
+    ? withGuidedQuery(returnTo, true)
+    : returnTo;
 
   return (
     <section
@@ -250,24 +320,16 @@ export function AgentDemoPanel({ data, onRefresh }: AgentDemoPanelProps) {
           <span aria-hidden="true">
             <Bot size={18} />
           </span>
-          Agent demo
+          Local lifecycle proof
         </h2>
         <div className="panel-actions">
           <button
             type="button"
-            onClick={() => void runNext()}
-            disabled={!nextStep || runningAll}
-          >
-            <StepForward size={18} aria-hidden="true" />
-            Run next
-          </button>
-          <button
-            type="button"
             onClick={() => void runAll()}
-            disabled={!nextStep || runningAll}
+            disabled={loading || !nextStep || runningAll}
           >
             <Play size={18} aria-hidden="true" />
-            Run full demo
+            Run guided proof
           </button>
           <button
             className="secondary"
@@ -276,10 +338,23 @@ export function AgentDemoPanel({ data, onRefresh }: AgentDemoPanelProps) {
             disabled={runningAll}
           >
             <RotateCcw size={18} aria-hidden="true" />
-            Reset view
+            Start a new proof
           </button>
         </div>
       </div>
+
+      <details className="agent-step-controls">
+        <summary>Run step by step</summary>
+        <button
+          className="secondary"
+          type="button"
+          onClick={() => void runNext()}
+          disabled={loading || !nextStep || runningAll}
+        >
+          <StepForward size={18} aria-hidden="true" />
+          Run next step
+        </button>
+      </details>
 
       <div
         className="agent-flow"
@@ -291,47 +366,36 @@ export function AgentDemoPanel({ data, onRefresh }: AgentDemoPanelProps) {
             index={index + 1}
             key={step.id}
             run={runs[step.id]}
-            canRun={nextStep?.id === step.id && !runningAll}
+            sessionStartedAt={proofStartedAt}
             step={step}
-            onRun={() => void runStep(step)}
+            returnTo={approvalReturnTo}
           />
         ))}
       </div>
-
-      {lifecycleComplete && (
-        <div className="demo-completion-summary" role="status">
-          <div>
-            <Check size={18} aria-hidden="true" />
-            <span>
-              <strong>Lifecycle complete.</strong> Search was allowed, the email
-              required a human decision, and deletion was denied.
-            </span>
-          </div>
-          <a className="text-link" href="#/audit">
-            Inspect the audit evidence
-          </a>
-        </div>
-      )}
     </section>
   );
 }
 
 function AgentStepRow({
-  canRun,
   data,
   index,
-  onRun,
+  returnTo,
   run,
+  sessionStartedAt,
   step,
 }: {
-  canRun: boolean;
   data: DashboardData;
   index: number;
-  onRun: () => void;
+  returnTo: string;
   run?: StepRun;
+  sessionStartedAt?: string;
   step: AgentStep;
 }) {
-  const liveToolCall = findLiveToolCall(data.toolCalls, run?.toolCallId);
+  const liveToolCall = findLiveToolCall(
+    data.toolCalls,
+    run?.toolCallId,
+    sessionStartedAt,
+  );
   const state = liveToolCall
     ? stateFromToolCall(liveToolCall)
     : (run?.state ?? "idle");
@@ -361,7 +425,6 @@ function AgentStepRow({
             Tool <code>{step.toolName}</code>
           </span>
           <span>{step.expected}</span>
-          {run?.approvalId && <span>Approval {run.approvalId}</span>}
         </div>
         <details>
           <summary>Payload</summary>
@@ -377,7 +440,7 @@ function AgentStepRow({
             {approvalId && (
               <a
                 className="text-link"
-                href={`#/approvals/${encodeURIComponent(approvalId)}`}
+                href={`#/approvals/${encodeURIComponent(approvalId)}?returnTo=${encodeURIComponent(returnTo)}`}
               >
                 Review this approval
               </a>
@@ -392,15 +455,6 @@ function AgentStepRow({
           </details>
         )}
       </div>
-      <button
-        className="secondary agent-step-run"
-        type="button"
-        onClick={onRun}
-        disabled={!canRun || state === "running"}
-      >
-        <Play size={16} aria-hidden="true" />
-        Run
-      </button>
     </article>
   );
 }
@@ -421,9 +475,26 @@ function StatusPill({ state }: { state: StepState }) {
 function findLiveToolCall(
   toolCalls: ToolCallRecord[],
   id?: string,
+  sessionStartedAt?: string,
 ): ToolCallRecord | undefined {
   if (!id) return undefined;
-  return toolCalls.find((toolCall) => toolCall.id === id);
+  return toolCalls.find(
+    (toolCall) =>
+      toolCall.id === id &&
+      isCurrentSessionCall(toolCall.createdAt, sessionStartedAt),
+  );
+}
+
+function isCurrentSessionCall(
+  createdAt: string,
+  sessionStartedAt?: string,
+): boolean {
+  if (!sessionStartedAt) return true;
+  const created = Date.parse(createdAt);
+  const started = Date.parse(sessionStartedAt);
+  return (
+    Number.isFinite(created) && Number.isFinite(started) && created >= started
+  );
 }
 
 function stateFromResponse(response: SubmitToolCallResponse): StepState {
@@ -452,9 +523,10 @@ function iconForState(state: StepState) {
 function findNextRunnableStep(
   runs: Record<string, StepRun>,
   data: DashboardData,
+  sessionStartedAt?: string,
 ): AgentStep | undefined {
   for (const step of agentSteps) {
-    const state = resolveStepState(step, runs, data);
+    const state = resolveStepState(step, runs, data, sessionStartedAt);
     if (canRunState(state)) return step;
     if (!canAdvancePastState(state)) return undefined;
   }
@@ -465,9 +537,14 @@ function resolveStepState(
   step: AgentStep,
   runs: Record<string, StepRun>,
   data: DashboardData,
+  sessionStartedAt?: string,
 ): StepState {
   const run = runs[step.id];
-  const liveToolCall = findLiveToolCall(data.toolCalls, run?.toolCallId);
+  const liveToolCall = findLiveToolCall(
+    data.toolCalls,
+    run?.toolCallId,
+    sessionStartedAt,
+  );
   return liveToolCall
     ? stateFromToolCall(liveToolCall)
     : (run?.state ?? "idle");
@@ -484,12 +561,17 @@ function canAdvancePastState(state: StepState): boolean {
 function syncRunsWithLiveToolCalls(
   runs: Record<string, StepRun>,
   toolCalls: ToolCallRecord[],
+  sessionStartedAt?: string,
 ): Record<string, StepRun> {
   let changed = false;
   const nextRuns: Record<string, StepRun> = { ...runs };
 
   for (const [stepId, run] of Object.entries(runs)) {
-    const liveToolCall = findLiveToolCall(toolCalls, run.toolCallId);
+    const liveToolCall = findLiveToolCall(
+      toolCalls,
+      run.toolCallId,
+      sessionStartedAt,
+    );
     if (!liveToolCall) continue;
 
     const state = stateFromToolCall(liveToolCall);
@@ -502,28 +584,29 @@ function syncRunsWithLiveToolCalls(
   return changed ? nextRuns : runs;
 }
 
-function loadStoredRuns(): Record<string, StepRun> {
+function demoRunsStorageKey(sessionId?: string): string {
+  return sessionId
+    ? `${demoRunsStoragePrefix}.${encodeURIComponent(sessionId)}`
+    : demoRunsStoragePrefix;
+}
+
+function loadStoredRuns(storageKey: string): Record<string, StepRun> {
   if (typeof window === "undefined") return {};
 
   try {
-    const storedRuns = window.localStorage.getItem(demoRunsStorageKey);
+    const storedRuns = window.localStorage.getItem(storageKey);
     if (!storedRuns) return {};
     const parsed = JSON.parse(storedRuns) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      clearStoredRuns(storageKey);
       return {};
-    return sanitizeStoredRuns(parsed);
+    }
+    const sanitized = sanitizeStoredRuns(parsed);
+    saveStoredRuns(storageKey, sanitized);
+    return sanitized;
   } catch {
+    clearStoredRuns(storageKey);
     return {};
-  }
-}
-
-function loadStoredAutoContinue(): boolean {
-  if (typeof window === "undefined") return false;
-
-  try {
-    return window.localStorage.getItem(demoAutoContinueStorageKey) === "true";
-  } catch {
-    return false;
   }
 }
 
@@ -532,69 +615,105 @@ function sanitizeStoredRuns(value: unknown): Record<string, StepRun> {
 
   const runs: Record<string, StepRun> = {};
   for (const [stepId, maybeRun] of Object.entries(value)) {
+    if (!agentSteps.some((step) => step.id === stepId)) continue;
     if (!maybeRun || typeof maybeRun !== "object" || Array.isArray(maybeRun))
       continue;
     const run = maybeRun as Partial<StepRun>;
-    if (!run.state || !stepStates.includes(run.state)) continue;
+    const approvalId = sanitizeStoredId(run.approvalId);
+    const toolCallId = sanitizeStoredId(run.toolCallId);
+    if (!approvalId && !toolCallId) continue;
     runs[stepId] = {
-      approvalId:
-        typeof run.approvalId === "string" ? run.approvalId : undefined,
-      error:
-        run.state === "running"
-          ? "The previous run was interrupted."
-          : undefined,
-      state: run.state === "running" ? "error" : run.state,
-      toolCallId:
-        typeof run.toolCallId === "string" ? run.toolCallId : undefined,
+      approvalId,
+      state: "idle",
+      toolCallId,
     };
   }
 
   return runs;
 }
 
-function saveStoredRuns(runs: Record<string, StepRun>) {
+function sanitizeStoredId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const id = value.trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(id) ? id : undefined;
+}
+
+function saveStoredRuns(storageKey: string, runs: Record<string, StepRun>) {
   if (typeof window === "undefined") return;
 
   try {
     const progressOnly = Object.fromEntries(
-      Object.entries(runs).map(([stepId, run]) => [
-        stepId,
-        {
-          approvalId: run.approvalId,
-          state: run.state,
-          toolCallId: run.toolCallId,
-        },
-      ]),
+      Object.entries(runs)
+        .filter(([, run]) => run.approvalId || run.toolCallId)
+        .map(([stepId, run]) => [
+          stepId,
+          {
+            approvalId: run.approvalId,
+            toolCallId: run.toolCallId,
+          },
+        ]),
     );
-    window.localStorage.setItem(
-      demoRunsStorageKey,
-      JSON.stringify(progressOnly),
-    );
+    window.localStorage.setItem(storageKey, JSON.stringify(progressOnly));
   } catch {
     // Browser storage is a convenience for route persistence; demo execution still works without it.
   }
 }
 
-function clearStoredRuns() {
+function clearStoredRuns(storageKey: string) {
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.removeItem(demoRunsStorageKey);
+    window.localStorage.removeItem(storageKey);
   } catch {
     // Ignore unavailable storage.
   }
 }
 
-function saveStoredAutoContinue(value: boolean) {
+function clearOtherDemoRunStorage(activeStorageKey: string) {
   if (typeof window === "undefined") return;
 
   try {
-    if (value) {
-      window.localStorage.setItem(demoAutoContinueStorageKey, "true");
-    } else {
-      window.localStorage.removeItem(demoAutoContinueStorageKey);
+    const staleKeys: string[] = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (
+        key &&
+        key !== activeStorageKey &&
+        (key === demoRunsStoragePrefix ||
+          key.startsWith(`${demoRunsStoragePrefix}.`))
+      ) {
+        staleKeys.push(key);
+      }
     }
+    for (const key of staleKeys) window.localStorage.removeItem(key);
   } catch {
     // Ignore unavailable storage.
   }
+}
+
+function clearLegacyAutoContinueStorage() {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.removeItem("actionproxy.agentDemoAutoContinue.v1");
+  } catch {
+    // Ignore unavailable storage.
+  }
+}
+
+function withGuidedQuery(returnTo: string, guided: boolean): string {
+  const [path, rawQuery = ""] = returnTo.split("?", 2);
+  const query = new URLSearchParams(rawQuery);
+  if (guided) query.set("guided", "1");
+  else query.delete("guided");
+  const serialized = query.toString();
+  return serialized ? `${path}?${serialized}` : path!;
+}
+
+function replaceGuidedRoute(returnTo: string, guided: boolean) {
+  if (typeof window === "undefined") return;
+  const next = withGuidedQuery(returnTo, guided);
+  if (window.location.hash === next) return;
+  window.history.replaceState(window.history.state, "", next);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
 }

@@ -1,0 +1,14 @@
+{
+  "yaml.schemas": {
+    "./schemas/actionproxy.policy.v1.schema.json": [
+      "**/actionproxy.policy.yaml",
+      "**/actionproxy.policy.yml",
+      "**/*.policy.yaml",
+      "**/*.policy.yml"
+    ],
+    "./schemas/actionproxy.mcp-wrapper.v1.schema.json": [
+      "**/actionproxy.mcp.yaml",
+      "**/actionproxy.mcp.yml"
+    ]
+  }
+}

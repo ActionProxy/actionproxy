@@ -1,0 +1,77 @@
+#!/bin/sh
+
+# ActionProxy's public first-run entry point intentionally stays POSIX-only so
+# it can explain a missing/unsupported Node runtime before importing any JS.
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+
+# The legacy raw environment input cannot be erased from the environment of a
+# process that has already started. Minimize that compatibility exposure by
+# copying it synchronously into a private OS-temporary handoff, unsetting it,
+# and only then execing the long-lived Node launcher. New automation should use
+# ACTIONPROXY_CONTROL_PLANE_KEY_FILE instead.
+BOOTSTRAP_DIR=""
+BOOTSTRAP_FILE=""
+cleanup_bootstrap() {
+  if [ -n "$BOOTSTRAP_FILE" ]; then
+    rm -f -- "$BOOTSTRAP_FILE" 2>/dev/null || true
+  fi
+  if [ -n "$BOOTSTRAP_DIR" ]; then
+    rmdir -- "$BOOTSTRAP_DIR" 2>/dev/null || true
+  fi
+  if [ "${ACTIONPROXY_LEGACY_RUNTIME_KEY_FD-}" = 9 ]; then
+    exec 9<&-
+    unset ACTIONPROXY_LEGACY_RUNTIME_KEY_FD
+  fi
+}
+trap cleanup_bootstrap EXIT HUP INT TERM
+unset ACTIONPROXY_LEGACY_RUNTIME_KEY_FD 2>/dev/null || true
+if [ "${CONTROL_PLANE_API_KEY+x}" = x ] && [ "${ACTIONPROXY_PNPM_ENTRY-}" = 1 ]; then
+  unset CONTROL_PLANE_API_KEY ACTIONPROXY_PNPM_ENTRY
+  printf '%s\n' '[RUNTIME_KEY_RAW_ENV_UNSAFE] Raw CONTROL_PLANE_API_KEY is not accepted through pnpm because the parent process would retain it.' >&2
+  printf '%s\n' 'Fix: use ACTIONPROXY_CONTROL_PLANE_KEY_FILE or invoke ./actionproxy chatgpt directly.' >&2
+  exit 2
+fi
+unset ACTIONPROXY_PNPM_ENTRY 2>/dev/null || true
+if [ "${CONTROL_PLANE_API_KEY+x}" = x ]; then
+  LEGACY_RUNTIME_KEY=$CONTROL_PLANE_API_KEY
+  unset CONTROL_PLANE_API_KEY
+  umask 077
+  TEMP_BASE=${TMPDIR:-/tmp}
+  BOOTSTRAP_DIR=$(mktemp -d "${TEMP_BASE%/}/actionproxy-first-run-key.XXXXXX")
+  chmod 700 "$BOOTSTRAP_DIR"
+  BOOTSTRAP_FILE="$BOOTSTRAP_DIR/runtime-key"
+  printf '%s' "$LEGACY_RUNTIME_KEY" > "$BOOTSTRAP_FILE"
+  unset LEGACY_RUNTIME_KEY
+  chmod 600 "$BOOTSTRAP_FILE"
+  # Open the private handoff, unlink it before Node starts, and expose only the
+  # fixed non-secret descriptor number. A failed import or fatal Node exit then
+  # closes the last reference without leaving credential material on disk.
+  exec 9< "$BOOTSTRAP_FILE"
+  rm -f -- "$BOOTSTRAP_FILE"
+  rmdir -- "$BOOTSTRAP_DIR"
+  BOOTSTRAP_FILE=""
+  BOOTSTRAP_DIR=""
+  ACTIONPROXY_LEGACY_RUNTIME_KEY_FD=9
+  export ACTIONPROXY_LEGACY_RUNTIME_KEY_FD
+fi
+unset OPENAI_API_KEY 2>/dev/null || true
+
+if ! command -v node >/dev/null 2>&1; then
+  printf '%s\n' '[NODE_MISSING] ActionProxy requires Node.js 22, 23, or 24.' >&2
+  printf '%s\n' 'Fix: install Node.js 24, then run ./actionproxy again.' >&2
+  exit 1
+fi
+
+NODE_MAJOR=$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')
+case "$NODE_MAJOR" in
+  22|23|24) ;;
+  *)
+    printf '%s\n' "[NODE_UNSUPPORTED] Found Node.js $(node -v 2>/dev/null || printf 'unknown'); ActionProxy supports Node.js 22-24." >&2
+    printf '%s\n' 'Fix: use Node.js 24, then run ./actionproxy again.' >&2
+    exit 1
+    ;;
+esac
+
+exec node "$SCRIPT_DIR/scripts/first-run.mjs" "$@"

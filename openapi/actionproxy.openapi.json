@@ -1,0 +1,6481 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "ActionProxy Community HTTP API",
+    "version": "0.1.0",
+    "description": "The self-hosted Community API for submitting governed tool calls, reviewing approvals, executing exact authorized actions, and verifying local audit evidence. Static web routes and routes outside the Community boundary are intentionally excluded.",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8787",
+      "description": "Default loopback development server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Approval webhooks"
+    },
+    {
+      "name": "Approvals"
+    },
+    {
+      "name": "Approvers"
+    },
+    {
+      "name": "Audit"
+    },
+    {
+      "name": "Authentication"
+    },
+    {
+      "name": "Execution"
+    },
+    {
+      "name": "Local integrations"
+    },
+    {
+      "name": "MCP HTTP"
+    },
+    {
+      "name": "MCP adapter"
+    },
+    {
+      "name": "Operator console"
+    },
+    {
+      "name": "Policy"
+    },
+    {
+      "name": "Policy detector"
+    },
+    {
+      "name": "Quickstart"
+    },
+    {
+      "name": "System"
+    },
+    {
+      "name": "Tool calls"
+    }
+  ],
+  "paths": {
+    "/.well-known/oauth-protected-resource": {
+      "get": {
+        "operationId": "getWellKnownOauthProtectedResource",
+        "summary": "Get MCP protected-resource metadata",
+        "tags": [
+          "MCP HTTP"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Requires ACTIONPROXY_MCP_HTTP_ENABLED=true.",
+        "x-actionproxy-availability": "Requires ACTIONPROXY_MCP_HTTP_ENABLED=true."
+      }
+    },
+    "/.well-known/oauth-protected-resource/mcp": {
+      "get": {
+        "operationId": "getWellKnownOauthProtectedResourceMcp",
+        "summary": "Get MCP protected-resource metadata for /mcp",
+        "tags": [
+          "MCP HTTP"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Requires ACTIONPROXY_MCP_HTTP_ENABLED=true.",
+        "x-actionproxy-availability": "Requires ACTIONPROXY_MCP_HTTP_ENABLED=true."
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Check server health",
+        "tags": [
+          "System"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp": {
+      "delete": {
+        "operationId": "deleteMcp",
+        "summary": "Reject unsupported MCP session deletion",
+        "tags": [
+          "MCP HTTP"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method intentionally unsupported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          }
+        },
+        "description": "Requires ACTIONPROXY_MCP_HTTP_ENABLED=true and an OAuth bearer with verified client identity.",
+        "x-actionproxy-availability": "Requires ACTIONPROXY_MCP_HTTP_ENABLED=true and an OAuth bearer with verified client identity."
+      },
+      "get": {
+        "operationId": "getMcp",
+        "summary": "Reject unsupported MCP SSE reads",
+        "tags": [
+          "MCP HTTP"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method intentionally unsupported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          }
+        },
+        "description": "Requires ACTIONPROXY_MCP_HTTP_ENABLED=true and an OAuth bearer with verified client identity.",
+        "x-actionproxy-availability": "Requires ACTIONPROXY_MCP_HTTP_ENABLED=true and an OAuth bearer with verified client identity."
+      },
+      "post": {
+        "operationId": "postMcp",
+        "summary": "Exchange one MCP Streamable HTTP JSON-RPC message",
+        "tags": [
+          "MCP HTTP"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "description": "Must accept both application/json and text/event-stream.",
+            "in": "header",
+            "name": "Accept",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required after MCP initialization.",
+            "in": "header",
+            "name": "MCP-Protocol-Version",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "MCP Streamable HTTP session identifier.",
+            "in": "header",
+            "name": "MCP-Session-Id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JsonRpcRequest"
+              }
+            }
+          }
+        },
+        "description": "Requires ACTIONPROXY_MCP_HTTP_ENABLED=true and an OAuth bearer with verified client identity.",
+        "x-actionproxy-availability": "Requires ACTIONPROXY_MCP_HTTP_ENABLED=true and an OAuth bearer with verified client identity."
+      }
+    },
+    "/v1/approvals/pending": {
+      "get": {
+        "operationId": "getV1ApprovalsPending",
+        "summary": "List pending approvals",
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvals/{id}": {
+      "get": {
+        "operationId": "getV1ApprovalsId",
+        "summary": "Get an approval and its tool call",
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/approvals/{id}/approve": {
+      "post": {
+        "operationId": "postV1ApprovalsIdApprove",
+        "summary": "Approve an exact proposal",
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalDecisionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveApproval"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvals/{id}/cancel": {
+      "post": {
+        "operationId": "postV1ApprovalsIdCancel",
+        "summary": "Cancel a pending proposal",
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalDecisionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelApproval"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvals/{id}/notifications/resend": {
+      "post": {
+        "operationId": "postV1ApprovalsIdNotificationsResend",
+        "summary": "Resend approval notifications",
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/approvals/{id}/reject": {
+      "post": {
+        "operationId": "postV1ApprovalsIdReject",
+        "summary": "Reject a pending proposal",
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalDecisionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectApproval"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvals/{id}/review": {
+      "get": {
+        "operationId": "getV1ApprovalsIdReview",
+        "summary": "Get a freshness-bound approval review",
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/approvers": {
+      "get": {
+        "operationId": "getV1Approvers",
+        "summary": "List approver users and groups",
+        "tags": [
+          "Approvers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvers/groups": {
+      "post": {
+        "operationId": "postV1ApproversGroups",
+        "summary": "Create an approver group",
+        "tags": [
+          "Approvers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproverGroupInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvers/groups/{id}": {
+      "delete": {
+        "operationId": "deleteV1ApproversGroupsId",
+        "summary": "Delete an approver group",
+        "tags": [
+          "Approvers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "putV1ApproversGroupsId",
+        "summary": "Update an approver group",
+        "tags": [
+          "Approvers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproverGroupInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvers/users": {
+      "post": {
+        "operationId": "postV1ApproversUsers",
+        "summary": "Create an approver user",
+        "tags": [
+          "Approvers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproverUserInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvers/users/{id}": {
+      "delete": {
+        "operationId": "deleteV1ApproversUsersId",
+        "summary": "Delete an approver user",
+        "tags": [
+          "Approvers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "putV1ApproversUsersId",
+        "summary": "Update an approver user",
+        "tags": [
+          "Approvers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproverUserInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvers/users/{id}/telegram-connect": {
+      "post": {
+        "operationId": "postV1ApproversUsersIdTelegramConnect",
+        "summary": "Create a Telegram connection link",
+        "tags": [
+          "Approvers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/approvers/users/{id}/telegram-connect/poll": {
+      "post": {
+        "operationId": "postV1ApproversUsersIdTelegramConnectPoll",
+        "summary": "Poll a Telegram approver connection",
+        "tags": [
+          "Approvers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/approvers/users/{id}/telegram-connection": {
+      "delete": {
+        "operationId": "deleteV1ApproversUsersIdTelegramConnection",
+        "summary": "Disconnect an approver from Telegram",
+        "tags": [
+          "Approvers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/audit": {
+      "get": {
+        "operationId": "getV1Audit",
+        "summary": "List audit events",
+        "tags": [
+          "Audit"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "enum": [
+                "json",
+                "siem"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 5000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "toolCallId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/audit/export": {
+      "get": {
+        "operationId": "getV1AuditExport",
+        "summary": "Export filtered audit events",
+        "tags": [
+          "Audit"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "enum": [
+                "json",
+                "siem"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "toolCallId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/audit/verify": {
+      "get": {
+        "operationId": "getV1AuditVerify",
+        "summary": "Verify the local audit hash chain",
+        "tags": [
+          "Audit"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditVerification"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/authorized-actions": {
+      "get": {
+        "operationId": "getV1AuthorizedActions",
+        "summary": "List authorized external actions",
+        "tags": [
+          "Execution"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "waiting",
+              "enum": [
+                "all",
+                "completed",
+                "consumed",
+                "expired",
+                "failed",
+                "waiting"
+              ],
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/dashboard/overview": {
+      "get": {
+        "operationId": "getV1DashboardOverview",
+        "summary": "Get the local operator overview",
+        "tags": [
+          "Operator console"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "24h",
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/demo/quickstart/status/{sessionId}": {
+      "get": {
+        "operationId": "getV1DemoQuickstartStatusSessionId",
+        "summary": "Read an ephemeral Quickstart status snapshot",
+        "tags": [
+          "Quickstart"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickstartStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Registered only in explicit local Quickstart mode.",
+        "x-actionproxy-availability": "Registered only in explicit local Quickstart mode."
+      },
+      "put": {
+        "operationId": "putV1DemoQuickstartStatusSessionId",
+        "summary": "Update an ephemeral Quickstart status snapshot",
+        "tags": [
+          "Quickstart"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickstartStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Session-owned update token. It is never exposed to browser code.",
+            "in": "header",
+            "name": "X-ActionProxy-Quickstart-Token",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuickstartStatusUpdate"
+              }
+            }
+          }
+        },
+        "description": "Registered only in explicit local Quickstart mode; intended for the concierge launcher, not browser code.",
+        "x-actionproxy-availability": "Registered only in explicit local Quickstart mode; intended for the concierge launcher, not browser code."
+      }
+    },
+    "/v1/execution-grants/{id}/consume": {
+      "post": {
+        "operationId": "postV1ExecutionGrantsIdConsume",
+        "summary": "Consume a single-use execution grant",
+        "tags": [
+          "Execution"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required only when continuing an authenticated stdio MCP wrapper action.",
+            "in": "header",
+            "name": "X-ActionProxy-MCP-Session-Id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumeExecutionGrant"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/execution-grants/{id}/outcome": {
+      "post": {
+        "operationId": "postV1ExecutionGrantsIdOutcome",
+        "summary": "Report an external execution outcome",
+        "tags": [
+          "Execution"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required only when continuing an authenticated stdio MCP wrapper action.",
+            "in": "header",
+            "name": "X-ActionProxy-MCP-Session-Id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportExecutionOutcome"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations": {
+      "get": {
+        "operationId": "getV1Integrations",
+        "summary": "Get local integration status",
+        "tags": [
+          "Local integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/email": {
+      "put": {
+        "operationId": "putV1IntegrationsEmail",
+        "summary": "Configure local email delivery",
+        "tags": [
+          "Local integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailIntegrationUpdate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/email/test": {
+      "post": {
+        "operationId": "postV1IntegrationsEmailTest",
+        "summary": "Test local email delivery",
+        "tags": [
+          "Local integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/mcp-wrapper/profiles/{id}": {
+      "put": {
+        "operationId": "putV1IntegrationsMcpWrapperProfilesId",
+        "summary": "Save an MCP wrapper profile",
+        "tags": [
+          "Local integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpWrapperProfile"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/mcp-wrapper/profiles/{id}/sync-tools": {
+      "post": {
+        "operationId": "postV1IntegrationsMcpWrapperProfilesIdSyncTools",
+        "summary": "Discover tools for an MCP wrapper profile",
+        "tags": [
+          "Local integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/integrations/mcp-wrapper/profiles/{id}/yaml": {
+      "get": {
+        "operationId": "getV1IntegrationsMcpWrapperProfilesIdYaml",
+        "summary": "Get generated YAML for an MCP wrapper profile",
+        "tags": [
+          "Local integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/integrations/slack": {
+      "put": {
+        "operationId": "putV1IntegrationsSlack",
+        "summary": "Configure local Slack delivery",
+        "tags": [
+          "Local integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackIntegrationUpdate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/slack/test": {
+      "post": {
+        "operationId": "postV1IntegrationsSlackTest",
+        "summary": "Test local Slack delivery",
+        "tags": [
+          "Local integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/telegram": {
+      "put": {
+        "operationId": "putV1IntegrationsTelegram",
+        "summary": "Configure local Telegram delivery",
+        "tags": [
+          "Local integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramIntegrationUpdate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/telegram/test": {
+      "post": {
+        "operationId": "postV1IntegrationsTelegramTest",
+        "summary": "Test local Telegram delivery",
+        "tags": [
+          "Local integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramIntegrationTest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/tools/{id}": {
+      "put": {
+        "operationId": "putV1IntegrationsToolsId",
+        "summary": "Configure a local tool integration",
+        "tags": [
+          "Local integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolIntegrationUpdate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mcp/tool-calls": {
+      "post": {
+        "operationId": "postV1McpToolCalls",
+        "summary": "Submit a tool call from the authenticated stdio MCP adapter",
+        "tags": [
+          "MCP adapter"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCallSubmission"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "description": "Required transport request identifier for the stdio MCP adapter.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Authenticated stdio MCP wrapper session UUID.",
+            "in": "header",
+            "name": "X-ActionProxy-MCP-Session-Id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitToolCall"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mcp/tool-calls/{id}": {
+      "get": {
+        "operationId": "getV1McpToolCallsId",
+        "summary": "Get MCP-adapter tool-call status",
+        "tags": [
+          "MCP adapter"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCall"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Authenticated stdio MCP wrapper session UUID.",
+            "in": "header",
+            "name": "X-ActionProxy-MCP-Session-Id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "operationId": "getV1Me",
+        "summary": "Inspect the authenticated principal",
+        "tags": [
+          "Authentication"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/policy": {
+      "get": {
+        "operationId": "getV1Policy",
+        "summary": "Get the active policy",
+        "tags": [
+          "Policy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyFile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putV1Policy",
+        "summary": "Replace the active policy",
+        "tags": [
+          "Policy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyFile"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/policy/detector": {
+      "get": {
+        "operationId": "getV1PolicyDetector",
+        "summary": "List observed policy gaps",
+        "tags": [
+          "Policy detector"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/policy/detector/{id}/apply": {
+      "post": {
+        "operationId": "postV1PolicyDetectorIdApply",
+        "summary": "Apply an observed-tool rule",
+        "tags": [
+          "Policy detector"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyDetectedPolicy"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/policy/detector/{id}/dismiss": {
+      "post": {
+        "operationId": "postV1PolicyDetectorIdDismiss",
+        "summary": "Dismiss an observed policy gap",
+        "tags": [
+          "Policy detector"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/policy/presets": {
+      "get": {
+        "operationId": "getV1PolicyPresets",
+        "summary": "List Community policy presets",
+        "tags": [
+          "Policy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/policy/simulate": {
+      "post": {
+        "operationId": "postV1PolicySimulate",
+        "summary": "Simulate policy without side effects",
+        "tags": [
+          "Policy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicySimulation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/policy/summary": {
+      "get": {
+        "operationId": "getV1PolicySummary",
+        "summary": "Get a normalized policy summary",
+        "tags": [
+          "Policy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/receipts/{id}": {
+      "get": {
+        "operationId": "getV1ReceiptsId",
+        "summary": "Get an action receipt",
+        "tags": [
+          "Audit"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/service-accounts": {
+      "post": {
+        "operationId": "postV1ServiceAccounts",
+        "summary": "Create a service account",
+        "tags": [
+          "Authentication"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateServiceAccount"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/service-accounts/{id}/keys": {
+      "post": {
+        "operationId": "postV1ServiceAccountsIdKeys",
+        "summary": "Create a service-account API key",
+        "tags": [
+          "Authentication"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKey"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/slack/interactions": {
+      "post": {
+        "operationId": "postV1SlackInteractions",
+        "summary": "Receive a signed Slack interaction",
+        "tags": [
+          "Approval webhooks"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "description": "Slack request signature.",
+            "in": "header",
+            "name": "X-Slack-Signature",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Slack request timestamp.",
+            "in": "header",
+            "name": "X-Slack-Request-Timestamp",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackInteractionBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/telegram/webhook": {
+      "post": {
+        "operationId": "postV1TelegramWebhook",
+        "summary": "Receive a Telegram Bot API webhook",
+        "tags": [
+          "Approval webhooks"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "description": "Configured Telegram webhook secret.",
+            "in": "header",
+            "name": "X-Telegram-Bot-Api-Secret-Token",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramWebhookUpdate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tool-calls": {
+      "get": {
+        "operationId": "getV1ToolCalls",
+        "summary": "List governed tool calls",
+        "tags": [
+          "Tool calls"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCallList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "decision",
+            "required": false,
+            "schema": {
+              "enum": [
+                "allow",
+                "require_approval",
+                "deny"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sessionId",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "submitted",
+                "authorized",
+                "executed",
+                "pending_approval",
+                "blocked",
+                "rejected",
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "toolName",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "postV1ToolCalls",
+        "summary": "Submit a governed tool call",
+        "tags": [
+          "Tool calls"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCallSubmission"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "description": "Deduplicates a submission.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitToolCall"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tool-calls/{id}": {
+      "get": {
+        "operationId": "getV1ToolCallsId",
+        "summary": "Get a governed tool call",
+        "tags": [
+          "Tool calls"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCall"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/tool-calls/{id}/decision-trace": {
+      "get": {
+        "operationId": "getV1ToolCallsIdDecisionTrace",
+        "summary": "Get the policy decision trace",
+        "tags": [
+          "Tool calls"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/tool-calls/{id}/execution-attempts": {
+      "get": {
+        "operationId": "getV1ToolCallsIdExecutionAttempts",
+        "summary": "List execution attempts for a tool call",
+        "tags": [
+          "Tool calls"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/tool-calls/{id}/remediation": {
+      "post": {
+        "operationId": "postV1ToolCallsIdRemediation",
+        "summary": "Submit a remediation attempt",
+        "tags": [
+          "Tool calls"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Deduplicates a submission.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitRemediation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tool-calls/{id}/remediation-plan": {
+      "get": {
+        "operationId": "getV1ToolCallsIdRemediationPlan",
+        "summary": "Get a remediation plan",
+        "tags": [
+          "Tool calls"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the required scope or resource access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "scheme": "bearer",
+        "type": "http",
+        "description": "A service-account API key or OIDC access token, depending on AUTH_MODE. Omit only when AUTH_MODE=none."
+      }
+    },
+    "schemas": {
+      "ActionDescriptor": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "executionMode": {
+            "enum": [
+              "external_grant",
+              "local_mock"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "custom",
+                  "delete",
+                  "external_send",
+                  "financial",
+                  "read",
+                  "write"
+                ],
+                "type": "string"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "protocol": {
+            "enum": [
+              "actionproxy_http",
+              "cli",
+              "custom",
+              "langgraph",
+              "mcp",
+              "n8n",
+              "openai_tools",
+              "webhook"
+            ],
+            "type": "string"
+          },
+          "resources": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "metadata": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "source": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "metadata": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "ApplyDetectedPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "enum": [
+              "deny",
+              "never",
+              "required"
+            ],
+            "type": "string"
+          },
+          "pattern": {
+            "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*(?:\\.\\*)?$",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "risk": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Approval": {
+        "additionalProperties": true,
+        "properties": {
+          "approvedBy": {
+            "type": "string"
+          },
+          "cancelledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cancelledBy": {
+            "type": "string"
+          },
+          "cancellationReason": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "editedInput": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "expiredAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "originalInput": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "rejectedBy": {
+            "type": "string"
+          },
+          "rejectionReason": {
+            "type": "string"
+          },
+          "requestedBy": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "cancelled",
+              "expired",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "toolCallId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "createdAt",
+          "id",
+          "originalInput",
+          "requestedBy",
+          "status",
+          "toolCallId",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ApprovalDecisionResponse": {
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/Approval"
+          },
+          "toolCall": {
+            "$ref": "#/components/schemas/ToolCall"
+          }
+        },
+        "required": [
+          "approval",
+          "toolCall"
+        ],
+        "type": "object"
+      },
+      "ApprovalDetail": {
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/Approval"
+          },
+          "toolCall": {
+            "$ref": "#/components/schemas/ToolCall"
+          }
+        },
+        "required": [
+          "approval",
+          "toolCall"
+        ],
+        "type": "object"
+      },
+      "ApprovalList": {
+        "properties": {
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/Approval"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "approvals"
+        ],
+        "type": "object"
+      },
+      "ApproveApproval": {
+        "properties": {
+          "approvalNonce": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "approvedBy": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "editedInput": {
+            "oneOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "inputDecision": {
+            "oneOf": [
+              {
+                "properties": {
+                  "mode": {
+                    "const": "original"
+                  }
+                },
+                "required": [
+                  "mode"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "mode": {
+                    "const": "edited"
+                  }
+                },
+                "required": [
+                  "input",
+                  "mode"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "note": {
+            "type": "string"
+          },
+          "reviewHash": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ApproverGroupInput": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ApproverUserInput": {
+        "properties": {
+          "defaultApprover": {
+            "type": "boolean"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "email": {
+            "oneOf": [
+              {
+                "format": "email",
+                "type": "string"
+              },
+              {
+                "const": ""
+              }
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "groups": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "principalId": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "slackUserId": {
+            "type": "string"
+          },
+          "telegramChatId": {
+            "type": "string"
+          },
+          "telegramUsername": {
+            "type": "string"
+          },
+          "telegramUserId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AuditVerification": {
+        "additionalProperties": false,
+        "properties": {
+          "checked": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "eventId": {
+                  "type": "string"
+                },
+                "index": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "reason": {
+                  "enum": [
+                    "previous_event_hash_mismatch",
+                    "missing_event_hash",
+                    "event_hash_mismatch"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "eventId",
+                "index",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "firstEventHash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "lastEventHash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "checked",
+          "errors",
+          "valid"
+        ],
+        "type": "object"
+      },
+      "AuthContext": {
+        "properties": {
+          "authProvider": {
+            "enum": [
+              "api_key",
+              "none",
+              "oidc_jwt",
+              "slack",
+              "telegram"
+            ],
+            "type": "string"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "principalId": {
+            "type": "string"
+          },
+          "principalType": {
+            "enum": [
+              "local",
+              "service_account",
+              "slack",
+              "telegram",
+              "user"
+            ],
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "authProvider",
+          "displayName",
+          "groups",
+          "principalId",
+          "principalType",
+          "scopes",
+          "workspaceId"
+        ],
+        "type": "object"
+      },
+      "CancelApproval": {
+        "properties": {
+          "approvalNonce": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "cancelledBy": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConsumeExecutionGrant": {
+        "properties": {
+          "input": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "policyVersionHash": {
+            "type": "string"
+          },
+          "toolCallId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "toolName": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "input",
+          "toolCallId",
+          "toolName"
+        ],
+        "type": "object"
+      },
+      "CreateApiKey": {
+        "properties": {
+          "scopes": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "CreateServiceAccount": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "EmailIntegrationUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "approvalRecipient": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "from": {
+            "type": "string"
+          },
+          "publicBaseUrl": {
+            "type": "string"
+          },
+          "smtp": {
+            "additionalProperties": false,
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "password": {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              "port": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "secure": {
+                "type": "boolean"
+              },
+              "username": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "transport": {
+            "enum": [
+              "outbox",
+              "smtp"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "details": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "error": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "Health": {
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "service": {
+            "const": "actionproxy-server"
+          }
+        },
+        "required": [
+          "ok",
+          "service"
+        ],
+        "type": "object"
+      },
+      "JsonObject": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "JsonRpcRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "oneOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "jsonrpc": {
+            "const": "2.0"
+          },
+          "method": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "params": true
+        },
+        "required": [
+          "jsonrpc",
+          "method"
+        ],
+        "type": "object"
+      },
+      "McpWrapperConfig": {
+        "$ref": "../schemas/actionproxy.mcp-wrapper.v1.schema.json"
+      },
+      "McpWrapperProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "actionproxy": {
+            "additionalProperties": false,
+            "properties": {
+              "agentId": {
+                "type": "string"
+              },
+              "approvalPollIntervalMs": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "approvalTimeoutMs": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "baseUrl": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "bearerTokenEnv": {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "type": "string"
+              },
+              "requestedBy": {
+                "type": "string"
+              },
+              "requestTimeoutMs": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "baseUrl"
+            ],
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "policies": {
+            "additionalProperties": {
+              "properties": {
+                "approval": {
+                  "enum": [
+                    "deny",
+                    "never",
+                    "required"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "approval"
+              ],
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "server": {
+            "additionalProperties": false,
+            "properties": {
+              "args": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "command": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "env": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "requestTimeoutMs": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "command",
+              "name"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "actionproxy",
+          "server"
+        ],
+        "type": "object"
+      },
+      "Me": {
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/AuthContext"
+          },
+          "availableScopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "auth",
+          "availableScopes"
+        ],
+        "type": "object"
+      },
+      "PolicyFile": {
+        "$ref": "../schemas/actionproxy.policy.v1.schema.json"
+      },
+      "PolicySimulation": {
+        "properties": {
+          "action": {
+            "additionalProperties": false,
+            "properties": {
+              "context": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "executionMode": {
+                "enum": [
+                  "external_grant",
+                  "local_mock"
+                ],
+                "type": "string"
+              },
+              "operation": {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "custom",
+                      "delete",
+                      "external_send",
+                      "financial",
+                      "read",
+                      "write"
+                    ],
+                    "type": "string"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "protocol": {
+                "enum": [
+                  "actionproxy_http",
+                  "cli",
+                  "custom",
+                  "langgraph",
+                  "mcp",
+                  "n8n",
+                  "openai_tools",
+                  "webhook"
+                ],
+                "type": "string"
+              },
+              "resources": {
+                "items": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "metadata": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "source": {
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "metadata": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "agentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "hypotheticalContentInfluence": {
+            "additionalProperties": false,
+            "properties": {
+              "observedIntegrities": {
+                "items": {
+                  "enum": [
+                    "organization_managed",
+                    "verified_publisher",
+                    "authenticated_external",
+                    "public_untrusted",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 5,
+                "type": "array",
+                "uniqueItems": true
+              },
+              "scopeVerified": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "scopeVerified"
+            ],
+            "type": "object"
+          },
+          "input": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "policy": true,
+          "policyYaml": {
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "requestedBy": {
+            "default": "authenticated-principal",
+            "minLength": 1,
+            "type": "string"
+          },
+          "toolName": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "input",
+          "reason",
+          "toolName"
+        ],
+        "type": "object"
+      },
+      "QuickstartStatusUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "approvalTimeoutMs": {
+            "const": 300000
+          },
+          "checks": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "enum": [
+                    "node",
+                    "docker_cli",
+                    "docker_daemon",
+                    "compose",
+                    "gateway",
+                    "storage",
+                    "loopback",
+                    "tool_discovery",
+                    "tunnel_client",
+                    "tunnel_doctor",
+                    "tunnel_readiness"
+                  ],
+                  "type": "string"
+                },
+                "remediationCode": {
+                  "enum": [
+                    "unsupported_os",
+                    "unsupported_node",
+                    "docker_missing",
+                    "docker_not_running",
+                    "compose_missing",
+                    "gateway_unhealthy",
+                    "storage_not_sqlite",
+                    "non_loopback_binding",
+                    "runtime_key_in_docker",
+                    "tool_discovery_mismatch",
+                    "tunnel_client_missing",
+                    "tunnel_client_incompatible",
+                    "tunnel_access_failed",
+                    "tunnel_not_ready",
+                    "tunnel_disconnected"
+                  ],
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "pending",
+                    "running",
+                    "pass",
+                    "action_required",
+                    "fail"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "state"
+              ],
+              "type": "object"
+            },
+            "maxItems": 11,
+            "type": "array"
+          },
+          "journey": {
+            "enum": [
+              "local",
+              "chatgpt"
+            ],
+            "type": "string"
+          },
+          "schemaVersion": {
+            "const": "actionproxy.quickstart.v1"
+          },
+          "sessionId": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          "setupDetails": {
+            "additionalProperties": false,
+            "properties": {
+              "composeVersion": {
+                "type": "string"
+              },
+              "dockerVersion": {
+                "type": "string"
+              },
+              "nodeVersion": {
+                "type": "string"
+              },
+              "port": {
+                "maximum": 65535,
+                "minimum": 1024,
+                "type": "integer"
+              },
+              "projectName": {
+                "pattern": "^actionproxy-first-run-[a-f0-9]{10}$",
+                "type": "string"
+              },
+              "runtimeKeyExcludedFromDocker": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "composeVersion",
+              "dockerVersion",
+              "nodeVersion",
+              "port",
+              "projectName"
+            ],
+            "type": "object"
+          },
+          "setupStage": {
+            "enum": [
+              "gateway_starting",
+              "gateway_ready",
+              "tunnel_checking",
+              "tunnel_ready",
+              "tunnel_stopped",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "tunnelUiUrl": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approvalTimeoutMs",
+          "checks",
+          "journey",
+          "schemaVersion",
+          "sessionId",
+          "setupStage"
+        ],
+        "type": "object"
+      },
+      "QuickstartStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "approvalTimeoutMs": {
+            "const": 300000
+          },
+          "checks": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "enum": [
+                    "node",
+                    "docker_cli",
+                    "docker_daemon",
+                    "compose",
+                    "gateway",
+                    "storage",
+                    "loopback",
+                    "tool_discovery",
+                    "tunnel_client",
+                    "tunnel_doctor",
+                    "tunnel_readiness"
+                  ],
+                  "type": "string"
+                },
+                "remediationCode": {
+                  "enum": [
+                    "unsupported_os",
+                    "unsupported_node",
+                    "docker_missing",
+                    "docker_not_running",
+                    "compose_missing",
+                    "gateway_unhealthy",
+                    "storage_not_sqlite",
+                    "non_loopback_binding",
+                    "runtime_key_in_docker",
+                    "tool_discovery_mismatch",
+                    "tunnel_client_missing",
+                    "tunnel_client_incompatible",
+                    "tunnel_access_failed",
+                    "tunnel_not_ready",
+                    "tunnel_disconnected"
+                  ],
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "pending",
+                    "running",
+                    "pass",
+                    "action_required",
+                    "fail"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "state"
+              ],
+              "type": "object"
+            },
+            "maxItems": 11,
+            "type": "array"
+          },
+          "journey": {
+            "enum": [
+              "local",
+              "chatgpt"
+            ],
+            "type": "string"
+          },
+          "schemaVersion": {
+            "const": "actionproxy.quickstart.v1"
+          },
+          "sessionId": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          "setupDetails": {
+            "additionalProperties": false,
+            "properties": {
+              "composeVersion": {
+                "type": "string"
+              },
+              "dockerVersion": {
+                "type": "string"
+              },
+              "nodeVersion": {
+                "type": "string"
+              },
+              "port": {
+                "maximum": 65535,
+                "minimum": 1024,
+                "type": "integer"
+              },
+              "projectName": {
+                "pattern": "^actionproxy-first-run-[a-f0-9]{10}$",
+                "type": "string"
+              },
+              "runtimeKeyExcludedFromDocker": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "composeVersion",
+              "dockerVersion",
+              "nodeVersion",
+              "port",
+              "projectName"
+            ],
+            "type": "object"
+          },
+          "setupStage": {
+            "enum": [
+              "gateway_starting",
+              "gateway_ready",
+              "tunnel_checking",
+              "tunnel_ready",
+              "tunnel_stopped",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "tunnelUiUrl": {
+            "format": "uri",
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approvalTimeoutMs",
+          "checks",
+          "journey",
+          "schemaVersion",
+          "sessionId",
+          "setupStage",
+          "startedAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "RejectApproval": {
+        "properties": {
+          "approvalNonce": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rejectedBy": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReportExecutionOutcome": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "remediation": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "result": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "resultDelivery": {
+            "additionalProperties": false,
+            "properties": {
+              "byteCount": {
+                "maximum": 16777216,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "canonicalResultHash": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "modelVisible": {
+                "type": "boolean"
+              },
+              "version": {
+                "const": "actionproxy.result-delivery.v1"
+              }
+            },
+            "required": [
+              "byteCount",
+              "canonicalResultHash",
+              "modelVisible",
+              "version"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "cancelled",
+              "failed",
+              "succeeded",
+              "timed_out",
+              "unknown_outcome"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "SlackIntegrationUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "approvalChannelId": {
+            "type": "string"
+          },
+          "botToken": {
+            "format": "password",
+            "type": "string",
+            "writeOnly": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "publicBaseUrl": {
+            "type": "string"
+          },
+          "signingSecret": {
+            "format": "password",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "type": "object"
+      },
+      "SlackInteractionBody": {
+        "description": "Raw Slack application/x-www-form-urlencoded interaction payload.",
+        "type": "string"
+      },
+      "SubmitRemediation": {
+        "properties": {
+          "agentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "requestedBy": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SubmitToolCall": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "additionalProperties": false,
+            "properties": {
+              "context": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "executionMode": {
+                "enum": [
+                  "external_grant",
+                  "local_mock"
+                ],
+                "type": "string"
+              },
+              "operation": {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "custom",
+                      "delete",
+                      "external_send",
+                      "financial",
+                      "read",
+                      "write"
+                    ],
+                    "type": "string"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "protocol": {
+                "enum": [
+                  "actionproxy_http",
+                  "cli",
+                  "custom",
+                  "langgraph",
+                  "mcp",
+                  "n8n",
+                  "openai_tools",
+                  "webhook"
+                ],
+                "type": "string"
+              },
+              "resources": {
+                "items": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "metadata": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "source": {
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "metadata": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "agentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "requestedBy": {
+            "default": "authenticated-principal",
+            "minLength": 1,
+            "type": "string"
+          },
+          "toolName": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "input",
+          "reason",
+          "toolName"
+        ],
+        "type": "object"
+      },
+      "TelegramIntegrationTest": {
+        "additionalProperties": false,
+        "properties": {
+          "userId": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TelegramIntegrationUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "approvalChatId": {
+            "type": "string"
+          },
+          "botToken": {
+            "format": "password",
+            "type": "string",
+            "writeOnly": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "publicBaseUrl": {
+            "type": "string"
+          },
+          "webhookSecret": {
+            "format": "password",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "type": "object"
+      },
+      "TelegramWebhookUpdate": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "ToolIntegrationUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "ToolCall": {
+        "additionalProperties": true,
+        "properties": {
+          "agentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "allow",
+              "require_approval",
+              "deny"
+            ],
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "policyReason": {
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "requestedBy": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "result": true,
+          "risk": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "submitted",
+              "authorized",
+              "executed",
+              "pending_approval",
+              "blocked",
+              "rejected",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "toolName": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "createdAt",
+          "id",
+          "input",
+          "metadata",
+          "reason",
+          "requestedBy",
+          "status",
+          "toolName",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ToolCallList": {
+        "properties": {
+          "toolCalls": {
+            "items": {
+              "$ref": "#/components/schemas/ToolCall"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "toolCalls"
+        ],
+        "type": "object"
+      },
+      "ToolCallSubmission": {
+        "properties": {
+          "approval": {
+            "properties": {
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "approved",
+                  "cancelled",
+                  "expired",
+                  "rejected"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ],
+            "type": "object"
+          },
+          "decision": {
+            "enum": [
+              "allow",
+              "require_approval",
+              "deny"
+            ],
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "result": true,
+          "risk": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "submitted",
+              "authorized",
+              "executed",
+              "pending_approval",
+              "blocked",
+              "rejected",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "id",
+          "status"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

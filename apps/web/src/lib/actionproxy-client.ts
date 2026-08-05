@@ -2,6 +2,7 @@ import type {
   ApprovalRecord,
   ApprovalReview,
   ApproverDirectoryResponse,
+  AuditVerification,
   AuditEvent,
   AuthorizedActionSummary,
   DashboardData,
@@ -13,6 +14,10 @@ import type {
   PolicyFile,
   PolicySimulationResponse,
   PolicySummary,
+  QuickstartCheckState,
+  QuickstartJourney,
+  QuickstartSetupStage,
+  QuickstartStatus,
   ToolCallRecord,
   ToolIntegrationId,
   ToolIntegrationStatus,
@@ -169,6 +174,189 @@ export async function fetchAuditEvents(limit = 500): Promise<AuditEvent[]> {
   );
 }
 
+export async function fetchAuditVerification(): Promise<AuditVerification> {
+  return requestJson<AuditVerification>("/v1/audit/verify");
+}
+
+const quickstartJourneys = new Set<QuickstartJourney>(["local", "chatgpt"]);
+const quickstartStages = new Set<QuickstartSetupStage>([
+  "gateway_starting",
+  "gateway_ready",
+  "tunnel_checking",
+  "tunnel_ready",
+  "tunnel_stopped",
+  "failed",
+]);
+const quickstartCheckStates = new Set<QuickstartCheckState>([
+  "pending",
+  "running",
+  "pass",
+  "action_required",
+  "fail",
+]);
+
+export async function fetchQuickstartStatus(
+  sessionId: string,
+): Promise<QuickstartStatus | null> {
+  const response = await fetch(
+    `/v1/demo/quickstart/status/${encodeURIComponent(sessionId)}`,
+    { headers: requestHeaders() },
+  );
+  if (response.status === 404) return null;
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message =
+      typeof body === "object" && body && "message" in body
+        ? String(body.message)
+        : `Request failed: ${response.status}`;
+    throw new Error(message);
+  }
+  return parseQuickstartStatus(body, sessionId);
+}
+
+function parseQuickstartStatus(
+  value: unknown,
+  expectedSessionId: string,
+): QuickstartStatus {
+  if (!isRecord(value)) throw new Error("Quickstart status is invalid.");
+  const {
+    approvalTimeoutMs,
+    checks,
+    journey,
+    schemaVersion,
+    sessionId,
+    setupDetails,
+    setupStage,
+    startedAt,
+    tunnelUiUrl,
+    updatedAt,
+  } = value;
+  if (
+    typeof schemaVersion !== "string" ||
+    !schemaVersion ||
+    sessionId !== expectedSessionId ||
+    typeof journey !== "string" ||
+    !quickstartJourneys.has(journey as QuickstartJourney) ||
+    typeof setupStage !== "string" ||
+    !quickstartStages.has(setupStage as QuickstartSetupStage) ||
+    !isIsoDate(startedAt) ||
+    !isIsoDate(updatedAt) ||
+    !Number.isSafeInteger(approvalTimeoutMs) ||
+    Number(approvalTimeoutMs) <= 0 ||
+    !Array.isArray(checks)
+  ) {
+    throw new Error("Quickstart status is invalid.");
+  }
+  const parsedChecks = checks.map((check) => {
+    if (
+      !isRecord(check) ||
+      typeof check.id !== "string" ||
+      !check.id ||
+      typeof check.state !== "string" ||
+      !quickstartCheckStates.has(check.state as QuickstartCheckState) ||
+      (check.remediationCode !== undefined &&
+        typeof check.remediationCode !== "string")
+    ) {
+      throw new Error("Quickstart status is invalid.");
+    }
+    return {
+      id: check.id,
+      remediationCode: check.remediationCode as string | undefined,
+      state: check.state as QuickstartCheckState,
+    };
+  });
+  if (tunnelUiUrl !== undefined && !safeLoopbackHttpUrl(tunnelUiUrl)) {
+    throw new Error("Quickstart status contains an unsafe tunnel UI URL.");
+  }
+  const parsedSetupDetails =
+    setupDetails === undefined ? undefined : parseSetupDetails(setupDetails);
+  return {
+    approvalTimeoutMs: Number(approvalTimeoutMs),
+    checks: parsedChecks,
+    journey: journey as QuickstartJourney,
+    schemaVersion,
+    sessionId,
+    setupDetails: parsedSetupDetails,
+    setupStage: setupStage as QuickstartSetupStage,
+    startedAt,
+    tunnelUiUrl: tunnelUiUrl as string | undefined,
+    updatedAt,
+  };
+}
+
+function parseSetupDetails(
+  value: unknown,
+): NonNullable<QuickstartStatus["setupDetails"]> {
+  if (!isRecord(value)) throw new Error("Quickstart setup details are invalid.");
+  const allowedKeys = new Set([
+    "composeVersion",
+    "dockerVersion",
+    "nodeVersion",
+    "port",
+    "projectName",
+    "runtimeKeyExcludedFromDocker",
+  ]);
+  if (Object.keys(value).some((key) => !allowedKeys.has(key))) {
+    throw new Error("Quickstart setup details are invalid.");
+  }
+  const versionPattern =
+    /^v?(?:0|[1-9][0-9]{0,3})(?:\.(?:0|[1-9][0-9]{0,3})){1,3}(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/u;
+  if (
+    typeof value.composeVersion !== "string" ||
+    !versionPattern.test(value.composeVersion) ||
+    typeof value.dockerVersion !== "string" ||
+    !versionPattern.test(value.dockerVersion) ||
+    typeof value.nodeVersion !== "string" ||
+    !versionPattern.test(value.nodeVersion) ||
+    !Number.isSafeInteger(value.port) ||
+    Number(value.port) < 1024 ||
+    Number(value.port) > 65535 ||
+    typeof value.projectName !== "string" ||
+    !/^actionproxy-first-run-[0-9a-f]{10}$/u.test(value.projectName) ||
+    (value.runtimeKeyExcludedFromDocker !== undefined &&
+      typeof value.runtimeKeyExcludedFromDocker !== "boolean")
+  ) {
+    throw new Error("Quickstart setup details are invalid.");
+  }
+  return {
+    composeVersion: value.composeVersion,
+    dockerVersion: value.dockerVersion,
+    nodeVersion: value.nodeVersion,
+    port: Number(value.port),
+    projectName: value.projectName,
+    runtimeKeyExcludedFromDocker: value.runtimeKeyExcludedFromDocker as
+      | boolean
+      | undefined,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isIsoDate(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function safeLoopbackHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "http:" &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      (url.hostname === "127.0.0.1" ||
+        url.hostname === "localhost" ||
+        url.hostname === "[::1]")
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function buildAuditExportUrl(format: "json" | "siem" = "json"): string {
   return `/v1/audit/export?format=${format}`;
 }
@@ -257,8 +445,8 @@ export async function approveApproval(
     note?: string;
     reviewHash?: string;
   },
-): Promise<void> {
-  await requestJson(`/v1/approvals/${encodeURIComponent(id)}/approve`, {
+): Promise<{ approval: ApprovalRecord; toolCall: ToolCallRecord }> {
+  return requestJson(`/v1/approvals/${encodeURIComponent(id)}/approve`, {
     body: JSON.stringify(input),
     method: "POST",
   });
@@ -267,8 +455,8 @@ export async function approveApproval(
 export async function rejectApproval(
   id: string,
   input: { reason?: string; rejectedBy: string },
-): Promise<void> {
-  await requestJson(`/v1/approvals/${encodeURIComponent(id)}/reject`, {
+): Promise<{ approval: ApprovalRecord; toolCall: ToolCallRecord }> {
+  return requestJson(`/v1/approvals/${encodeURIComponent(id)}/reject`, {
     body: JSON.stringify(input),
     method: "POST",
   });

@@ -55,6 +55,15 @@ The normal server entrypoint registers only:
 - memory, SQLite, and Postgres stores;
 - the local operator console.
 
+When explicit local Quickstart mode is enabled, the same composition also
+registers one ephemeral, read-only-to-the-browser setup-status resource. The
+concierge authenticates status updates with a random session token. This state
+is held in memory, accepts no arbitrary diagnostic text or payloads, and never
+enters `Store`, `AuditStore`, policy evaluation, approvals, or execution.
+The bundled stdio MCP wrapper uses a separate random origin token; the server
+derives the current-session tunnel marker only on the validated MCP adapter
+route, while ordinary HTTP submissions cannot mint that provenance.
+
 The normal web entrypoint is also fixed. It renders the local Community
 console, guided lifecycle demo, policy and approval views, approval-channel
 configuration, MCP setup, runner queue, and audit evidence. It does not discover
@@ -63,6 +72,12 @@ product shape from a runtime capability endpoint.
 Import-boundary tests enforce that Community entrypoints cannot reach modules
 outside this composition. The public candidate exporter copies only classified
 Community paths and verifies the resulting tree.
+
+The Google Workspace example is outside the server composition: a local script
+starts the Community MCP wrapper, which starts an operator-owned third-party
+MCP process. Google OAuth material remains in that downstream process's local
+state. The example does not import or register ActionProxy's native provider,
+platform-agent, workflow, or hosted modules.
 
 ## Ingress and canonical requests
 
@@ -167,8 +182,20 @@ ChatGPT -> OpenAI Secure MCP Tunnel -> ActionProxy stdio wrapper
 
 It exposes exactly `docs.search`, `gmail.send_email`, and
 `dangerous.delete_customer`. The runtime key belongs only to the tunnel client;
-ActionProxy does not store or forward it. This local demo is not an end-user
-identity boundary.
+the concierge supplies it through a private, session-scoped temporary file and
+removes it when the tunnel exits. ActionProxy does not store or forward it.
+This local demo is not an end-user identity boundary.
+
+Client acquisition is a separate local bootstrap boundary. Only an explicit
+interactive `I` choice or `./actionproxy tunnel-client install` downloads the
+ActionProxy-reviewed official OpenAI `v0.0.10` asset. A checked-in SHA-256 binds
+the platform asset before an atomic install at
+`.actionproxy/bin/tunnel-client`; no `sudo`, `PATH`, Docker, browser, profile, or
+Gatekeeper mutation participates. The upstream binary is ad-hoc signed rather
+than Developer ID-signed/notarized, so the launcher makes no Apple-verification
+claim. A private receipt binds ownership and content. Status is read-only;
+removal refuses an active launcher, manually placed content, and any digest
+change. `stop` and `reset` retain the binary and tunnel profiles.
 
 The standard `/mcp` resource is the advanced path. Sessions are signed and
 bound to tenant, principal, OAuth client, resource, and protocol version.

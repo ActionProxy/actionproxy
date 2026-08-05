@@ -3,6 +3,33 @@
 This document describes the ActionProxy Community v0.1 HTTP surface. The API is
 a developer preview and may receive additive changes before a stable release.
 
+## Machine-readable contract
+
+The versioned machine-readable contract is
+[`openapi/actionproxy.openapi.json`](../openapi/actionproxy.openapi.json). It is
+OpenAPI 3.1, uses the JSON Schema draft 2020-12 dialect, and identifies the API
+as `0.1.0`. Its Community operation inventory is checked against the actual
+Fastify route modules; static web routes and routes outside the Community
+boundary are excluded deliberately. Routes that exist only in an explicitly
+enabled mode carry an availability note instead of being presented as
+universally active.
+
+Do not hand-edit the artifact. Change the generator and corresponding runtime
+validation, then regenerate and prove there is no drift:
+
+```bash
+corepack pnpm openapi:generate
+corepack pnpm openapi:check
+corepack pnpm test:openapi
+```
+
+The OpenAPI document references the versioned
+[policy](../schemas/actionproxy.policy.v1.schema.json) and
+[MCP-wrapper](../schemas/actionproxy.mcp-wrapper.v1.schema.json) schemas. For an
+AI coding agent, use these files and the versioned conformance fixtures rather
+than scraping examples. Runtime validation remains authoritative for any
+security invariant that OpenAPI or JSON Schema cannot express.
+
 ## Conventions
 
 - Default base URL: `http://127.0.0.1:8787`.
@@ -59,6 +86,53 @@ Returns:
 
 Serve the bundled Community console when `ACTIONPROXY_WEB_DIST_PATH` exists.
 Docker exposes the console at `/app#/demo`.
+
+## Local Quickstart status
+
+These routes are registered only when explicit Quickstart mode is enabled for a
+local deployment using `AUTH_MODE=none` and mock execution. Otherwise both
+routes return `404`. The snapshot is ephemeral setup transport state; it is not
+stored in the governance database or audit chain.
+
+### `GET /v1/demo/quickstart/status/:sessionId`
+
+Returns the current `actionproxy.quickstart.v1` snapshot for the one active
+concierge session. The browser can read this route without receiving the update
+token. Unknown, old, disabled, and not-yet-published sessions return `404`.
+A `tunnel_ready` heartbeat older than 15 seconds is rendered as
+`tunnel_stopped` with a fixed remediation code.
+
+### `PUT /v1/demo/quickstart/status/:sessionId`
+
+Replaces the current snapshot when
+`X-ActionProxy-Quickstart-Token` matches the random launcher-held token. The
+strict body contains only:
+
+```json
+{
+  "schemaVersion": "actionproxy.quickstart.v1",
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "journey": "chatgpt",
+  "setupStage": "tunnel_ready",
+  "approvalTimeoutMs": 300000,
+  "checks": [
+    { "id": "gateway", "state": "pass" },
+    { "id": "tunnel_readiness", "state": "pass" }
+  ],
+  "tunnelUiUrl": "http://127.0.0.1:49152/ui"
+}
+```
+
+The server owns `startedAt` and `updatedAt`. IDs, states, stages, and
+remediation codes are closed enumerations; duplicate checks and arbitrary
+messages, paths, environment data, command output, payloads, and credentials
+are rejected. A tunnel UI URL must be loopback HTTP.
+
+The launcher generates a second, distinct origin token for the bundled stdio
+MCP wrapper. Only authenticated `POST /v1/mcp/tool-calls` requests carrying
+that private header receive the server-derived active-session Quickstart
+origin marker. Ordinary `POST /v1/tool-calls` always strips reserved origin
+fields, even if a caller supplies either Quickstart token.
 
 ## Tool calls
 

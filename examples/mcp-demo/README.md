@@ -27,10 +27,18 @@ corepack pnpm demo:mcp
 
 This script acts as a tiny MCP host. It starts the ActionProxy MCP wrapper, verifies the three-tool catalog, runs `docs.search`, proves `gmail.send_email` has not executed before approval, approves it, and confirms `dangerous.delete_customer` is denied without a grant or downstream dispatch. Every downstream effect is simulated.
 
-To approve through the web UI instead:
+To approve through the web UI instead, keep the proxy-mode gateway running and
+use two more terminals.
+
+Terminal 2 — start the dashboard:
 
 ```bash
 corepack pnpm dev:web
+```
+
+Terminal 3 — start the manual MCP proof:
+
+```bash
 corepack pnpm demo:mcp:manual
 ```
 
@@ -56,4 +64,6 @@ Connect an MCP host to that command. Tool calls made through the host are submit
 - `gmail.send_email` creates a pending ActionProxy approval. After approval, the wrapper forwards the tool call to the demo MCP server.
 - `dangerous.delete_customer` is denied before the downstream MCP server is called.
 
-The ActionProxy audit log records the MCP tool-call proposals because the wrapper submits them through `POST /v1/tool-calls`.
+The ActionProxy audit log records the MCP tool-call proposals because the
+wrapper submits them through the authenticated `POST /v1/mcp/tool-calls`
+adapter boundary.

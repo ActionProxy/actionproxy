@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://actionproxy.com/schemas/actionproxy.mcp-wrapper.v1.schema.json",
+  "title": "ActionProxy MCP wrapper configuration v1",
+  "description": "Configuration for wrapping one or more downstream stdio MCP servers with the ActionProxy governance lifecycle.",
+  "type": "object",
+  "required": [
+    "actionproxy",
+    "servers"
+  ],
+  "properties": {
+    "actionproxy": {
+      "$ref": "#/$defs/actionproxy"
+    },
+    "servers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/server"
+      }
+    },
+    "policies": {
+      "type": "object",
+      "description": "Documented wrapper intent only. The ActionProxy server policy remains the enforcement source of truth.",
+      "additionalProperties": {
+        "$ref": "#/$defs/policyIntent"
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$comment": "The v1 parser strips unknown fields for compatibility. It also performs case-insensitive credential isolation and inline-versus-passthrough checks that JSON Schema cannot express.",
+  "$defs": {
+    "actionproxy": {
+      "type": "object",
+      "required": [
+        "baseUrl"
+      ],
+      "properties": {
+        "baseUrl": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "ActionProxy gateway base URL. ACTIONPROXY_BASE_URL may override it at runtime.",
+          "examples": [
+            "http://127.0.0.1:8787"
+          ]
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "requestedBy": {
+          "type": "string"
+        },
+        "approvalPollIntervalMs": {
+          "type": "number"
+        },
+        "approvalTimeoutMs": {
+          "type": "number"
+        },
+        "cancelPendingOnAbort": {
+          "type": "boolean",
+          "default": false
+        },
+        "bearerTokenEnv": {
+          "$ref": "#/$defs/environmentVariableName"
+        },
+        "quickstartOriginTokenEnv": {
+          "$ref": "#/$defs/environmentVariableName"
+        },
+        "requestTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "apiKey": false,
+        "bearerToken": false,
+        "token": false,
+        "quickstartOriginToken": false
+      },
+      "additionalProperties": true,
+      "$comment": "Credentials must be referenced by environment-variable name. Literal apiKey, bearerToken, token, and quickstartOriginToken properties are rejected by the runtime."
+    },
+    "environmentVariableName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "policyIntent": {
+      "type": "object",
+      "required": [
+        "approval"
+      ],
+      "properties": {
+        "approval": {
+          "type": "string",
+          "enum": [
+            "never",
+            "required",
+            "deny"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "server": {
+      "type": "object",
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "envPassthrough": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/environmentVariableName"
+          },
+          "uniqueItems": true
+        },
+        "requestTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "stdioFraming": {
+          "type": "string",
+          "enum": [
+            "content-length",
+            "newline"
+          ]
+        }
+      },
+      "additionalProperties": true,
+      "$comment": "At runtime envPassthrough names are unique case-insensitively, cannot duplicate inline env names, and cannot expose either configured ActionProxy credential variable."
+    }
+  },
+  "examples": [
+    {
+      "actionproxy": {
+        "baseUrl": "http://127.0.0.1:8787",
+        "bearerTokenEnv": "ACTIONPROXY_MCP_BEARER_TOKEN",
+        "approvalPollIntervalMs": 1000,
+        "approvalTimeoutMs": 300000,
+        "cancelPendingOnAbort": true
+      },
+      "servers": {
+        "demo": {
+          "command": "node",
+          "args": [
+            "./server.mjs"
+          ],
+          "envPassthrough": [
+            "DOWNSTREAM_CREDENTIAL_REFERENCE"
+          ]
+        }
+      },
+      "policies": {
+        "docs.search": {
+          "approval": "never"
+        },
+        "gmail.send_email": {
+          "approval": "required"
+        },
+        "dangerous.delete_customer": {
+          "approval": "deny"
+        }
+      }
+    }
+  ]
+}

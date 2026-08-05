@@ -14,6 +14,10 @@ an identified reviewer; they do not create a separate authorization path.
 Configure channels from the Integrations page or deployment environment. Do
 not commit bot tokens, signing secrets, SMTP passwords, or API keys.
 
+See [OSS test status](OSS_TEST_STATUS.md) for the distinction between automated
+channel tests, historical or local evidence, and live provider validation that
+operators still need to perform.
+
 ## Lifecycle rules
 
 - ActionProxy creates the pending approval before attempting delivery.

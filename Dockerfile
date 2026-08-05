@@ -33,7 +33,7 @@ ENV ACTIONPROXY_HOST=0.0.0.0
 ENV ACTIONPROXY_LOCAL_EXECUTION=mock
 ENV ACTIONPROXY_POLICY_PATH=apps/server/src/policies/default.policy.yaml
 ENV ACTIONPROXY_PORT=8787
-ENV ACTIONPROXY_STORAGE=memory
+ENV ACTIONPROXY_STORAGE=sqlite
 ENV ACTIONPROXY_WEB_DIST_PATH=apps/web/dist
 
 COPY --from=build /app/apps/server/dist ./apps/server/dist

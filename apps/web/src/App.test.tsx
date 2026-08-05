@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -12,16 +13,19 @@ import { fetchDashboardData, saveApiToken } from "./lib/actionproxy-client";
 vi.mock("./components/Dashboard", () => ({
   Dashboard: ({
     error,
+    loading,
     onRefresh,
     snapshotState,
   }: {
     error?: string | null;
+    loading: boolean;
     onRefresh: () => Promise<void> | void;
     snapshotState?: string;
   }) => (
     <div data-testid="dashboard-shell">
       Community dashboard shell
       <span data-testid="snapshot-state">{snapshotState}</span>
+      <span data-testid="loading-state">{loading ? "loading" : "idle"}</span>
       {error && <span data-testid="dashboard-error">{error}</span>}
       <button type="button" onClick={() => void onRefresh()}>
         Refresh probe
@@ -122,5 +126,51 @@ describe("fixed Community app shell", () => {
       ),
     );
     expect(screen.queryByTestId("dashboard-error")).not.toBeInTheDocument();
+  });
+
+  it("keeps scheduled background refreshes visually silent", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<App />);
+      await act(async () => {});
+
+      expect(screen.getByTestId("loading-state")).toHaveTextContent("idle");
+
+      let completeBackgroundRefresh: (
+        data: Awaited<ReturnType<typeof fetchDashboardData>>,
+      ) => void = () => undefined;
+      vi.mocked(fetchDashboardData).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            completeBackgroundRefresh = resolve;
+          }),
+      );
+
+      act(() => vi.advanceTimersByTime(5_000));
+
+      expect(fetchDashboardData).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId("loading-state")).toHaveTextContent("idle");
+
+      await act(async () => {
+        completeBackgroundRefresh(
+          {} as Awaited<ReturnType<typeof fetchDashboardData>>,
+        );
+      });
+      expect(screen.getByTestId("loading-state")).toHaveTextContent("idle");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes silently when the operator returns to the browser", async () => {
+    render(<App />);
+    await screen.findByTestId("dashboard-shell");
+    await waitFor(() => expect(fetchDashboardData).toHaveBeenCalledTimes(1));
+    vi.mocked(fetchDashboardData).mockClear();
+
+    window.dispatchEvent(new Event("focus"));
+
+    await waitFor(() => expect(fetchDashboardData).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("loading-state")).toHaveTextContent("idle");
   });
 });

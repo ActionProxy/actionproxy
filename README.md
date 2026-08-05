@@ -2,6 +2,14 @@
 
 **Open-source approval gates for AI agent tool calls.**
 
+```bash
+./actionproxy
+```
+
+That is the fresh-download first run. It guides you through a local lifecycle
+proof or an experimental ChatGPT connection; details and prerequisites follow
+below.
+
 ActionProxy sits between an AI agent and the tools it wants to use. Calls routed
 through an ActionProxy adapter are evaluated against deterministic policy,
 allowed, denied, or paused for human approval, and recorded as lifecycle
@@ -11,7 +19,7 @@ Use it when an agent can send email, update a CRM, change a ticket, issue a
 refund, call an internal API, or invoke an MCP tool—but should not receive broad
 authority to do so unattended.
 
-![ActionProxy local demo lab](docs/assets/actionproxy-demo-lab.png)
+![ActionProxy local Quickstart](docs/assets/actionproxy-quickstart.png)
 
 ```text
 agent proposes a tool call
@@ -27,80 +35,233 @@ runner executes the tool
 ActionProxy records the outcome and audit evidence
 ```
 
-## Five-minute demo
+## First run
 
-### Source quickstart
-
-Prerequisites: Node.js 24 and Corepack. Node 22 is also supported in CI.
+From a fresh source download, start with one command:
 
 ```bash
-nvm use
-corepack enable
-corepack pnpm install --frozen-lockfile
-corepack pnpm dev
+./actionproxy
 ```
 
-`pnpm dev` starts the Community gateway and Vite console together. Open
-`http://127.0.0.1:5173/#/demo`, choose **Run full demo**, and follow the
-allow, approval, denial, and audit steps. The tools are deterministic mocks; no
-SaaS credentials are needed.
+The guided path is supported on macOS and requires Node.js 22–24 and
+Docker Desktop. Node.js 24 is recommended. It checks prerequisites before
+changing anything, builds the Community container, lets Docker assign a free
+loopback port, verifies the exact mock-tool inventory, and opens **Quickstart**.
+No host-side `pnpm install`, account, SaaS credential, or real business system
+is needed for the local proof. A cold Docker build can still download its base
+image and install dependencies inside the image.
 
-If you do not use `nvm`, install a current Node 24 release with your preferred
-version manager. The checked-in `.node-version` also works with tools such as
-`asdf` and `mise`.
+Cold-build time varies with network and host performance. Warm reruns reuse the
+local Docker cache and the retained SQLite volume.
 
-Advanced development commands:
+Choose one of two journeys, or invoke it directly:
 
 ```bash
-corepack pnpm dev:server  # gateway only, with local mock execution
-corepack pnpm dev:web     # Vite console only
-corepack pnpm dev:proxy   # gateway for an external runner; no local execution
+./actionproxy local
+./actionproxy chatgpt
 ```
 
-### Docker alternative
+The local journey proves all three policy outcomes:
 
-Build and run the same Community source on loopback:
+- `docs.search` is allowed and executes immediately;
+- `gmail.send_email` pauses with zero effects until a human decides; and
+- `dangerous.delete_customer` is denied without downstream dispatch.
+
+All three tools are deterministic mocks. The container stores lifecycle and
+audit evidence in a checkout-specific SQLite volume, so `stop` and a later
+restart retain it:
 
 ```bash
-docker compose up --build
+./actionproxy status
+./actionproxy stop
 ```
 
-Open `http://127.0.0.1:8787/app#/demo`. To use another host port:
-
-```bash
-ACTIONPROXY_DOCKER_PORT=18787 docker compose up --build
-```
-
-Stop the foreground process with `Ctrl+C`, then run `docker compose down` when
-you also want to remove the container. The named data volume remains unless
-you explicitly add `--volumes`.
+`Start a new proof` clears only browser guidance. To delete the concierge-owned
+container state and audit volume, run `./actionproxy reset` and type the exact
+confirmation phrase it displays. The concierge never targets unrelated Docker
+projects or volumes.
 
 ### Connect ChatGPT
 
-The beginner ChatGPT path keeps ActionProxy on loopback and exposes only its
-stdio MCP wrapper through OpenAI Secure MCP Tunnel:
+The ChatGPT journey keeps the gateway on loopback and exposes only its stdio
+MCP wrapper through OpenAI Secure MCP Tunnel:
 
 ```text
 ChatGPT → OpenAI Secure MCP Tunnel → ActionProxy MCP wrapper
         → local ActionProxy gateway → deterministic mock tools
 ```
 
-After creating a tunnel for an entitled ChatGPT workspace, keep its runtime key
-in the shell and run:
+This journey is experimental in v0.1. Its local lifecycle, launcher, secret
+handling, and simulated tunnel states have automated coverage, but the mandatory
+clean-Mac live ChatGPT acceptance has not yet been recorded. Treat the steps as
+guided evaluation, not as a claim of release-proven live ChatGPT support.
+
+ChatGPT developer-mode access, Platform Tunnels **Read** + **Use**, and tunnel
+association with the target ChatGPT workspace are separate prerequisites. The
+concierge checks the local pieces and guides the workspace steps; it cannot
+grant access or change administrator settings.
+
+Run `./actionproxy chatgpt` even if you have not prepared the tunnel yet. In
+the same terminal, the concierge:
+
+- checks Mac, Node, Docker Desktop, and Compose first;
+- explains the separate Platform and ChatGPT access boundaries;
+- can open the official tunnel, developer-mode, and access-request guidance;
+- accepts and validates the tunnel ID when you have it;
+- detects `tunnel-client`; when it is absent, offers an explicit `I` choice to
+  install ActionProxy's reviewed, pinned copy of the official OpenAI `v0.0.10`
+  asset locally, while retaining the exact manual release/checksum procedure;
+  and
+- builds and verifies the local gateway before asking for the runtime key with
+  hidden input.
+
+You can pause safely at every external-access step and rerun the same command.
+Once the gateway is ready, the browser Quickstart opens alongside the remaining
+tunnel setup and shows the matching live state. Passing
+`--tunnel-id tunnel_0123456789abcdef0123456789abcdef` remains available for
+automation or experienced users.
+
+ActionProxy downloads `tunnel-client` only after you choose `I` in the
+interactive missing-client flow or explicitly run the install command. It
+installs the ActionProxy-reviewed, pinned official OpenAI `v0.0.10` asset at
+`.actionproxy/bin/tunnel-client`; the checked-in SHA-256 is the trust anchor.
+The upstream binary is ad-hoc signed, not Developer ID-signed or notarized, so
+ActionProxy does not claim that Apple has verified it. The installer never runs
+`sudo`, changes `PATH`, removes quarantine metadata, or bypasses Gatekeeper.
+This describes the optional host-side tunnel helper; a cold Docker build can
+separately download images and image-local dependencies.
+
+Inspect or manage only this checkout-local installation with:
 
 ```bash
-export CONTROL_PLANE_API_KEY='<runtime-key-from-openai-platform>'
-corepack pnpm demo:chatgpt:tunnel -- --tunnel-id tunnel_...
+./actionproxy tunnel-client status
+./actionproxy tunnel-client install
+./actionproxy tunnel-client remove
 ```
 
-The launcher verifies Docker and the wrapper, exposes exactly `docs.search`,
-`gmail.send_email`, and `dangerous.delete_customer`, and never asks the browser
-for the runtime key. See the complete
-[Secure MCP Tunnel example](examples/chatgpt-tunnel/README.md).
+Each command also accepts `--json`. A verified local install is reusable
+offline. `remove` deletes only an unchanged client bound to ActionProxy's own
+install receipt; it refuses a live launcher, a modified file, and manually
+placed clients. `stop` and `reset` retain the client. The downloaded optional
+binary is not part of the repository release or its SBOM.
 
-For an advanced public HTTPS resource-server integration, see
-[OAuth-protected Streamable HTTP MCP](docs/CHATGPT_MCP.md). That adapter is
-experimental and requires an external OAuth 2.1 authorization server.
+The runtime key is supplied to `tunnel-client` through a private, temporary
+file and is removed when the tunnel ends; never put the key in a command
+argument, browser, profile, or checked-in configuration.
+
+For noninteractive automation, point
+`ACTIONPROXY_CONTROL_PLANE_KEY_FILE` at an absolute, caller-owned regular file
+with mode `0600`. The concierge reads it only after the non-secret checks and
+build, copies the value into an OS-temporary `0700` session, and leaves the
+caller file untouched. Legacy `CONTROL_PLANE_API_KEY` input is accepted only
+when invoking `./actionproxy` directly; the root shim immediately moves it to
+an unlinked private file descriptor before starting Node. Environment secrets
+still have an unavoidable pre-start process-listing window, so do not put the
+raw variable in front of `corepack pnpm`, `node scripts/first-run.mjs`, or the
+compatibility adapter. Use the file input whenever strict process-list secrecy
+matters.
+
+The external OpenAI links in this first-run guidance were last reviewed on
+**2026-08-03**; use the linked canonical pages rather than relying on a copied
+menu path.
+
+The existing automation-compatible command remains available and delegates to
+the same implementation:
+
+```bash
+corepack pnpm demo:chatgpt:tunnel -- --tunnel-id tunnel_0123456789abcdef0123456789abcdef
+```
+
+See the complete [Secure MCP Tunnel manual fallback and troubleshooting
+guide](examples/chatgpt-tunnel/README.md). For an advanced public HTTPS
+resource-server integration, see [OAuth-protected Streamable HTTP
+MCP](docs/CHATGPT_MCP.md); that adapter is experimental and requires an
+external OAuth 2.1 authorization server.
+
+## Adopt in another project
+
+If a developer or AI coding agent is adding ActionProxy to an existing
+application, start with the [third-party adoption guide](docs/ADOPTING.md), not
+the contribution workflow. Generate a credential-free starter from the
+consumer project's directory with one deterministic command:
+
+```bash
+/absolute/path/to/actionproxy/actionproxy integrate --mode sdk --json
+# or: --mode mcp
+# or: --mode http
+```
+
+The default directory is `actionproxy-<mode>-integration`. Use
+`--output NAME` for another single-directory name. Generation creates a new
+directory only, refuses to overwrite any existing entry, targets a loopback
+gateway, and includes a machine-readable descriptor plus a mode-specific proof
+checklist. SDK and MCP starters build a versioned local package tarball from the
+reviewed checkout; they do not assume or probe npm registry availability. The
+HTTP starter has no runtime dependency. The generated descriptor records the
+package and source-binding contract. A private `actionproxy-source.json` stores
+the reviewed checkout's local path so the starter can find it after `cd`; its
+contents and absolute path are omitted from command output. `--json` reports
+generated filenames, hashes, and next commands without credentials or absolute
+paths. The starter's `.gitignore` excludes that binding, local package
+tarballs, and installed dependencies.
+
+Each starter rechecks `./actionproxy status --json` immediately before it runs,
+requires a healthy loopback-only gateway, and uses the live Docker-assigned
+port. Its generated policy is clearly marked as a sample; `./actionproxy local`
+continues to enforce the bundled deterministic demo policy unless an operator
+starts the server separately with an explicit policy path.
+
+The guide provides a single decision tree for the three supported integration
+boundaries:
+
+- put the stdio wrapper in front of an existing MCP server;
+- use `runExternalAction` when a JavaScript or TypeScript runner owns the
+  downstream function; or
+- implement the documented HTTP grant lifecycle from another runtime.
+
+The SDK and MCP-wrapper package sources are independently versioned at
+`0.1.0`. Their manifests and isolated packed-consumer tests are release-ready,
+but this document does not claim that either package exists in npm until the
+exact registry records are independently verified. The guide includes the
+truthful local-tarball fallback, machine-readable OpenAPI and JSON Schema
+contracts, a mock-first completion contract, and a prompt developers can give
+directly to a coding agent. Do not let an agent invent package availability,
+bypass grant consumption, or replace an unknown downstream outcome with an
+automatic retry.
+
+### Develop from source
+
+Use the Node/Corepack workflow when changing ActionProxy itself:
+
+In the public checkout, coding agents and automated contributors should first
+read the repository-wide [AGENTS.md](AGENTS.md).
+
+If you already use `nvm`, run `nvm use` first. Otherwise select Node 22–24 with
+your existing Node installation or version manager; Node 24 is recommended.
+
+```bash
+node --version
+corepack enable
+corepack pnpm install --frozen-lockfile
+corepack pnpm dev
+```
+
+Open `http://127.0.0.1:5173/#/demo`. The checked-in `.node-version` also works
+with tools such as `asdf` and `mise`.
+
+These development commands are alternatives; run each process you need in its
+own terminal:
+
+```bash
+corepack pnpm dev:server  # gateway only, with local mock execution
+corepack pnpm dev:web     # Vite console only
+corepack pnpm dev:proxy   # external-runner mode; no local execution
+```
+
+For a manual Docker run, use `docker compose up --build` and open
+`http://127.0.0.1:8787/app#/demo`. Set `ACTIONPROXY_DOCKER_PORT=18787` when an
+explicit alternate host port is useful. The Compose default uses SQLite and
+publishes only to `127.0.0.1`.
 
 ## What ships
 
@@ -119,7 +280,8 @@ experimental and requires an external OAuth 2.1 authorization server.
 - API-key and OIDC JWT authentication modes for self-hosted deployments
 
 See [Community capabilities](docs/COMMUNITY_CAPABILITIES.md) for the precise
-boundary and current limitations.
+boundary, and [OSS test status](docs/OSS_TEST_STATUS.md) for what is automated,
+what still needs live validation, and what remains before release.
 
 ## What ActionProxy is not
 
@@ -158,14 +320,24 @@ The expected behavior is:
 
 The JavaScript SDK is a workspace component in `packages/sdk-js/`. It contains
 the HTTP client, polling helper, gated-tool helper, and external-runner
-authority flow. Packages are not published to npm for v0.1; use them from this
-checkout.
+authority flow. Its independently packable candidate is
+`@actionproxy/sdk-js@0.1.0`. This README does not infer registry availability
+from the manifest; verify the exact npm record after an owner-authorized
+release, or use the pinned local-tarball workflow in
+[the adoption guide](docs/ADOPTING.md#javascript-consumer-path).
 
 Start ActionProxy without local tool execution before testing an external
 runner:
 
+Terminal 1 — gateway:
+
 ```bash
 corepack pnpm dev:proxy
+```
+
+Terminal 2 — external runner:
+
+```bash
 node examples/external-runner/run-external-action.mjs
 ```
 
@@ -174,7 +346,9 @@ See [External runners and MCP](docs/EXTERNAL_RUNNERS_MCP.md).
 ## MCP wrapper
 
 The stdio wrapper in `packages/mcp-wrapper/` lets an MCP host expose downstream
-tools only through ActionProxy policy and approval.
+tools only through ActionProxy policy and approval. Its independently packable
+candidate is `@actionproxy/mcp-wrapper@0.1.0`; the same registry-verification
+rule and local-tarball fallback apply.
 
 ```bash
 corepack pnpm dev:proxy
@@ -190,6 +364,33 @@ Use `corepack pnpm demo:mcp:manual` to approve through the web console, or
 `corepack pnpm demo:mcp:hosts` to print local Codex, Claude Code, and generic
 stdio host configurations. Discovery starts reviewed child commands and is not
 a sandbox.
+
+### Real Google Workspace reference
+
+Community also includes an opt-in, downstream
+[Google Workspace MCP reference](examples/google-workspace-mcp-demo/README.md).
+It demonstrates a real Gmail search followed by a draft that remains paused
+until an ActionProxy approval is granted:
+
+```text
+local scripted host → ActionProxy MCP wrapper → operator-owned workspace-mcp
+                    → Google Workspace
+```
+
+This is not the bundled `gmail.send_email` mock and it is not an
+ActionProxy-native Google connector. The third-party MCP process owns Google
+OAuth and runs with the local user's ordinary process and network authority;
+ActionProxy does not vendor it or take custody of its OAuth tokens. Use a
+dedicated test account, review the external dependency before invocation, and
+keep the example's `.env.local` and `.actionproxy/` state untracked. The
+documented first proof can search Gmail and create a draft after review; it
+does not send email. The reference pins the third-party
+[`workspace-mcp` 1.22.0 README](https://github.com/taylorwilsdon/google_workspace_mcp/blob/v1.22.0/README.md),
+[`v1.22.0` license](https://github.com/taylorwilsdon/google_workspace_mcp/blob/v1.22.0/LICENSE),
+and [official PyPI 1.22.0 record](https://pypi.org/project/workspace-mcp/1.22.0/).
+Its Python transitive dependencies remain outside ActionProxy's pnpm lock and
+SBOM. No live Google-account acceptance has been recorded for this release
+candidate, so this is not a claim of verified native or live connector support.
 
 ## Storage
 
@@ -245,6 +446,8 @@ the [threat model](docs/THREAT_MODEL.md) before using real data or tools.
 corepack pnpm test
 corepack pnpm lint
 corepack pnpm build
+corepack pnpm openapi:check
+node scripts/generate-config-schemas.mjs --check
 corepack pnpm test:e2e:community
 corepack pnpm docker:smoke:community
 ```
@@ -272,6 +475,5 @@ ActionProxy is licensed under Apache-2.0. Read [CONTRIBUTING.md](CONTRIBUTING.md
 the [Code of Conduct](CODE_OF_CONDUCT.md), and [Support](SUPPORT.md). Good starter
 work is listed in [First issues](docs/FIRST_ISSUES.md).
 
-The public repository is generated from a private source monorepo. Accepted
-public contributions are ported back with the original contributor attribution
-preserved.
+The public repository is generated from a reviewed Community boundary.
+Accepted public contributions retain the original contributor attribution.

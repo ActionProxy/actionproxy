@@ -6,6 +6,10 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const defaultUiUrl = 'http://127.0.0.1:5173/#/demo';
+const googleWorkspaceDataDir =
+  '.actionproxy/google-workspace-mcp/actionproxy-data';
+const googleWorkspacePolicyPath =
+  'examples/google-workspace-mcp-demo/actionproxy.policy.yaml';
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',
@@ -32,6 +36,10 @@ export function loadDevEnvironment(
 
 export function devProcessSpecs(args = [], environment = process.env) {
   const options = new Set(args);
+  const googleWorkspaceDemo = options.has('--google-workspace-demo');
+  const childEnvironment = googleWorkspaceDemo
+    ? isolateGoogleWorkspaceDemoEnvironment(environment)
+    : environment;
   const serverOnly = options.has('--server-only');
   const webOnly = options.has('--web-only');
   if (serverOnly && webOnly) {
@@ -39,10 +47,20 @@ export function devProcessSpecs(args = [], environment = process.env) {
   }
 
   const policyIndex = args.indexOf('--policy');
-  const policyPath = policyIndex === -1 ? undefined : args[policyIndex + 1];
+  if (googleWorkspaceDemo && policyIndex !== -1) {
+    throw new Error(
+      '--google-workspace-demo owns its policy and cannot be combined with --policy.',
+    );
+  }
+  const policyPath = googleWorkspaceDemo
+    ? googleWorkspacePolicyPath
+    : policyIndex === -1
+      ? undefined
+      : args[policyIndex + 1];
   if (policyIndex !== -1 && !policyPath) {
     throw new Error('--policy requires a repository-relative policy path.');
   }
+  const privateDataDir = resolvePrivateDataDir(args);
 
   const corepack = process.platform === 'win32' ? 'corepack.cmd' : 'corepack';
   const specs = [];
@@ -51,10 +69,29 @@ export function devProcessSpecs(args = [], environment = process.env) {
       args: ['pnpm', '--filter', '@actionproxy/server', 'dev'],
       command: corepack,
       env: {
-        ...environment,
+        ...childEnvironment,
         ACTIONPROXY_DEPLOYMENT_MODE: 'local',
-        ACTIONPROXY_LOCAL_EXECUTION: options.has('--proxy') ? 'disabled' : 'mock',
+        ACTIONPROXY_LOCAL_EXECUTION:
+          googleWorkspaceDemo || options.has('--proxy') ? 'disabled' : 'mock',
         ...(policyPath ? { ACTIONPROXY_POLICY_PATH: policyPath } : {}),
+        ...(privateDataDir
+          ? { ACTIONPROXY_DATA_DIR: privateDataDir }
+          : {}),
+        ...(googleWorkspaceDemo
+          ? {
+              ACTIONPROXY_ALLOW_UNSAFE_LOCAL_BIND: 'false',
+              ACTIONPROXY_AUTH_MODE: 'none',
+              ACTIONPROXY_DISABLE_LOCAL_ENV_FILES: 'true',
+              ACTIONPROXY_EMAIL_TRANSPORT: 'outbox',
+              ACTIONPROXY_HOST: '127.0.0.1',
+              ACTIONPROXY_MCP_STDIO_DISCOVERY_ENABLED: 'false',
+              ACTIONPROXY_MCP_STREAMABLE_HTTP_ENABLED: 'false',
+              ACTIONPROXY_OTEL_ENABLED: 'false',
+              ACTIONPROXY_PORT: '8787',
+              ACTIONPROXY_QUICKSTART_MODE: 'false',
+              ACTIONPROXY_STORAGE: 'memory',
+            }
+          : {}),
       },
       label: 'server',
     });
@@ -63,11 +100,53 @@ export function devProcessSpecs(args = [], environment = process.env) {
     specs.push({
       args: ['pnpm', '--filter', '@actionproxy/web', 'dev'],
       command: corepack,
-      env: { ...environment },
+      env: { ...childEnvironment },
       label: 'web',
     });
   }
   return specs;
+}
+
+export function isolateGoogleWorkspaceDemoEnvironment(environment) {
+  const result = {};
+  for (const name of [
+    'ALL_PROXY',
+    'CI',
+    'COLORTERM',
+    'COREPACK_HOME',
+    'FORCE_COLOR',
+    'HOME',
+    'HTTPS_PROXY',
+    'HTTP_PROXY',
+    'LANG',
+    'LC_ALL',
+    'LC_CTYPE',
+    'LOGNAME',
+    'NO_COLOR',
+    'NO_PROXY',
+    'NVM_BIN',
+    'NVM_DIR',
+    'PATH',
+    'PNPM_HOME',
+    'Path',
+    'SHELL',
+    'SSL_CERT_DIR',
+    'SSL_CERT_FILE',
+    'TEMP',
+    'TERM',
+    'TMP',
+    'TMPDIR',
+    'TZ',
+    'USER',
+    'VOLTA_HOME',
+    'all_proxy',
+    'http_proxy',
+    'https_proxy',
+    'no_proxy',
+  ]) {
+    if (typeof environment[name] === 'string') result[name] = environment[name];
+  }
+  return result;
 }
 
 export function startDev({
@@ -80,10 +159,24 @@ export function startDev({
   rootDirectory = repositoryRoot,
   spawnProcess = spawn,
 } = {}) {
-  const specs = devProcessSpecs(
-    args,
-    loadDevEnvironment(rootDirectory, environment),
-  );
+  const privateDataDir = resolvePrivateDataDir(args);
+  if (privateDataDir) {
+    preparePrivateDataDirectory(rootDirectory, privateDataDir);
+  }
+  const previousUmask = privateDataDir ? process.umask(0o077) : undefined;
+  let specs;
+  try {
+    const loadedEnvironment = args.includes('--google-workspace-demo')
+      ? environment
+      : loadDevEnvironment(rootDirectory, environment);
+    specs = devProcessSpecs(
+      args,
+      loadedEnvironment,
+    );
+  } catch (error) {
+    if (previousUmask !== undefined) process.umask(previousUmask);
+    throw error;
+  }
   const children = new Set();
   let stopping = false;
 
@@ -96,26 +189,30 @@ export function startDev({
     onExit(exitCode);
   }
 
-  for (const spec of specs) {
-    const child = spawnProcess(spec.command, spec.args, {
-      env: spec.env,
-      stdio: 'inherit',
-    });
-    children.add(child);
-    child.once('error', (error) => {
-      output.write(`[ActionProxy] Could not start ${spec.label}: ${error.message}\n`);
-      stop('SIGTERM', 1);
-    });
-    child.once('exit', (code, signal) => {
-      children.delete(child);
-      if (stopping) return;
-      if (code !== 0 || signal) {
-        output.write(
-          `[ActionProxy] ${spec.label} stopped${signal ? ` after ${signal}` : ` with exit code ${code}`}. Check for an occupied port or the error above.\n`,
-        );
-      }
-      stop('SIGTERM', code ?? (signal ? 1 : 0));
-    });
+  try {
+    for (const spec of specs) {
+      const child = spawnProcess(spec.command, spec.args, {
+        env: spec.env,
+        stdio: 'inherit',
+      });
+      children.add(child);
+      child.once('error', (error) => {
+        output.write(`[ActionProxy] Could not start ${spec.label}: ${error.message}\n`);
+        stop('SIGTERM', 1);
+      });
+      child.once('exit', (code, signal) => {
+        children.delete(child);
+        if (stopping) return;
+        if (code !== 0 || signal) {
+          output.write(
+            `[ActionProxy] ${spec.label} stopped${signal ? ` after ${signal}` : ` with exit code ${code}`}. Check for an occupied port or the error above.\n`,
+          );
+        }
+        stop('SIGTERM', code ?? (signal ? 1 : 0));
+      });
+    }
+  } finally {
+    if (previousUmask !== undefined) process.umask(previousUmask);
   }
 
   const handleInterrupt = () => stop('SIGINT', 0);
@@ -137,6 +234,62 @@ export function startDev({
     },
     stop,
   };
+}
+
+export function preparePrivateDataDirectory(rootDirectory, relativePath) {
+  const privateRoot = path.resolve(rootDirectory, '.actionproxy');
+  const target = path.resolve(rootDirectory, relativePath);
+  if (
+    path.isAbsolute(relativePath) ||
+    target === privateRoot ||
+    !target.startsWith(`${privateRoot}${path.sep}`)
+  ) {
+    throw new Error(
+      '--private-data-dir must name a repository-relative child of .actionproxy.',
+    );
+  }
+
+  let current = path.resolve(rootDirectory);
+  for (const segment of path.relative(rootDirectory, target).split(path.sep)) {
+    current = path.join(current, segment);
+    if (!fs.existsSync(current)) {
+      fs.mkdirSync(current, { mode: 0o700 });
+    }
+    const stat = fs.lstatSync(current);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error(
+        '--private-data-dir must not traverse a symbolic link or non-directory.',
+      );
+    }
+    fs.chmodSync(current, 0o700);
+  }
+  return target;
+}
+
+function parsePrivateDataDir(args) {
+  const indexes = args.flatMap((argument, index) =>
+    argument === '--private-data-dir' ? [index] : [],
+  );
+  if (indexes.length > 1) {
+    throw new Error('--private-data-dir may be provided only once.');
+  }
+  if (indexes.length === 0) return undefined;
+  const value = args[indexes[0] + 1];
+  if (!value || value.startsWith('--')) {
+    throw new Error('--private-data-dir requires a repository-relative path.');
+  }
+  return value;
+}
+
+function resolvePrivateDataDir(args) {
+  const explicit = parsePrivateDataDir(args);
+  if (!args.includes('--google-workspace-demo')) return explicit;
+  if (explicit && explicit !== googleWorkspaceDataDir) {
+    throw new Error(
+      `--google-workspace-demo requires --private-data-dir ${googleWorkspaceDataDir}.`,
+    );
+  }
+  return args.includes('--web-only') ? undefined : googleWorkspaceDataDir;
 }
 
 function parseDotEnvValue(rawValue) {

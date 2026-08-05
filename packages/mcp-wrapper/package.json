@@ -1,19 +1,50 @@
 {
   "name": "@actionproxy/mcp-wrapper",
   "version": "0.1.0",
-  "private": true,
+  "description": "Stdio MCP proxy for ActionProxy policy, approval, grants, and audit",
+  "keywords": [
+    "ai-agents",
+    "approval-gateway",
+    "audit",
+    "human-in-the-loop",
+    "mcp",
+    "model-context-protocol"
+  ],
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ActionProxy/actionproxy.git",
+    "directory": "packages/mcp-wrapper"
+  },
+  "homepage": "https://github.com/ActionProxy/actionproxy#readme",
+  "bugs": {
+    "url": "https://github.com/ActionProxy/actionproxy/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "engines": {
     "node": ">=22 <25"
   },
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "bin": {
     "actionproxy-mcp": "dist/index.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --out-dir dist",
+    "prepack": "npm run build",
     "test": "vitest run",
     "lint": "tsc --noEmit"
   },

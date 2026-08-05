@@ -58,11 +58,27 @@ export default defineConfig({
       },
     },
     {
-      name: "mobile",
+      name: "tablet",
       use: {
         ...devices["Desktop Chrome"],
         hasTouch: true,
-        viewport: { height: 727, width: 393 },
+        viewport: { height: 1024, width: 768 },
+      },
+    },
+    {
+      name: "mobile-390",
+      use: {
+        ...devices["Desktop Chrome"],
+        hasTouch: true,
+        viewport: { height: 844, width: 390 },
+      },
+    },
+    {
+      name: "mobile-320",
+      use: {
+        ...devices["Desktop Chrome"],
+        hasTouch: true,
+        viewport: { height: 568, width: 320 },
       },
     },
   ],

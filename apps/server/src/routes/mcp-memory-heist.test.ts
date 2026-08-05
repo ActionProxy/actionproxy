@@ -103,6 +103,7 @@ describe('real-process MCP memory-heist containment', () => {
 
       const response = await responsePromise;
       if (url === exactlyApprovedUrl) {
+        expect(response.error, JSON.stringify(response.error)).toBeUndefined();
         expect(response.result).toMatchObject({ content: [expect.objectContaining({ type: 'text' })] });
       } else {
         expect(response.result).toMatchObject({ isError: true });
@@ -115,7 +116,7 @@ describe('real-process MCP memory-heist containment', () => {
     expect(prefixUrls.filter((url) => url !== exactlyApprovedUrl).every(
       (url) => dispatchedUrlCount(harness.markerPath, url) === 0,
     )).toBe(true);
-  }, 30_000);
+  }, 60_000);
 
   it('denies every encoded follow-up in the exposed scope while leaving a separate scope clean', async () => {
     const harness = await startHarness('strict');
@@ -162,7 +163,7 @@ describe('real-process MCP memory-heist containment', () => {
     await reject(harness.app, cleanScopePending.approval.id, harness.approverToken);
     await expect(cleanScopePromise).resolves.toMatchObject({ result: { isError: true } });
     expect(dispatchedUrlCount(harness.markerPath, cleanScopeUrl)).toBe(0);
-  }, 30_000);
+  }, 60_000);
 
   it('records public-untrusted exposure before releasing a valid hostile isError result', async () => {
     const harness = await startHarness('default');
@@ -204,7 +205,7 @@ describe('real-process MCP memory-heist containment', () => {
     );
     expect(JSON.stringify(exposureEvent)).not.toContain('AGENT-ONLY TURNSTILE');
     expect(JSON.stringify(exposureEvent)).not.toContain(hostileErrorUrl);
-  }, 20_000);
+  }, 30_000);
 });
 
 type HarnessMode = 'default' | 'strict';
@@ -312,17 +313,20 @@ function writeWrapperConfig(input: {
   fs.writeFileSync(configPath, JSON.stringify({
     actionproxy: {
       approvalPollIntervalMs: 10,
-      approvalTimeoutMs: 5_000,
+      approvalTimeoutMs: 15_000,
       baseUrl: input.baseUrl,
       bearerTokenEnv: 'ACTIONPROXY_MCP_BEARER_TOKEN',
-      requestTimeoutMs: 2_000,
+      // Real-process SQLite and HTTP work can contend with the rest of the
+      // serialized release suite on slower CI hosts. Keep the timeout scoped
+      // to this integration fixture; production defaults remain unchanged.
+      requestTimeoutMs: 10_000,
     },
     servers: {
       publicWeb: {
         args: [input.fixturePath, input.markerPath],
         command: process.execPath,
         cwd: input.tempDir,
-        requestTimeoutMs: 500,
+        requestTimeoutMs: 2_000,
         stdioFraming: 'newline',
       },
     },
@@ -663,7 +667,7 @@ class RealWrapperHost {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         rejectPromise(new Error(`Timed out waiting for wrapper response to ${method}: ${this.stderr}`));
-      }, 10_000);
+      }, 20_000);
       this.pending.set(id, { reject: rejectPromise, resolve, timeout });
       this.write({ id, jsonrpc: '2.0', method, params });
     });

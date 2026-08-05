@@ -2,19 +2,27 @@
 
 Wrap downstream MCP servers with ActionProxy approval, one-time execution grants, and audit.
 
-The wrapper is distributed as source in this repository. ActionProxy v0.1.0
-does not publish npm packages, so build the workspace package before using the
-local binary:
+The wrapper is independently packable from a reviewed ActionProxy source
+checkout. Before installing by package name, verify the exact `0.1.0` registry
+record and its repository metadata. To evaluate from source or pin the reviewed
+artifact, create and install a local tarball:
 
 ```bash
-corepack pnpm install
-corepack pnpm --filter @actionproxy/mcp-wrapper build
-./packages/mcp-wrapper/dist/index.js wrap --config actionproxy.mcp.yaml
+corepack pnpm install --frozen-lockfile
+mkdir -p /absolute/path/to/your-app/vendor
+corepack pnpm --filter @actionproxy/mcp-wrapper pack \
+  --out /absolute/path/to/your-app/vendor/actionproxy-mcp-wrapper-0.1.0.tgz
+cd /absolute/path/to/your-app
+corepack pnpm add ./vendor/actionproxy-mcp-wrapper-0.1.0.tgz
+corepack pnpm exec actionproxy-mcp wrap --config actionproxy.mcp.yaml
 ```
 
 The wrapper is a local stdio MCP server. A host connects to `actionproxy-mcp`, the wrapper reads tools from configured downstream MCP servers, and each `tools/call` is first submitted to ActionProxy. ActionProxy authorizes the call; the downstream MCP server still owns the real tool implementation and credentials.
 
-## CLI
+## CLI from the source checkout
+
+After building the wrapper in the ActionProxy checkout, invoke its generated
+entry point directly:
 
 ```bash
 ./packages/mcp-wrapper/dist/index.js wrap --config actionproxy.mcp.yaml
@@ -63,6 +71,7 @@ actionproxy:
   agentId: actionproxy-mcp-wrapper
   approvalPollIntervalMs: 1000
   approvalTimeoutMs: 120000
+  cancelPendingOnAbort: false
   requestTimeoutMs: 30000
 
 servers:
@@ -84,6 +93,13 @@ authenticated deployment, create a wrapper service account with only
 `tool_call:submit`, `tool_call:read`, and `execution_grant:consume`, then start
 the wrapper with that variable set. Inline `token`, `bearerToken`, and `apiKey`
 config values are rejected.
+
+`cancelPendingOnAbort` defaults to `false` for compatibility. When enabled for
+an interactive adapter such as the bundled ChatGPT demo, an expired approval
+wait or an upstream MCP cancellation asks ActionProxy to cancel the proposal
+while it is still pending. The wrapper never resumes downstream dispatch after
+that upstream request has ended; if a human decision wins the race, the
+recorded server decision remains authoritative.
 
 The wrapper passes only a small operating-system environment allowlist and
 explicit `servers.<name>.env` entries to a downstream process. Existing parent
@@ -159,3 +175,12 @@ or retry/recovery engine.
 
 It is also not a prompt-injection detector, content scanner, model gateway, or
 proof that the host cannot bypass the wrapper.
+
+## Support and Security
+
+For usage questions and confirmed non-sensitive defects, use
+[GitHub Issues](https://github.com/ActionProxy/actionproxy/issues). For a
+suspected vulnerability, follow the
+[ActionProxy security policy](https://github.com/ActionProxy/actionproxy/security/policy)
+and do not disclose credentials, exploit details, or other sensitive evidence
+in a public issue.

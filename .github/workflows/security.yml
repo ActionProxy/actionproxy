@@ -1,6 +1,7 @@
 name: security
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -10,6 +11,25 @@ permissions:
   contents: read
 
 jobs:
+  first-run-macos:
+    name: first-run concierge (macOS, Node ${{ matrix.node-version }})
+    runs-on: macos-14
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22', '24']
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: node scripts/attest-public-checkout.mjs .
+      - run: node --test scripts/first-run.test.mjs examples/chatgpt-tunnel/run-tunnel.test.mjs
+        env:
+          ACTIONPROXY_TEST_REAL_TTY: "1"
+
   verify:
     name: tests, types, build (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
@@ -28,6 +48,16 @@ jobs:
       - run: corepack pnpm verify:tracked-checkout
       - run: corepack pnpm verify:oss-boundary
       - run: corepack pnpm install --frozen-lockfile
+      - name: Check generated OpenAPI contract
+        run: corepack pnpm openapi:check
+      - name: Check generated configuration schemas
+        run: corepack pnpm schemas:check
+      - name: Validate OpenAPI and JSON Schema standards offline
+        run: corepack pnpm contracts:validate
+      - name: Check release version consistency
+        run: corepack pnpm release:versions:check
+      - name: Test isolated package consumers
+        run: corepack pnpm test:consumer-conformance
       - run: corepack pnpm test
       - run: corepack pnpm lint
       - run: corepack pnpm build

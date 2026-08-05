@@ -6,23 +6,76 @@ ActionProxy Community has two explicit deployment postures:
 
 - `ACTIONPROXY_DEPLOYMENT_MODE=local` with `ACTIONPROXY_AUTH_MODE=none`: local demo/development only. The server creates an implicit `local-admin` context with all scopes and defaults to `ACTIONPROXY_HOST=127.0.0.1`. Startup is blocked on `0.0.0.0` unless `ACTIONPROXY_ALLOW_UNSAFE_LOCAL_BIND=true` is set for an intentional localhost-published container/demo run.
 - `ACTIONPROXY_DEPLOYMENT_MODE=self_hosted` with `ACTIONPROXY_AUTH_MODE=api_key` or `oidc_jwt`: customer-operated or VPC design-review deployments.
-ActionProxy authorizes proposed tool calls, manages the approval lifecycle,
-issues external execution grants, and records audit events. Existing customer
-runners and MCP tools keep custody of downstream business-tool credentials;
-Community does not ship production SaaS connectors.
+  ActionProxy authorizes proposed tool calls, manages the approval lifecycle,
+  issues external execution grants, and records audit events. Existing customer
+  runners and MCP tools keep custody of downstream business-tool credentials;
+  Community does not ship production SaaS connectors.
 
 `ACTIONPROXY_LOCAL_EXECUTION=disabled` keeps that boundary explicit: ActionProxy authorizes external runners and does not execute local tools. `ACTIONPROXY_LOCAL_EXECUTION=mock` exists only for local demo flows with built-in mock tools.
 
 The ChatGPT Secure MCP Tunnel demo preserves this local posture. OpenAI's
 `tunnel-client` starts exactly one MCP command—the ActionProxy stdio wrapper—and
 the wrapper reaches only the loopback ActionProxy gateway and deterministic
-mock MCP child declared in `examples/chatgpt-tunnel/actionproxy.mcp.yaml`. The
-launcher accepts `CONTROL_PLANE_API_KEY` only from its process environment and
-does not print or write its value; Docker Compose does not inject it into the
-ActionProxy container, wrapper, or downstream child. Launcher-owned state under
-`.actionproxy/` contains only a marker version, tunnel id, and wrapper-command
-hash. The tunnel client may maintain its own OpenAI-managed
-profile state outside ActionProxy.
+mock MCP child declared in `examples/chatgpt-tunnel/actionproxy.mcp.yaml`.
+
+The optional convenience installer is deliberately narrow. It runs only after
+an explicit interactive `I` choice or the dedicated
+`./actionproxy tunnel-client install` command, selects the platform asset from
+ActionProxy's reviewed official OpenAI `v0.0.10` distribution manifest, and
+requires its bytes to match the checked-in SHA-256 before atomically installing
+`.actionproxy/bin/tunnel-client`. That digest is ActionProxy's trust anchor; an
+upstream checksum fetched through the same channel would not be independent
+publisher authentication. The upstream binary is ad-hoc signed, not Developer
+ID-signed or notarized, and ActionProxy does not represent it as Apple-verified.
+The installer never invokes `sudo`, changes `PATH`, removes quarantine metadata,
+or runs Gatekeeper-override commands. If macOS blocks execution, the concierge
+stops. It stores no credential and does not send the binary to Docker or the
+browser. Because the binary is downloaded after checkout, it is not part of the
+repository release or its CycloneDX SBOM.
+
+Checkout-local describes installation and ownership scope, not a process
+sandbox. When launched, `tunnel-client` is a native process with the current
+macOS user's ordinary filesystem and network authority. ActionProxy minimizes
+the environment supplied to installer verification probes and never passes the
+runtime key to those probes, but it does not claim OS-level confinement.
+
+An installer receipt binds the expected local path and installed digest.
+`./actionproxy tunnel-client remove` refuses a live launcher, an absent or
+mismatched receipt, a modified executable, symlinks, and manually placed files;
+it never removes `TUNNEL_CLIENT_BIN` or a client found on `PATH`. `stop` and
+`reset` retain both the client and tunnel profiles. `doctor`, including
+`doctor --chatgpt`, writes no ActionProxy state and never downloads or installs
+software, but its ChatGPT checks may execute a selected client's help/version
+probes. A receipt-verified compatible client may be reused offline.
+
+The concierge reads the runtime key from `/dev/tty` with echo disabled after
+all non-secret checks pass. It writes the key only to a session-owned `0600`
+temporary file under a `0700` OS-temporary directory outside the checkout and
+passes a `file:` reference to
+`tunnel-client`; the key is absent from process arguments and stripped from
+child environments. Strict automation supplies only the path to a
+caller-owned, mode-`0600` file through
+`ACTIONPROXY_CONTROL_PLANE_KEY_FILE`; that file is read after the build and is
+not removed. Legacy `CONTROL_PLANE_API_KEY` input is accepted only through a
+direct root-shim invocation. The shim moves it into an unlinked private file
+descriptor before it execs the long-lived launcher, but its raw pre-start
+environment has an unavoidable brief process-listing window and is deprecated
+for strict automation. Prefixing `corepack pnpm` or a direct Node entry point
+with the raw variable is unsupported. Session files are removed on normal exit, failure, SIGINT, and
+SIGTERM. Docker, profiles, persistent concierge state, browser state,
+diagnostics, and audit records never receive the key. The tunnel client may
+maintain its own non-secret OpenAI-managed profile state outside ActionProxy.
+
+Explicit local Quickstart mode adds an in-memory setup-status resource for one
+random session. Its PUT token is known only to the concierge; the browser has
+read-only access. The route accepts only fixed setup/check enums and an
+optional loopback HTTP tunnel UI URL, writes no governance audit event, and is
+not registered outside local unauthenticated mock mode. The CLI independently
+verifies that Docker publishes the container port only on loopback.
+The stdio wrapper receives a separate origin token that is stripped from its
+downstream child. Only the validated MCP adapter route can exchange it for a
+server-derived active-session marker; ordinary HTTP submissions always lose
+reserved Quickstart provenance fields.
 
 Secure MCP Tunnel is a transport boundary, not an ActionProxy identity upgrade.
 The demo still uses the implicit `local-admin` context from
@@ -56,6 +109,16 @@ a local outbox by default and may use an operator-owned SMTP service. Messages
 are sent one recipient at a time for privacy and per-user delivery audit.
 
 MCP wrapper profiles are executable configuration. Saving a profile and generating its wrapper YAML are safe while server-side discovery is disabled. `ACTIONPROXY_MCP_STDIO_DISCOVERY_ENABLED=true` explicitly permits the server to start profile-defined commands for `tools/list` discovery. Those commands, arguments, working directories, and environment additions run with the server process's operating-system privileges and are not sandboxed. Enable discovery only for trusted profiles and tightly control `admin:integrations` access.
+
+The opt-in Google Workspace MCP reference makes that executable boundary
+concrete. Its local script starts the third-party `workspace-mcp` package via
+`uvx`; that package is not vendored, sandboxed, or included in ActionProxy's
+SBOM. It receives the operator's Google OAuth settings and can read real mailbox
+data or create a real draft within the scopes granted to it. Use a dedicated
+test account, inspect the dependency before invocation, keep `.env.local` and
+`.actionproxy/google-workspace-mcp/` private, and do not treat ActionProxy's
+audit chain as proof of the provider's mailbox state. The Community export
+contains no ActionProxy-native Google OAuth/token-custody runtime.
 
 The standard `/mcp` endpoint is a protected OAuth resource, not an
 authorization server. It accepts only RS256 JWT access tokens and validates the

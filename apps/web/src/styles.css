@@ -62,7 +62,7 @@ button {
   font-weight: 750;
   gap: 7px;
   justify-content: center;
-  min-height: 40px;
+  min-height: 44px;
   padding: 8px 13px;
 }
 button:hover {
@@ -87,8 +87,29 @@ button.danger-action {
   color: var(--red);
 }
 button.icon-button {
-  min-width: 40px;
+  min-width: 44px;
   padding: 8px;
+}
+.button-link {
+  align-items: center;
+  background: var(--navy);
+  border: 1px solid var(--navy);
+  border-radius: 7px;
+  color: #fff;
+  display: inline-flex;
+  font-weight: 750;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 13px;
+  white-space: nowrap;
+}
+.button-link:hover {
+  background: #1a4059;
+  text-decoration: none;
+}
+.button-link.compact {
+  min-height: 44px;
+  padding: 6px 10px;
 }
 button:focus-visible,
 a:focus-visible,
@@ -106,7 +127,7 @@ textarea {
   border: 1px solid var(--line-strong);
   border-radius: 7px;
   color: var(--ink);
-  min-height: 42px;
+  min-height: 44px;
   padding: 9px 11px;
   width: 100%;
 }
@@ -140,6 +161,30 @@ pre {
 }
 .dashboard-chrome {
   margin-bottom: 18px;
+}
+.quickstart-pending-banner {
+  align-items: center;
+  background: #fff4d8;
+  border: 1px solid #dfbd72;
+  border-radius: 9px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin: -4px 0 16px;
+  padding: 12px 14px;
+  position: sticky;
+  top: 8px;
+  z-index: 10;
+}
+.quickstart-pending-banner > div,
+.approval-result > div,
+.chatgpt-approval-callout > div {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+}
+.quickstart-pending-banner a {
+  white-space: nowrap;
 }
 .topbar {
   align-items: flex-start;
@@ -756,6 +801,49 @@ th {
   background: #fff8e8;
   border-color: #e3c98f;
 }
+.quickstart-chooser {
+  align-items: end;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(230px, 0.8fr) minmax(0, 1.6fr);
+}
+.quickstart-chooser h2 {
+  margin: 5px 0 7px;
+}
+.quickstart-chooser p {
+  color: var(--muted);
+  margin: 0;
+}
+.quickstart-choice-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.quickstart-choice-grid > a {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink);
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 13px;
+}
+.quickstart-choice-grid > a.active {
+  background: #e9f7f3;
+  border-color: #64b9aa;
+  box-shadow: inset 0 0 0 1px #64b9aa;
+}
+.quickstart-choice-grid span,
+.quickstart-choice-grid small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.quickstart-choice-grid small {
+  color: var(--teal);
+  font-weight: 800;
+  text-transform: uppercase;
+}
 .demo-lab-notice > span {
   align-items: center;
   color: var(--amber);
@@ -773,6 +861,23 @@ th {
   display: grid;
   gap: 10px;
 }
+.agent-step-controls {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+}
+.agent-step-controls > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 800;
+  min-height: 44px;
+}
+.agent-step-controls[open] > summary {
+  margin-bottom: 10px;
+}
 .agent-step {
   align-items: start;
   border: 1px solid var(--line);
@@ -780,7 +885,7 @@ th {
   border-radius: 8px;
   display: grid;
   gap: 12px;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr);
   padding: 12px;
 }
 .agent-step.complete {
@@ -884,6 +989,157 @@ th {
   display: flex;
   gap: 8px;
 }
+.approval-result {
+  align-items: center;
+  background: var(--teal-soft);
+  border: 1px solid #91d2c5;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin: 12px 0;
+  padding: 12px;
+}
+.approval-result.rejected {
+  background: var(--red-soft);
+  border-color: #dda09d;
+}
+.approval-result.pending {
+  background: var(--amber-soft);
+  border-color: #dfbd72;
+}
+.approval-result > small {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.approval-safety-note,
+.approval-freshness {
+  align-items: center;
+  background: #fff8e8;
+  border: 1px solid #dfbd72;
+  border-radius: 8px;
+  display: flex;
+  gap: 9px;
+  margin: 13px 0;
+  padding: 12px;
+}
+.approval-source-chain {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 13px 0;
+  padding: 10px 12px;
+}
+.approval-source-node {
+  background: #e8eef3;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 750;
+  padding: 6px 8px;
+}
+.email-approval-preview,
+.approval-policy-reason {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  margin-top: 14px;
+  padding: 14px;
+}
+.email-preview-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+.email-approval-preview h2,
+.approval-policy-reason h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+.email-approval-preview dl {
+  display: grid;
+  gap: 0;
+  margin: 12px 0 0;
+}
+.email-approval-preview dl > div {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 90px minmax(0, 1fr);
+  padding: 10px 0;
+}
+.email-approval-preview dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.email-approval-preview dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.approval-policy-reason {
+  background: #f4f8fb;
+}
+.approval-policy-reason p {
+  margin: 8px 0;
+}
+.approval-policy-reason small {
+  color: var(--muted);
+}
+.approval-freshness {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.approval-freshness.stale {
+  background: var(--red-soft);
+  border-color: #dda09d;
+}
+.approval-freshness ul {
+  margin: 7px 0 0;
+  padding-left: 20px;
+}
+.approval-rejection-panel {
+  background: var(--red-soft);
+  border: 1px solid #dda09d;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+button.danger-confirm {
+  background: var(--red);
+  border-color: var(--red);
+}
+.approval-technical-details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-top: 16px;
+  padding: 12px;
+}
+.approval-technical-details > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 800;
+  min-height: 44px;
+}
+.approval-technical-details[open] > summary {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+.approval-technical-details .payload-section {
+  border-top: 0;
+  margin-top: 0;
+}
+.approval-evidence-grid dd {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.76rem;
+}
 
 .chatgpt-tunnel-panel {
   background: linear-gradient(135deg, #101d2b, #18374b);
@@ -919,6 +1175,115 @@ th {
   color: #c9d8e2;
   line-height: 1.5;
 }
+.quickstart-stepper {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  margin: 14px 0;
+  padding: 0;
+}
+.quickstart-stepper li {
+  align-items: center;
+  background: rgb(255 255 255 / 5%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px;
+}
+.quickstart-stepper li.current {
+  border-color: #6bd7c3;
+  box-shadow: inset 0 0 0 1px rgb(107 215 195 / 20%);
+}
+.quickstart-stepper li.complete {
+  background: rgb(46 154 133 / 17%);
+}
+.quickstart-stepper li.upcoming {
+  opacity: 0.68;
+}
+.quickstart-stepper li > span {
+  align-items: center;
+  background: rgb(255 255 255 / 10%);
+  border-radius: 999px;
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 0.74rem;
+  font-weight: 850;
+  height: 25px;
+  justify-content: center;
+  width: 25px;
+}
+.quickstart-stepper li > div {
+  min-width: 0;
+}
+.quickstart-stepper strong,
+.quickstart-stepper small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.quickstart-stepper strong {
+  font-size: 0.8rem;
+}
+.quickstart-stepper small {
+  color: #b8c9d4;
+  font-size: 0.7rem;
+  margin-top: 2px;
+}
+.chatgpt-tunnel-access,
+.chatgpt-tunnel-tools {
+  background: rgb(255 255 255 / 6%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 8px;
+  margin: 14px 0;
+  padding: 13px;
+}
+.chatgpt-tunnel-access h3,
+.chatgpt-tunnel-tools h3,
+.chatgpt-tunnel-launcher h3 {
+  margin: 0 0 8px;
+}
+.chatgpt-tunnel-access p {
+  color: #c9d8e2;
+  margin: 0;
+}
+.chatgpt-tunnel-access ol {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 0;
+  padding-left: 22px;
+}
+.chatgpt-tunnel-access li {
+  line-height: 1.45;
+}
+.chatgpt-tunnel-tools ul {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.chatgpt-tunnel-tools li {
+  background: rgb(255 255 255 / 6%);
+  border-radius: 7px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px;
+}
+.chatgpt-tunnel-tools code {
+  color: #dff8f2;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.chatgpt-tunnel-tools span,
+.chatgpt-tunnel-connect-note {
+  color: #c9d8e2;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
 .chatgpt-tunnel-setup-grid {
   display: grid;
   gap: 15px;
@@ -941,6 +1306,11 @@ th {
   color: #b8c9d4;
   display: block;
   margin-top: 5px;
+}
+.chatgpt-tunnel-launcher > p {
+  color: #c9d8e2;
+  line-height: 1.45;
+  margin: 7px 0 12px;
 }
 .chatgpt-tunnel-command {
   display: grid;
@@ -976,7 +1346,368 @@ th {
   margin-top: 3px;
 }
 .chatgpt-tunnel-panel .text-link {
+  align-items: center;
   color: #7fe2cf;
+  display: inline-flex;
+  gap: 4px;
+  margin: 0 12px 7px 0;
+  min-height: 44px;
+}
+.chatgpt-tunnel-connect-note {
+  margin: 3px 0 0;
+}
+.chatgpt-admin-request {
+  background: rgb(0 0 0 / 18%);
+  border-left: 3px solid #6bd7c3;
+  color: #d5e3e8;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin: 10px 0;
+  padding: 9px 10px;
+}
+.chatgpt-link-row {
+  align-content: center;
+  background: rgb(255 255 255 / 6%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: 13px;
+}
+.chatgpt-link-row.compact {
+  background: transparent;
+  border: 0;
+  flex-direction: row;
+  flex-wrap: wrap;
+  padding: 0;
+}
+.chatgpt-link-row small {
+  color: var(--muted);
+  margin-top: 7px;
+}
+.chatgpt-tunnel-panel .chatgpt-link-row small {
+  color: #b8c9d4;
+}
+.chatgpt-link-row.compact small {
+  flex-basis: 100%;
+}
+.chatgpt-app-step,
+.chatgpt-tunnel-ready,
+.quickstart-runtime-card,
+.quickstart-proof-card,
+.chatgpt-approval-callout,
+.chatgpt-no-call-recovery {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  margin-top: 14px;
+  padding: 14px;
+}
+.chatgpt-app-step {
+  align-items: center;
+  background: rgb(255 255 255 / 7%);
+  border-color: rgb(255 255 255 / 16%);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+.chatgpt-tunnel-ready {
+  align-items: flex-start;
+  background: #153d38;
+  border-color: #4c9487;
+  display: flex;
+  gap: 9px;
+}
+.chatgpt-tunnel-ready h3,
+.chatgpt-tunnel-ready p {
+  margin: 0;
+}
+.chatgpt-tunnel-ready p {
+  color: #d5e3e8;
+  line-height: 1.45;
+  margin-top: 5px;
+}
+.chatgpt-app-step h3,
+.chatgpt-app-step p {
+  margin: 4px 0 0;
+}
+.chatgpt-app-step p {
+  color: #c9d8e2;
+}
+.quickstart-runtime-status {
+  align-items: center;
+  background: rgb(255 255 255 / 7%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+}
+.quickstart-runtime-status.failed {
+  background: rgb(165 43 43 / 22%);
+  border-color: rgb(255 177 169 / 38%);
+}
+.quickstart-runtime-card {
+  background: rgb(255 255 255 / 7%);
+  border-color: rgb(255 255 255 / 14%);
+}
+.quickstart-runtime-heading,
+.chatgpt-prompt-heading {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+.quickstart-runtime-heading h3,
+.chatgpt-prompt-heading h3 {
+  margin: 4px 0 0;
+}
+.quickstart-runtime-heading > small,
+.chatgpt-prompt-heading > span {
+  color: #b8c9d4;
+  overflow-wrap: anywhere;
+}
+.quickstart-runtime-card ul {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  margin: 13px 0;
+  padding: 0;
+}
+.quickstart-runtime-card li {
+  align-items: start;
+  background: rgb(255 255 255 / 6%);
+  border-radius: 7px;
+  display: flex;
+  gap: 7px;
+  padding: 8px;
+}
+.quickstart-runtime-card li.pass {
+  color: #9ff0df;
+}
+.quickstart-runtime-card li.fail,
+.quickstart-runtime-card li.action_required {
+  color: #ffd1cb;
+}
+.quickstart-runtime-card li span {
+  display: grid;
+  gap: 3px;
+}
+.quickstart-runtime-card li small {
+  color: #c9d8e2;
+}
+.local-quickstart-runtime {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+  padding: clamp(16px, 2.2vw, 24px);
+}
+.local-quickstart-runtime .quickstart-runtime-card {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  margin-top: 0;
+}
+.local-quickstart-runtime .quickstart-runtime-card li {
+  background: var(--surface);
+}
+.local-quickstart-runtime .quickstart-runtime-card li.pass {
+  color: var(--teal);
+}
+.local-quickstart-runtime .quickstart-runtime-card li.fail,
+.local-quickstart-runtime .quickstart-runtime-card li.action_required {
+  color: var(--red);
+}
+.local-quickstart-runtime .quickstart-runtime-card li small,
+.local-quickstart-runtime .quickstart-runtime-heading > small {
+  color: var(--muted);
+}
+.local-quickstart-runtime .quickstart-runtime-status {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  margin-top: 0;
+}
+.local-quickstart-runtime .quickstart-runtime-status.failed {
+  background: var(--red-soft);
+  border-color: #dda09d;
+}
+.chatgpt-tunnel-details {
+  background: rgb(255 255 255 / 5%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 8px;
+  margin-top: 14px;
+  padding: 12px;
+}
+.chatgpt-manual-setup {
+  background: rgb(255 255 255 / 5%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 8px;
+  margin-top: 14px;
+  padding: 12px;
+}
+.chatgpt-manual-setup > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 800;
+  min-height: 44px;
+}
+.quickstart-setup-details > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 800;
+  min-height: 44px;
+}
+.chatgpt-manual-setup[open] > summary {
+  margin-bottom: 12px;
+}
+.chatgpt-tunnel-details > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 800;
+  min-height: 44px;
+}
+.chatgpt-tunnel-details .chatgpt-tunnel-access,
+.chatgpt-tunnel-details .chatgpt-tunnel-tools {
+  margin-bottom: 0;
+}
+.chatgpt-tunnel-prompts {
+  margin-top: 14px;
+}
+.chatgpt-tunnel-prompt {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+}
+.chatgpt-tunnel-prompt.locked {
+  opacity: 0.62;
+}
+.chatgpt-tunnel-prompt.active {
+  border: 1px solid #6bd7c3;
+  box-shadow: 0 0 0 1px rgb(107 215 195 / 20%);
+}
+.chatgpt-tunnel-prompt.complete {
+  background: rgb(46 154 133 / 17%);
+}
+.chatgpt-tunnel-prompt.waiting {
+  background: rgb(192 133 35 / 18%);
+}
+.chatgpt-prompt-index {
+  align-items: center;
+  background: rgb(255 255 255 / 10%);
+  border-radius: 999px;
+  display: flex;
+  font-size: 0.78rem;
+  font-weight: 850;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+.chatgpt-tunnel-prompt small {
+  color: #9ff0df;
+  display: block;
+  font-size: 0.73rem;
+  margin-top: 5px;
+}
+.chatgpt-approval-callout {
+  align-items: center;
+  background: #fff3d6;
+  border-color: #dfbd72;
+  color: #5d4211;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+.chatgpt-no-call-recovery {
+  background: #2d3540;
+  border-color: #68798a;
+  display: grid;
+  gap: 12px;
+}
+.chatgpt-no-call-recovery > div:first-child {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+}
+.chatgpt-no-call-recovery ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 23px;
+}
+.quickstart-proof-card {
+  align-items: center;
+  background: var(--surface);
+  display: flex;
+  gap: 15px;
+  justify-content: space-between;
+}
+.quickstart-proof-card.ready {
+  background: var(--teal-soft);
+  border-color: #91d2c5;
+}
+.chatgpt-tunnel-panel .quickstart-proof-card {
+  background: #173247;
+  border-color: rgb(255 255 255 / 16%);
+}
+.chatgpt-tunnel-panel .quickstart-proof-card.ready {
+  background: #153d38;
+  border-color: #4c9487;
+}
+.chatgpt-tunnel-panel .quickstart-proof-card p {
+  color: #c9d8e2;
+}
+.quickstart-proof-card h3,
+.quickstart-proof-card p {
+  margin: 4px 0 0;
+}
+.quickstart-proof-card p {
+  color: var(--muted);
+}
+.quickstart-proof-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.chatgpt-verified-proof {
+  display: block;
+}
+.verified-outcome-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 14px 0;
+  padding: 0;
+}
+.verified-outcome-list li {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.quickstart-stop-command {
+  align-items: center;
+  background: rgb(0 0 0 / 18%);
+  border-radius: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 13px;
+  padding: 10px;
+}
+.quickstart-stop-command code {
+  color: #dff8f2;
+  font-weight: 800;
+}
+.chatgpt-session-missing {
+  color: #ffd1cb;
+  line-height: 1.45;
 }
 
 .policy-editor-page {
@@ -1045,6 +1776,7 @@ th {
   align-items: center !important;
   display: flex !important;
   gap: 8px !important;
+  min-height: 44px;
 }
 .toggle-row input {
   min-height: 18px;
@@ -1106,7 +1838,7 @@ th {
   background: #fff;
   border-color: var(--line-strong);
   color: var(--ink);
-  min-height: 34px;
+  min-height: 44px;
 }
 .policy-filter-row button.active {
   background: var(--navy);
@@ -1281,7 +2013,14 @@ th {
     border-bottom: 1px solid var(--line);
   }
   .overview-command-center,
+  .quickstart-chooser,
   .chatgpt-tunnel-setup-grid {
+    grid-template-columns: 1fr;
+  }
+  .quickstart-stepper {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .chatgpt-tunnel-tools ul {
     grid-template-columns: 1fr;
   }
   .setup-checklist-grid,
@@ -1312,14 +2051,25 @@ th {
   .setup-checklist-header,
   .record-title,
   .approval-item,
+  .approval-result,
+  .approval-freshness,
   .audit-toolbar,
   .audit-group-header,
   .chatgpt-tunnel-heading-row,
+  .chatgpt-app-step,
+  .chatgpt-tunnel-ready,
+  .chatgpt-approval-callout,
+  .chatgpt-no-call-recovery,
+  .quickstart-pending-banner,
+  .quickstart-proof-card,
   .dashboard-error-banner {
     align-items: flex-start;
     flex-direction: column;
   }
   .setup-checklist-grid,
+  .quickstart-stepper,
+  .quickstart-choice-grid,
+  .quickstart-runtime-card ul,
   .approval-input-comparison,
   .detail-grid,
   .command-metrics,
@@ -1346,6 +2096,16 @@ th {
   .chatgpt-tunnel-architecture {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .quickstart-proof-actions {
+    justify-content: flex-start;
+  }
+  .chatgpt-tunnel-prompt {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+  .chatgpt-tunnel-prompt > :last-child {
+    grid-column: 2;
+    justify-self: start;
   }
   .approval-item .status-badge {
     align-self: flex-start;

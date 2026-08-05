@@ -7,12 +7,21 @@ ActionProxy is proxy-first for production-shaped integrations. The SDK submits p
 
 ## Install
 
-The SDK is distributed as source in this repository. ActionProxy v0.1.0 does
-not publish npm packages, so build the workspace package before use.
+The SDK is independently packable from a reviewed ActionProxy source checkout.
+Before installing by package name, verify the exact `0.1.0` registry record and
+its repository metadata. To evaluate from source or pin the reviewed artifact,
+create a local tarball:
 
 ```sh
-corepack pnpm install
-corepack pnpm --filter @actionproxy/sdk-js build
+corepack pnpm install --frozen-lockfile
+corepack pnpm --filter @actionproxy/sdk-js pack \
+  --out /absolute/path/to/your-app/vendor/actionproxy-sdk-js-0.1.0.tgz
+```
+
+Then install that exact tarball from the consumer repository:
+
+```sh
+corepack pnpm add ./vendor/actionproxy-sdk-js-0.1.0.tgz
 ```
 
 For local workspace development, run the gateway first:
@@ -261,3 +270,12 @@ for (const step of [
 - `execute` may be passed to `gatedTool` to preserve a future agent-side execution shape, but `gatedTool` does not call it.
 - Unknown tools still require approval by default.
 - Destructive demo tools are denied by policy.
+
+## Support and Security
+
+For usage questions and confirmed non-sensitive defects, use
+[GitHub Issues](https://github.com/ActionProxy/actionproxy/issues). For a
+suspected vulnerability, follow the
+[ActionProxy security policy](https://github.com/ActionProxy/actionproxy/security/policy)
+and do not disclose credentials, exploit details, or other sensitive evidence
+in a public issue.

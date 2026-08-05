@@ -37,6 +37,9 @@ function config(): McpWrapperConfig {
 function submitted(status: ActionProxySubmitResponse['status'], id = `toolcall_${status}`): ActionProxySubmitResponse {
   const input = { query: 'refund' };
   return {
+    approval: status === 'pending_approval'
+      ? { id: `approval_${id}`, status: 'pending' }
+      : undefined,
     decision: status === 'blocked' ? 'deny' : status === 'pending_approval' ? 'require_approval' : 'allow',
     id,
     status,
@@ -256,6 +259,69 @@ describe('ActionProxyMcpWrapper', () => {
     await expect(result).resolves.toMatchObject({ content: expect.any(Array) });
     expect(downstream.callTool).toHaveBeenCalledTimes(1);
     expect(downstream.callTool).toHaveBeenCalledWith('gmail.send_email', { to: 'customer@example.com' });
+  });
+
+  it('cancels a still-pending approval when the configured wait expires', async () => {
+    const downstream = fakeDownstream();
+    const gateway = fakeGateway(submitted('pending_approval'));
+    const timeout = new Error('approval wait expired');
+    timeout.name = 'ApprovalWaitTimeoutError';
+    vi.mocked(gateway.waitForToolCall).mockRejectedValueOnce(timeout);
+    const wrapperConfig = config();
+    wrapperConfig.actionproxy.cancelPendingOnAbort = true;
+    const wrapper = new ActionProxyMcpWrapper(wrapperConfig, { demo: downstream }, gateway);
+    await wrapper.initialize();
+
+    await expect(wrapper.callTool('gmail.send_email', { to: 'customer@example.com' })).rejects.toThrow(
+      'approval wait expired',
+    );
+    expect(gateway.cancelApproval).toHaveBeenCalledWith('approval_toolcall_pending_approval', {
+      cancelledBy: 'dev@example.com',
+      reason: 'Upstream MCP approval wait expired before approval completed.',
+    });
+    expect(downstream.callTool).not.toHaveBeenCalled();
+  });
+
+  it('never dispatches after an upstream cancellation, even when approval wins the cancellation race', async () => {
+    const downstream = fakeDownstream();
+    const gateway = fakeGateway(submitted('pending_approval'));
+    const controller = new AbortController();
+    vi.mocked(gateway.waitForToolCall).mockImplementationOnce(async () => {
+      controller.abort();
+      const cancelled = new Error('upstream request ended');
+      cancelled.name = 'McpRequestCancelledError';
+      throw cancelled;
+    });
+    vi.mocked(gateway.cancelApproval).mockRejectedValueOnce(new Error('approval is no longer pending'));
+    const wrapperConfig = config();
+    wrapperConfig.actionproxy.cancelPendingOnAbort = true;
+    const wrapper = new ActionProxyMcpWrapper(wrapperConfig, { demo: downstream }, gateway);
+    await wrapper.initialize();
+
+    await expect(
+      wrapper.callTool('gmail.send_email', { to: 'customer@example.com' }, { signal: controller.signal }),
+    ).rejects.toThrow('upstream request ended');
+    expect(gateway.cancelApproval).toHaveBeenCalledWith('approval_toolcall_pending_approval', {
+      cancelledBy: 'dev@example.com',
+      reason: 'Upstream MCP request was cancelled before approval completed.',
+    });
+    expect(downstream.callTool).not.toHaveBeenCalled();
+  });
+
+  it('keeps pending approvals intact by default for backward compatibility', async () => {
+    const downstream = fakeDownstream();
+    const gateway = fakeGateway(submitted('pending_approval'));
+    const timeout = new Error('approval wait expired');
+    timeout.name = 'ApprovalWaitTimeoutError';
+    vi.mocked(gateway.waitForToolCall).mockRejectedValueOnce(timeout);
+    const wrapper = new ActionProxyMcpWrapper(config(), { demo: downstream }, gateway);
+    await wrapper.initialize();
+
+    await expect(wrapper.callTool('gmail.send_email', { to: 'customer@example.com' })).rejects.toThrow(
+      'approval wait expired',
+    );
+    expect(gateway.cancelApproval).not.toHaveBeenCalled();
+    expect(downstream.callTool).not.toHaveBeenCalled();
   });
 
   it('uses the final approved input when approval edits the payload', async () => {
@@ -568,7 +634,7 @@ describe('HttpActionProxyGateway', () => {
     });
   });
 
-  it('uses the MCP adapter routes with bearer authentication and header-only idempotency', async () => {
+  it('uses header-only authentication, Quickstart provenance, and idempotency on MCP adapter routes', async () => {
     const responses = [
       submitted('executed'),
       submitted('executed').toolCall,
@@ -583,6 +649,7 @@ describe('HttpActionProxyGateway', () => {
     const fetchFn = fetchSpy as unknown as typeof fetch;
     const gateway = new HttpActionProxyGateway('https://actionproxy.example/', fetchFn, {
       bearerToken: 'wrapper-secret-token',
+      quickstartOriginToken: 'quickstart-origin-canary',
       sessionId: '123e4567-e89b-42d3-a456-426614174000',
     });
     const input = {
@@ -613,9 +680,11 @@ describe('HttpActionProxyGateway', () => {
     for (const [, init] of fetchSpy.mock.calls) {
       expect(init?.headers).toMatchObject({
         'X-ActionProxy-MCP-Session-Id': '123e4567-e89b-42d3-a456-426614174000',
+        'X-ActionProxy-Quickstart-Origin-Token': 'quickstart-origin-canary',
         authorization: 'Bearer wrapper-secret-token',
       });
       expect(String(init?.body ?? '')).not.toContain('wrapper-secret-token');
+      expect(String(init?.body ?? '')).not.toContain('quickstart-origin-canary');
     }
     expect(fetchSpy.mock.calls[0]?.[1]?.headers).toMatchObject({
       'X-ActionProxy-MCP-Session-Id': '123e4567-e89b-42d3-a456-426614174000',
@@ -659,7 +728,7 @@ describe('HttpActionProxyGateway', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
-  it('resolves a bearer only from the named process environment for the configured wrapper', async () => {
+  it('resolves gateway credentials only from named process environment variables', async () => {
     const responses = [submitted('executed'), { ok: true }, { ok: true }];
     const fetchSpy = vi.fn(async (_url: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) =>
       new Response(JSON.stringify(responses.shift()), { status: 200 }));
@@ -668,6 +737,7 @@ describe('HttpActionProxyGateway', () => {
       actionproxy: {
         baseUrl: 'https://actionproxy.example',
         bearerTokenEnv: 'ACTIONPROXY_MCP_BEARER_TOKEN',
+        quickstartOriginTokenEnv: 'ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN',
       },
       servers: {
         demo: { args: [demoServerPath], command: process.execPath, cwd: process.cwd() },
@@ -680,7 +750,11 @@ describe('HttpActionProxyGateway', () => {
     })).rejects.toThrow('ACTIONPROXY_MCP_BEARER_TOKEN is missing');
 
     const wrapper = await createWrapperFromConfig(wrapperConfig, {
-      env: { ACTIONPROXY_MCP_BEARER_TOKEN: 'resolved-secret', PATH: process.env.PATH },
+      env: {
+        ACTIONPROXY_MCP_BEARER_TOKEN: 'resolved-secret',
+        ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN: 'resolved-origin-proof',
+        PATH: process.env.PATH,
+      },
       fetchFn: fetchSpy as unknown as typeof fetch,
     });
     try {
@@ -691,8 +765,12 @@ describe('HttpActionProxyGateway', () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(3);
     for (const [, init] of fetchSpy.mock.calls) {
-      expect(init?.headers).toMatchObject({ authorization: 'Bearer resolved-secret' });
+      expect(init?.headers).toMatchObject({
+        'X-ActionProxy-Quickstart-Origin-Token': 'resolved-origin-proof',
+        authorization: 'Bearer resolved-secret',
+      });
       expect(String(init?.body ?? '')).not.toContain('resolved-secret');
+      expect(String(init?.body ?? '')).not.toContain('resolved-origin-proof');
     }
   });
 });
@@ -988,7 +1066,7 @@ function send(message) {
     }
   });
 
-  it('does not inherit host or ActionProxy bearer credentials into a child process', async () => {
+  it('does not inherit host or ActionProxy credentials into a child process', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'actionproxy-mcp-env-test-'));
     const serverPath = writeNewlineTestServer(dir, `
 if (message.method === 'tools/call') {
@@ -1001,6 +1079,7 @@ if (message.method === 'tools/call') {
         text: JSON.stringify({
           allowed: process.env.EXPLICIT_CHILD_VALUE ?? null,
           bearer: process.env.ACTIONPROXY_MCP_BEARER_TOKEN ?? null,
+          quickstartOrigin: process.env.ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN ?? null,
           passthrough: process.env.PASSTHROUGH_CHILD_VALUE ?? null,
           unrelated: process.env.UNRELATED_HOST_SECRET ?? null,
         }),
@@ -1017,9 +1096,13 @@ if (message.method === 'tools/call') {
       envPassthrough: ['PASSTHROUGH_CHILD_VALUE'],
       stdioFraming: 'newline',
     }, {
-      forbiddenEnvironmentVariables: ['ACTIONPROXY_MCP_BEARER_TOKEN'],
+      forbiddenEnvironmentVariables: [
+        'ACTIONPROXY_MCP_BEARER_TOKEN',
+        'ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN',
+      ],
       parentEnvironment: {
         ACTIONPROXY_MCP_BEARER_TOKEN: 'must-not-leak',
+        ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN: 'quickstart-origin-canary',
         PATH: process.env.PATH,
         PASSTHROUGH_CHILD_VALUE: 'named-only',
         UNRELATED_HOST_SECRET: 'must-not-leak-either',
@@ -1032,6 +1115,7 @@ if (message.method === 'tools/call') {
         allowed: 'allowed',
         bearer: null,
         passthrough: 'named-only',
+        quickstartOrigin: null,
         unrelated: null,
       });
     } finally {
@@ -1170,6 +1254,7 @@ function fakeGateway(
   consumeError?: Error,
 ): ActionProxyGateway {
   return {
+    cancelApproval: vi.fn(async () => ({ ok: true })),
     consumeExecutionGrant: vi.fn(async () => {
       if (consumeError) throw consumeError;
       return { ok: true };

@@ -5,7 +5,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const manualApproval = process.argv.includes('--manual-approval');
-const baseUrl = (process.env.ACTIONPROXY_BASE_URL ?? 'http://127.0.0.1:8787').replace(/\/+$/, '');
+const configuredBaseUrl = process.env.ACTIONPROXY_BASE_URL;
+const baseUrl = normalizeLoopbackApiUrl(configuredBaseUrl ?? 'http://127.0.0.1:8787');
+const approvalUrl = normalizeLoopbackBrowserUrl(
+  process.env.ACTIONPROXY_APPROVAL_URL ??
+    (configuredBaseUrl ? `${baseUrl}/app#/approvals` : 'http://127.0.0.1:5173/#/approvals'),
+);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const wrapperPath = path.join(repoRoot, 'packages/mcp-wrapper/dist/index.js');
 const configPath = path.join(repoRoot, 'examples/mcp-demo/actionproxy.mcp.yaml');
@@ -71,7 +76,7 @@ async function main() {
     assertNoExecutionBeforeApproval(auditBeforeApproval.events, pending.toolCall.id);
 
     if (manualApproval) {
-      console.log(`Open http://127.0.0.1:5173/#/approvals and approve ${pending.approval.id}.`);
+      console.log(`Open ${approvalUrl} and approve ${pending.approval.id}.`);
       console.log('Waiting for manual approval...');
     } else {
       await approve(pending.approval.id);
@@ -248,6 +253,32 @@ function assertExactlyOneExecution(events, toolCallId) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeLoopbackApiUrl(value) {
+  const url = normalizeLoopbackUrl(value, 'ACTIONPROXY_BASE_URL');
+  if (url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('ACTIONPROXY_BASE_URL must be a loopback HTTP origin without a path, query, or fragment.');
+  }
+  return url.origin;
+}
+
+function normalizeLoopbackBrowserUrl(value) {
+  const url = normalizeLoopbackUrl(value, 'ACTIONPROXY_APPROVAL_URL');
+  return url.toString();
+}
+
+function normalizeLoopbackUrl(value, name) {
+  const url = new URL(value);
+  if (
+    url.protocol !== 'http:' ||
+    !['127.0.0.1', 'localhost'].includes(url.hostname) ||
+    url.username ||
+    url.password
+  ) {
+    throw new Error(`${name} must use loopback HTTP without credentials.`);
+  }
+  return url;
 }
 
 class JsonRpcPeer {

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadMcpWrapperConfig } from './config';
@@ -49,12 +50,22 @@ export type {
   McpTool,
 } from './wrap-server';
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isDirectExecution(process.argv[1])) {
   try {
     process.exitCode = await runMcpWrapperCli(process.argv.slice(2));
   } catch (error) {
     process.stderr.write(`actionproxy-mcp: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
+  }
+}
+
+function isDirectExecution(entryPath: string | undefined): boolean {
+  if (!entryPath) return false;
+  const modulePath = fileURLToPath(import.meta.url);
+  try {
+    return fs.realpathSync(entryPath) === fs.realpathSync(modulePath);
+  } catch {
+    return path.resolve(entryPath) === modulePath;
   }
 }
 

@@ -4,11 +4,21 @@ This example shows ActionProxy as the approval backend for a runner that owns do
 
 The script submits a `gmail.send_email` proposal, waits for ActionProxy to allow or approve it, consumes the one-time execution grant, runs a fake downstream mailer, and reports the outcome back to ActionProxy. No Gmail, MCP, or SaaS credentials are required.
 
-Run:
+Terminal 1 — start ActionProxy without local tool execution:
 
 ```bash
 corepack pnpm dev:proxy
+```
+
+Terminal 2 — start the dashboard:
+
+```bash
 corepack pnpm dev:web
+```
+
+Terminal 3 — build the SDK, then start the external runner:
+
+```bash
 corepack pnpm --filter @actionproxy/sdk-js build
 node examples/external-runner/run-external-action.mjs
 ```

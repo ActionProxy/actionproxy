@@ -3,7 +3,9 @@ actionproxy:
   requestedBy: chatgpt-tunnel-demo@example.local
   agentId: actionproxy-chatgpt-tunnel-demo
   approvalPollIntervalMs: 1000
-  approvalTimeoutMs: 120000
+  approvalTimeoutMs: 300000
+  cancelPendingOnAbort: true
+  quickstartOriginTokenEnv: ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN
 
 servers:
   chatgpt-tunnel-demo:

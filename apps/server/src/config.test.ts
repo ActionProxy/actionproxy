@@ -27,6 +27,11 @@ describe('ActionProxy config', () => {
     process.env.ACTIONPROXY_DATA_DIR = '.custom-actionproxy';
     process.env.ACTIONPROXY_STORAGE = 'sqlite';
     process.env.ACTIONPROXY_SQLITE_PATH = '.custom-actionproxy/custom.sqlite';
+    process.env.ACTIONPROXY_QUICKSTART_MODE = 'true';
+    process.env.ACTIONPROXY_QUICKSTART_LOOPBACK_PUBLISHED = 'true';
+    process.env.ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN = 'o'.repeat(32);
+    process.env.ACTIONPROXY_QUICKSTART_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000';
+    process.env.ACTIONPROXY_QUICKSTART_UPDATE_TOKEN = 'q'.repeat(32);
 
     const config = loadConfig();
 
@@ -35,6 +40,13 @@ describe('ActionProxy config', () => {
     expect(config.dataDir).toBe(path.join(tempDir, '.custom-actionproxy'));
     expect(config.storage?.mode).toBe('sqlite');
     expect(config.storage?.sqlitePath).toBe(path.join(tempDir, '.custom-actionproxy/custom.sqlite'));
+    expect(config.quickstart).toEqual({
+      enabled: true,
+      loopbackPublicationAttested: true,
+      originToken: 'o'.repeat(32),
+      sessionId: '550e8400-e29b-41d4-a716-446655440000',
+      updateToken: 'q'.repeat(32),
+    });
   });
 
   it('loads root environment files and resolves their paths from the repository root', () => {
@@ -64,6 +76,46 @@ describe('ActionProxy config', () => {
     expect(config.approverDirectoryPath).toBe(path.join(tempDir, '.actionproxy-root/approvers.json'));
     expect(config.webDistPath).toBe(path.join(tempDir, 'apps/web/dist'));
     expect(config.storage?.sqlitePath).toBe(path.join(tempDir, '.actionproxy-root/actionproxy.sqlite'));
+  });
+
+  it('can disable repository env files before any values are ingested', () => {
+    const serverCwd = path.join(tempDir, 'apps', 'server');
+    fs.mkdirSync(serverCwd, { recursive: true });
+    fs.writeFileSync(path.join(tempDir, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    fs.writeFileSync(path.join(serverCwd, 'package.json'), '{"name":"@actionproxy/server"}\n');
+    fs.writeFileSync(
+      path.join(tempDir, '.env.local'),
+      [
+        'ACTIONPROXY_PORT=9011',
+        'ACTIONPROXY_STORAGE=postgres',
+        'ACTIONPROXY_OTEL_ENABLED=true',
+        'ACTIONPROXY_EMAIL_TRANSPORT=smtp',
+        'ACTIONPROXY_EMAIL_SMTP_PASSWORD=env-file-canary',
+        'GOOGLE_OAUTH_CLIENT_SECRET=env-file-canary',
+        'DATABASE_URL=postgres://env-file-canary',
+        'SLACK_BOT_TOKEN=env-file-canary',
+        'TELEGRAM_BOT_TOKEN=env-file-canary',
+      ].join('\n'),
+    );
+    process.env.ACTIONPROXY_DISABLE_LOCAL_ENV_FILES = 'true';
+    process.env.ACTIONPROXY_EMAIL_TRANSPORT = 'outbox';
+    process.chdir(serverCwd);
+
+    const config = loadConfig();
+
+    expect(config.port).toBe(8787);
+    expect(config.storage?.mode).toBe('memory');
+    expect(config.telemetry?.enabled).toBe(false);
+    expect(config.email?.transport).toBe('outbox');
+    for (const name of [
+      'ACTIONPROXY_EMAIL_SMTP_PASSWORD',
+      'GOOGLE_OAUTH_CLIENT_SECRET',
+      'DATABASE_URL',
+      'SLACK_BOT_TOKEN',
+      'TELEGRAM_BOT_TOKEN',
+    ]) {
+      expect(process.env[name]).toBeUndefined();
+    }
   });
 
   it('resolves the default policy from the repository root under filtered package execution', () => {
@@ -333,6 +385,131 @@ describe('ActionProxy config', () => {
     expect(config.allowUnsafeLocalBind).toBe(false);
     expect(() => assertSafeStartupConfig(config)).not.toThrow();
     expect(unsafeLocalBindWarning(config)).toBeUndefined();
+  });
+
+  it('keeps Quickstart routes disabled unless explicitly enabled', () => {
+    const config = withConfigDefaults(loadConfig());
+
+    expect(config.quickstart).toEqual({
+      enabled: false,
+      loopbackPublicationAttested: false,
+      originToken: undefined,
+      sessionId: undefined,
+      updateToken: undefined,
+    });
+    expect(() => assertSafeStartupConfig(config)).not.toThrow();
+  });
+
+  it('accepts Quickstart only in the local unauthenticated mock posture', () => {
+    const base = withConfigDefaults(loadConfig());
+    const quickstart = {
+      ...base,
+      localExecution: { mode: 'mock' as const },
+      quickstart: {
+        enabled: true,
+        originToken: 'o'.repeat(32),
+        sessionId: '550e8400-e29b-41d4-a716-446655440000',
+        updateToken: 'q'.repeat(32),
+      },
+    };
+
+    expect(() => assertSafeStartupConfig(quickstart)).not.toThrow();
+    expect(() =>
+      assertSafeStartupConfig({
+        ...quickstart,
+        allowUnsafeLocalBind: true,
+        host: '0.0.0.0',
+        quickstart: {
+          ...quickstart.quickstart,
+          loopbackPublicationAttested: true,
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertSafeStartupConfig({
+        ...quickstart,
+        allowUnsafeLocalBind: true,
+        host: '0.0.0.0',
+      }),
+    ).toThrow('ACTIONPROXY_QUICKSTART_LOOPBACK_PUBLISHED=true');
+
+    expect(() =>
+      assertSafeStartupConfig({
+        ...quickstart,
+        deployment: { mode: 'self_hosted' },
+      }),
+    ).toThrow('ACTIONPROXY_DEPLOYMENT_MODE=local');
+    expect(() =>
+      assertSafeStartupConfig({
+        ...quickstart,
+        auth: { ...quickstart.auth, mode: 'api_key' },
+      }),
+    ).toThrow('ACTIONPROXY_AUTH_MODE=none');
+    expect(() =>
+      assertSafeStartupConfig({
+        ...quickstart,
+        localExecution: { mode: 'disabled' },
+      }),
+    ).toThrow('ACTIONPROXY_LOCAL_EXECUTION=mock');
+    expect(() =>
+      assertSafeStartupConfig({ ...quickstart, host: '192.0.2.10' }),
+    ).toThrow('loopback server bind');
+    expect(() =>
+      assertSafeStartupConfig({
+        ...quickstart,
+        allowUnsafeLocalBind: true,
+        host: '::',
+      }),
+    ).toThrow('loopback server bind');
+  });
+
+  it('requires bounded Quickstart session credentials', () => {
+    const base = withConfigDefaults(loadConfig());
+    const quickstart = {
+      ...base,
+      localExecution: { mode: 'mock' as const },
+      quickstart: {
+        enabled: true,
+        originToken: 'short',
+        sessionId: 'short',
+        updateToken: 'short',
+      },
+    };
+
+    expect(() => assertSafeStartupConfig(quickstart)).toThrow(
+      'ACTIONPROXY_QUICKSTART_SESSION_ID',
+    );
+    expect(() =>
+      assertSafeStartupConfig({
+        ...quickstart,
+        quickstart: {
+          ...quickstart.quickstart,
+          sessionId: '550e8400-e29b-41d4-a716-446655440000',
+        },
+      }),
+    ).toThrow('ACTIONPROXY_QUICKSTART_UPDATE_TOKEN');
+    expect(() =>
+      assertSafeStartupConfig({
+        ...quickstart,
+        quickstart: {
+          ...quickstart.quickstart,
+          originToken: 'short',
+          sessionId: '550e8400-e29b-41d4-a716-446655440000',
+          updateToken: 'q'.repeat(32),
+        },
+      }),
+    ).toThrow('ACTIONPROXY_QUICKSTART_ORIGIN_TOKEN');
+    expect(() =>
+      assertSafeStartupConfig({
+        ...quickstart,
+        quickstart: {
+          ...quickstart.quickstart,
+          originToken: 'q'.repeat(32),
+          sessionId: '550e8400-e29b-41d4-a716-446655440000',
+          updateToken: 'q'.repeat(32),
+        },
+      }),
+    ).toThrow('must be distinct');
   });
 });
 
