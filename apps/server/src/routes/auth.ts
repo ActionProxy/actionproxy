@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AuthService } from '../security/auth-service';
-import { allScopes } from '../security/auth-service';
 import { requireScope } from '../security/scopes';
 import type { AuditStore } from '../storage/audit-store';
 import { authContext, mapKnownError } from './route-utils';
@@ -25,7 +24,7 @@ export async function registerAuthRoutes(
 ): Promise<void> {
   app.get('/v1/me', async (request) => {
     const auth = authContext(request);
-    return { auth, availableScopes: allScopes() };
+    return { auth, availableScopes: authService.availableScopes() };
   });
 
   app.post('/v1/service-accounts', async (request, reply) => {

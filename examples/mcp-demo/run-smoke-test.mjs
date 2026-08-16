@@ -35,7 +35,7 @@ async function main() {
   try {
     await peer.request('initialize', {
       capabilities: {},
-      clientInfo: { name: 'actionproxy-mcp-smoke-test', version: '0.1.0' },
+      clientInfo: { name: 'actionproxy-mcp-smoke-test', version: '0.1.1' },
       protocolVersion: '2025-06-18',
     });
     peer.notify('notifications/initialized', {});

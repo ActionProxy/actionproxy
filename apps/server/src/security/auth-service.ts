@@ -4,7 +4,7 @@ import type { AuthConfig, SlackUserMapping } from '../config';
 import { ForbiddenError, UnauthorizedError } from '../errors';
 import type { ApiKeyRecord, AuthContext, JsonObject, ServiceAccountRecord } from '../models';
 import type { Store } from '../storage/store';
-import { ALL_SCOPES, type ActionProxyScope } from './scopes';
+import { ALL_SCOPES } from './scopes';
 import { randomToken, safeEqual, sha256Hex } from './crypto';
 
 export interface CreateServiceAccountInput {
@@ -66,6 +66,7 @@ const defaultJwksFetch: JwksFetch = async (url, init) =>
   (await globalThis.fetch(url, init)) as unknown as JwksFetchResponse;
 
 export class AuthService {
+  private readonly allowedScopes: string[];
   private remoteJwksCache?: { fetchedAt: number; jwks: Jwks; uri: string };
   private remoteJwksFetch?: { promise: Promise<Jwks>; uri: string };
   private remoteUnknownKidRefreshedAt = 0;
@@ -74,7 +75,14 @@ export class AuthService {
     private readonly config: AuthConfig,
     private readonly store: Store,
     private readonly fetchJwks: JwksFetch = defaultJwksFetch,
-  ) {}
+    additionalScopes: readonly string[] = [],
+  ) {
+    this.allowedScopes = uniqueStrings([...ALL_SCOPES, ...additionalScopes]);
+  }
+
+  availableScopes(): string[] {
+    return [...this.allowedScopes];
+  }
 
   async ensureWorkspace(): Promise<void> {
     const existing = await this.store.getWorkspace(this.config.workspaceId);
@@ -189,7 +197,7 @@ export class AuthService {
       groups: stringArrayClaim(payload[this.config.oidc.groupsClaim]),
       principalId,
       principalType: 'user',
-      scopes,
+      scopes: restrictScopes(scopes, this.allowedScopes),
       workspaceId: this.config.workspaceId,
     };
   }
@@ -210,7 +218,10 @@ export class AuthService {
       groups: mapping.groups ?? [],
       principalId: mapping.principalId,
       principalType: 'slack',
-      scopes: mapping.scopes ?? ['approval:read', 'approval:approve', 'approval:reject'],
+      scopes: restrictScopes(
+        mapping.scopes ?? ['approval:read', 'approval:approve', 'approval:reject'],
+        this.allowedScopes,
+      ),
       workspaceId: this.config.workspaceId,
     };
   }
@@ -229,13 +240,15 @@ export class AuthService {
 
   async createServiceAccount(input: CreateServiceAccountInput, actor: AuthContext): Promise<ServiceAccountRecord> {
     const now = new Date().toISOString();
+    const scopes = uniqueStrings(input.scopes ?? ['tool_call:submit', 'tool_call:read']);
+    this.assertSupportedScopes(scopes);
     const record: ServiceAccountRecord = {
       createdAt: now,
       description: input.description,
       groups: uniqueStrings(input.groups ?? []),
       id: `svc_${randomUUID()}`,
       name: input.name,
-      scopes: uniqueStrings(input.scopes ?? ['tool_call:submit', 'tool_call:read']),
+      scopes,
       updatedAt: now,
       workspaceId: actor.workspaceId,
     };
@@ -252,7 +265,12 @@ export class AuthService {
     const keyPrefix = randomUUID().replaceAll('-', '').slice(0, 12);
     const token = `apx_${keyPrefix}_${randomToken(32)}`;
     const now = new Date().toISOString();
-    const scopes = restrictScopes(input.scopes ?? serviceAccount.scopes, serviceAccount.scopes);
+    const requestedScopes = input.scopes ?? serviceAccount.scopes;
+    if (input.scopes) this.assertSupportedScopes(requestedScopes);
+    const scopes = restrictScopes(
+      restrictScopes(requestedScopes, serviceAccount.scopes),
+      this.allowedScopes,
+    );
     const record: ApiKeyRecord = {
       createdAt: now,
       id: `key_${randomUUID()}`,
@@ -286,15 +304,31 @@ export class AuthService {
       groups: serviceAccount.groups,
       principalId: serviceAccount.id,
       principalType: 'service_account',
-      scopes: restrictScopes(apiKey.scopes.length > 0 ? apiKey.scopes : serviceAccount.scopes, serviceAccount.scopes),
+      scopes: restrictScopes(
+        restrictScopes(
+          apiKey.scopes.length > 0 ? apiKey.scopes : serviceAccount.scopes,
+          serviceAccount.scopes,
+        ),
+        this.allowedScopes,
+      ),
       workspaceId: apiKey.workspaceId,
     };
   }
 
-  private authenticateOidcJwt(token: string): AuthContext {
+  private async authenticateOidcJwt(token: string): Promise<AuthContext> {
     const { header, payload, signedValue, signature } = parseJwt(token);
     if (header.alg !== 'RS256') throw new UnauthorizedError('Only RS256 OIDC JWTs are supported.');
-    if (!verifyJwtSignature(header, signedValue, signature, this.loadJwks())) {
+    const kid = stringClaim(header.kid);
+    if (!kid) throw new UnauthorizedError('JWT key id is required.');
+
+    let loaded = await this.loadMcpJwks();
+    let jwk = resolveUniqueMcpSigningKey(loaded.jwks, kid);
+    if (!jwk && loaded.remote && loaded.fromCache && this.canRefreshUnknownKid()) {
+      loaded = await this.loadRemoteMcpJwks(true);
+      jwk = resolveUniqueMcpSigningKey(loaded.jwks, kid);
+    }
+    if (!jwk) throw new UnauthorizedError('JWT key id is not trusted.');
+    if (!verifyMcpJwtSignature(signedValue, signature, jwk)) {
       throw new UnauthorizedError('Invalid JWT signature.');
     }
 
@@ -324,23 +358,19 @@ export class AuthService {
       groups: stringArrayClaim(payload[this.config.oidc.groupsClaim]),
       principalId,
       principalType: 'user',
-      scopes: scopesClaim(payload[this.config.oidc.scopesClaim]),
+      scopes: restrictScopes(scopesClaim(payload[this.config.oidc.scopesClaim]), this.allowedScopes),
       workspaceId: this.config.workspaceId,
     };
   }
 
-  private loadJwks(): Jwks {
-    const raw = this.config.oidc.jwksJson ?? (this.config.oidc.jwksPath ? fs.readFileSync(this.config.oidc.jwksPath, 'utf8') : undefined);
-    if (!raw) throw new UnauthorizedError('OIDC JWKS is not configured.');
-    try {
-      return JSON.parse(raw) as Jwks;
-    } catch {
-      throw new UnauthorizedError('OIDC JWKS is invalid JSON.');
-    }
-  }
-
   private isBootstrapToken(token: string): boolean {
     return Boolean(this.config.bootstrapAdminApiKey && safeEqual(token, this.config.bootstrapAdminApiKey));
+  }
+
+  private assertSupportedScopes(scopes: string[]): void {
+    const allowed = new Set(this.allowedScopes);
+    const unsupported = scopes.find((scope) => !allowed.has(scope));
+    if (unsupported) throw new ForbiddenError(`Unsupported scope for this edition: ${unsupported}`);
   }
 
   private async loadMcpJwks(): Promise<LoadedMcpJwks> {
@@ -450,21 +480,6 @@ function parseBase64Json<T>(value: string): T {
     return JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as T;
   } catch {
     throw new UnauthorizedError('JWT contains invalid JSON.');
-  }
-}
-
-function verifyJwtSignature(header: JwtHeader, signedValue: string, signature: Buffer, jwks: Jwks): boolean {
-  const keys = jwks.keys ?? [];
-  const jwk = keys.find((candidate) => (header.kid ? candidate.kid === header.kid : true));
-  if (!jwk) throw new UnauthorizedError('JWT key id is not trusted.');
-
-  try {
-    const verifier = createVerify('RSA-SHA256');
-    verifier.update(signedValue);
-    verifier.end();
-    return verifier.verify(createPublicKey({ format: 'jwk', key: jwk }), signature);
-  } catch {
-    return false;
   }
 }
 
@@ -662,7 +677,7 @@ function stringArrayClaim(value: unknown): string[] {
   return [];
 }
 
-function scopesClaim(value: unknown): ActionProxyScope[] | string[] {
+function scopesClaim(value: unknown): string[] {
   return stringArrayClaim(value);
 }
 

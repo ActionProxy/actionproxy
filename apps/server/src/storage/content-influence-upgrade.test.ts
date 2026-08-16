@@ -30,7 +30,13 @@ describeIfSqlite('SQLite content-influence schema upgrade', () => {
 
     expect(runSqliteMigrations(databasePath)).toEqual({
       adoptedLegacySchema: true,
-      applied: ['0001_initial', '0002_legacy_schema_reconciliation', '0003_approver_principal_identity'],
+      applied: [
+        '0001_initial',
+        '0002_legacy_schema_reconciliation',
+        '0003_approver_principal_identity',
+        '0004_unique_approver_principal',
+        '0005_unique_approver_effective_identity',
+      ],
     });
     const record = upgradeExposure('sqlite');
     const upgraded = new SqliteStore(databasePath);
@@ -59,6 +65,8 @@ describeIfSqlite('SQLite content-influence schema upgrade', () => {
         { id: '0001_initial', position: 1 },
         { id: '0002_legacy_schema_reconciliation', position: 2 },
         { id: '0003_approver_principal_identity', position: 3 },
+        { id: '0004_unique_approver_principal', position: 4 },
+        { id: '0005_unique_approver_effective_identity', position: 5 },
       ]);
   });
 });
@@ -87,7 +95,13 @@ describeIfPostgres('Postgres content-influence schema upgrade', () => {
 
       await expect(runPostgresMigrations(scopedUrl)).resolves.toEqual({
         adoptedLegacySchema: true,
-        applied: ['0001_initial', '0002_legacy_schema_reconciliation', '0003_approver_principal_identity'],
+        applied: [
+          '0001_initial',
+          '0002_legacy_schema_reconciliation',
+          '0003_approver_principal_identity',
+          '0004_unique_approver_principal',
+          '0005_unique_approver_effective_identity',
+        ],
       });
       const record = upgradeExposure('postgres');
       upgraded = await PostgresStore.connect(scopedUrl);
@@ -123,6 +137,8 @@ describeIfPostgres('Postgres content-influence schema upgrade', () => {
         { id: '0001_initial', position: 1 },
         { id: '0002_legacy_schema_reconciliation', position: 2 },
         { id: '0003_approver_principal_identity', position: 3 },
+        { id: '0004_unique_approver_principal', position: 4 },
+        { id: '0005_unique_approver_effective_identity', position: 5 },
       ]);
     } finally {
       await upgraded?.close();

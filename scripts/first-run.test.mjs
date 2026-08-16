@@ -329,16 +329,16 @@ test("integration starters are deterministic, local-only, and machine-readable",
   );
   assert.equal(
     sdkPackage.dependencies["@actionproxy/sdk-js"],
-    "file:vendor/actionproxy-sdk-js-0.1.0.tgz",
+    "file:vendor/actionproxy-sdk-js-0.1.1.tgz",
   );
   const sdkStarter = createIntegrationStarter("sdk");
   assert.deepEqual(sdkStarter.packageSource, {
-    archive: "vendor/actionproxy-sdk-js-0.1.0.tgz",
+    archive: "vendor/actionproxy-sdk-js-0.1.1.tgz",
     availability: "local_source_tarball_required",
     kind: "local_tarball",
     packageName: "@actionproxy/sdk-js",
     registryInstallAvailable: false,
-    version: "0.1.0",
+    version: "0.1.1",
   });
   assert.match(
     sdkStarter.files.find((file) => file.path === "README.md").content,
@@ -3629,7 +3629,7 @@ test("the POSIX shim is executable, reports version under Node 24, and rejects n
   };
   const version = spawnSync(shim, ["--version"], { encoding: "utf8", env });
   assert.equal(version.status, 0, version.stderr);
-  assert.match(version.stdout, /^0\.1\.0/u);
+  assert.match(version.stdout, /^0\.1\.1/u);
   const noCommand = spawnSync(shim, [], { encoding: "utf8", env, input: "" });
   assert.equal(noCommand.status, 2);
   assert.match(noCommand.stderr, /input is not interactive/u);

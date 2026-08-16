@@ -2,6 +2,10 @@ import type { ApproverGroupRecord, ApproverUserRecord, AuthContext } from '../mo
 import { ConflictError, NotFoundError } from '../errors';
 import type { PolicyFile, PolicyRule } from '../policy/policy-types';
 import type { Store } from '../storage/store';
+import {
+  APPROVER_PRINCIPAL_CONFLICT_MESSAGE,
+  ApproverPrincipalConflictError,
+} from '../storage/approver-principal-constraint';
 
 export interface ApprovalNotificationRecipient {
   displayName: string;
@@ -79,7 +83,14 @@ export class ApproverDirectoryService {
       updatedAt: now,
       workspaceId,
     };
-    return this.store.upsertApproverUser(record);
+    try {
+      return await this.store.upsertApproverUser(record);
+    } catch (error) {
+      if (error instanceof ApproverPrincipalConflictError) {
+        throw new ConflictError(APPROVER_PRINCIPAL_CONFLICT_MESSAGE);
+      }
+      throw error;
+    }
   }
 
   async connectTelegramUser(

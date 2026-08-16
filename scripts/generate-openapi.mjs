@@ -175,7 +175,7 @@ export function buildOpenApiDocument() {
     jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
     info: {
       title: "ActionProxy Community HTTP API",
-      version: "0.1.0",
+      version: "0.1.1",
       description: "The self-hosted Community API for submitting governed tool calls, reviewing approvals, executing exact authorized actions, and verifying local audit evidence. Static web routes and routes outside the Community boundary are intentionally excluded.",
       license: { name: "Apache-2.0", identifier: "Apache-2.0" },
     },

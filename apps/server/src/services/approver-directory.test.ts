@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApproverDirectoryService } from './approver-directory';
 import { MemoryStore } from '../storage/memory-store';
+import { ConflictError } from '../errors';
 
 describe('ApproverDirectoryService', () => {
   it('creates users and groups with generated unique ids', async () => {
@@ -120,6 +121,41 @@ describe('ApproverDirectoryService', () => {
     await expect(
       directory.upsertUser('default', 'oidc|alice', { displayName: 'Legacy collision' }),
     ).rejects.toThrow('authorization identity conflicts');
+  });
+
+  it('maps a concurrent storage principal conflict to a safe domain conflict', async () => {
+    const directory = new ApproverDirectoryService(new MemoryStore());
+    const results = await Promise.allSettled([
+      directory.upsertUser('default', 'u_alice', { displayName: 'Alice', principalId: 'oidc|shared' }),
+      directory.upsertUser('default', 'u_bob', { displayName: 'Bob', principalId: 'oidc|shared' }),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(ConflictError);
+    expect((rejected?.reason as Error | undefined)?.message).toBe(
+      'Approver authorization identity conflicts with an existing directory user.',
+    );
+  });
+
+  it('maps a concurrent principal-to-fallback-id collision to a safe domain conflict', async () => {
+    const directory = new ApproverDirectoryService(new MemoryStore());
+    const results = await Promise.allSettled([
+      directory.upsertUser('default', 'u_mapped', {
+        displayName: 'Mapped operator',
+        principalId: 'oidc|operator',
+      }),
+      directory.upsertUser('default', 'oidc|operator', {
+        displayName: 'Legacy fallback operator',
+      }),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(ConflictError);
+    expect((rejected?.reason as Error | undefined)?.message).toBe(
+      'Approver authorization identity conflicts with an existing directory user.',
+    );
   });
 
   it('validates policy references against enabled directory records', async () => {

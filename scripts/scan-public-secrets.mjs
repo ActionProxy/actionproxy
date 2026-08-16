@@ -132,7 +132,9 @@ for await (const relativeFile of walk(target)) {
 if (findings.length) {
   console.error(`Public secret scan failed: ${findings.length} finding${findings.length === 1 ? '' : 's'}`);
   for (const finding of findings.slice(0, 80)) {
-    console.error(`- ${finding.file}:${finding.line} [${finding.rule}] ${finding.reason}: ${finding.preview}`);
+    console.error(
+      `- ${finding.file}:${finding.line} [${finding.rule}] ${finding.reason} (matched value redacted)`,
+    );
   }
   if (findings.length > 80) {
     console.error(`- ... ${findings.length - 80} additional findings omitted`);
@@ -159,7 +161,7 @@ function scanFile(relativeFile, body) {
       for (const match of line.matchAll(rule.pattern)) {
         const value = match[0];
         if (isPlaceholderValue(value)) continue;
-        addFinding(relativeFile, lineNumber, rule.id, rule.reason, value);
+        addFinding(relativeFile, lineNumber, rule.id, rule.reason);
       }
     }
 
@@ -180,7 +182,12 @@ function scanFile(relativeFile, body) {
       const host = normalizeValue(match[3]);
       if (isPlaceholderValue(username) && isPlaceholderValue(password)) continue;
       if (isAllowedLocalCredentialUrl(username, password, host)) continue;
-      addFinding(relativeFile, lineNumber, 'credential-url', 'URL contains inline credentials', `${username}:${password}@${host}`);
+      addFinding(
+        relativeFile,
+        lineNumber,
+        'credential-url',
+        'URL contains inline credentials',
+      );
     }
   }
 }
@@ -192,15 +199,19 @@ function scanAssignedValue(relativeFile, lineNumber, key, rawValue) {
   const suspiciousLength = value.length >= 16;
   const suspiciousEntropy = value.length >= 12 && entropy >= 3.25;
   if (suspiciousLength || suspiciousEntropy || looksLikeTokenPrefix(value)) {
-    addFinding(relativeFile, lineNumber, 'secret-assignment', `non-placeholder value assigned to ${key}`, value);
+    addFinding(
+      relativeFile,
+      lineNumber,
+      'secret-assignment',
+      `non-placeholder value assigned to ${key}`,
+    );
   }
 }
 
-function addFinding(file, line, rule, reason, value) {
+function addFinding(file, line, rule, reason) {
   findings.push({
     file,
     line,
-    preview: maskValue(value),
     reason,
     rule,
   });
@@ -276,12 +287,6 @@ function shannonEntropy(value) {
     entropy -= probability * Math.log2(probability);
   }
   return entropy;
-}
-
-function maskValue(value) {
-  const normalized = normalizeValue(value);
-  if (normalized.length <= 8) return '<redacted>';
-  return `${normalized.slice(0, 4)}...${normalized.slice(-4)}`;
 }
 
 function normalizeValue(value) {

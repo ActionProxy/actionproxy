@@ -20,10 +20,11 @@ authority, and records the outcome.
 | Content consequences | Source-aware influence scopes and fail-closed policy narrowing for calls routed through supported MCP paths                                                                                               |
 
 The SDK and MCP wrapper are independently packable as
-`@actionproxy/sdk-js@0.1.0` and `@actionproxy/mcp-wrapper@0.1.0`. Registry
+`@actionproxy/sdk-js@0.1.1` and `@actionproxy/mcp-wrapper@0.1.1`. Registry
 availability is a separately verified release fact; until both exact npm
-records resolve, consumers use the reviewed local tarballs described in
-[the adoption guide](ADOPTING.md).
+records resolve with the reviewed repository metadata, integrity values, and
+provenance, consumers use the reviewed local tarballs described in [the
+adoption guide](ADOPTING.md).
 
 The optional `tunnel-client` binary is downloaded only after explicit install
 intent and is not part of the ActionProxy repository or its SBOM. Its checked-in

@@ -19,6 +19,8 @@ const publicRoutes = new Set([
   'GET /health',
   'POST /v1/slack/interactions',
   'POST /v1/telegram/webhook',
+  'GET /v1/integrations/google-workspace/oauth/callback',
+  'GET /v1/integrations/slack/oauth/callback',
   'GET /.well-known/oauth-protected-resource',
   'GET /.well-known/oauth-protected-resource/mcp',
 ]);

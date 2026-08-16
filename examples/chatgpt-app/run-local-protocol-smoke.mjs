@@ -208,7 +208,7 @@ function initializeMessage(id) {
     method: 'initialize',
     params: {
       capabilities: {},
-      clientInfo: { name: 'actionproxy-chatgpt-local-smoke', version: '0.1.0' },
+      clientInfo: { name: 'actionproxy-chatgpt-local-smoke', version: '0.1.1' },
       protocolVersion: proposedProtocolVersion,
     },
   };

@@ -1,14 +1,21 @@
 {
   "name": "@actionproxy/mcp-wrapper",
-  "version": "0.1.0",
-  "description": "Stdio MCP proxy for ActionProxy policy, approval, grants, and audit",
+  "version": "0.1.1",
+  "description": "MCP stdio proxy for governing tool calls with ActionProxy policy, human approval, one-time grants, and audit",
   "keywords": [
+    "actionproxy",
     "ai-agents",
+    "agent-security",
+    "ai-governance",
     "approval-gateway",
     "audit",
     "human-in-the-loop",
     "mcp",
-    "model-context-protocol"
+    "mcp-proxy",
+    "mcp-server",
+    "model-context-protocol",
+    "tool-calling",
+    "tool-governance"
   ],
   "license": "Apache-2.0",
   "repository": {
@@ -16,7 +23,7 @@
     "url": "git+https://github.com/ActionProxy/actionproxy.git",
     "directory": "packages/mcp-wrapper"
   },
-  "homepage": "https://github.com/ActionProxy/actionproxy#readme",
+  "homepage": "https://actionproxy.com/quickstart/",
   "bugs": {
     "url": "https://github.com/ActionProxy/actionproxy/issues"
   },

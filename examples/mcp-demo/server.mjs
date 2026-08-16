@@ -72,7 +72,7 @@ function handle(message) {
       result: {
         capabilities: { tools: {} },
         protocolVersion: '2025-06-18',
-        serverInfo: { name: 'actionproxy-mcp-demo', version: '0.1.0' },
+        serverInfo: { name: 'actionproxy-mcp-demo', version: '0.1.1' },
       },
     });
     return;

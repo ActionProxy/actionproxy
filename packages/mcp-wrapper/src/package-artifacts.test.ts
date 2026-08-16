@@ -12,6 +12,43 @@ const repositoryRoot = path.resolve(
 );
 const corepack = process.platform === 'win32' ? 'corepack.cmd' : 'corepack';
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const expectedVersion = String(
+  readJson(path.join(repositoryRoot, 'package.json')).version,
+);
+const expectedPackageMetadata = {
+  'mcp-wrapper': {
+    homepage: 'https://actionproxy.com/quickstart/',
+    keywords: [
+      'actionproxy',
+      'ai-agents',
+      'agent-security',
+      'ai-governance',
+      'approval-gateway',
+      'audit',
+      'human-in-the-loop',
+      'mcp',
+      'mcp-proxy',
+      'mcp-server',
+      'model-context-protocol',
+      'tool-calling',
+      'tool-governance',
+    ],
+  },
+  'sdk-js': {
+    homepage: 'https://actionproxy.com/quickstart/',
+    keywords: [
+      'actionproxy',
+      'ai-agents',
+      'agent-security',
+      'ai-governance',
+      'approval-gateway',
+      'audit',
+      'human-in-the-loop',
+      'tool-calling',
+      'tool-governance',
+    ],
+  },
+} as const;
 const expectedPackageFiles = [
   'LICENSE',
   'README.md',
@@ -36,11 +73,11 @@ describe('independently packed npm artifacts', () => {
 
       const sdkTarball = path.join(
         artifactsDirectory,
-        'actionproxy-sdk-js-0.1.0.tgz',
+        `actionproxy-sdk-js-${expectedVersion}.tgz`,
       );
       const mcpTarball = path.join(
         artifactsDirectory,
-        'actionproxy-mcp-wrapper-0.1.0.tgz',
+        `actionproxy-mcp-wrapper-${expectedVersion}.tgz`,
       );
       const yamlTarball = path.join(artifactsDirectory, 'yaml.tgz');
       const sdkReport = pack('@actionproxy/sdk-js', sdkTarball);
@@ -51,11 +88,7 @@ describe('independently packed npm artifacts', () => {
       const yamlPackageRoot = path.dirname(
         createRequire(import.meta.url).resolve('yaml/package.json'),
       );
-      run(
-        corepack,
-        ['pnpm', 'pack', '--out', yamlTarball],
-        yamlPackageRoot,
-      );
+      run(corepack, ['pnpm', 'pack', '--out', yamlTarball], yamlPackageRoot);
 
       assertExactPackageInventory(sdkReport.files);
       assertExactPackageInventory(mcpReport.files);
@@ -64,8 +97,8 @@ describe('independently packed npm artifacts', () => {
       expect(sdkNpmReport.entryCount).toBe(5);
       expect(mcpNpmReport.entryCount).toBe(5);
       expect(
-        mcpNpmReport.files.find(({ path: filePath }) =>
-          filePath === 'dist/index.js'
+        mcpNpmReport.files.find(
+          ({ path: filePath }) => filePath === 'dist/index.js',
         )?.mode,
       ).toBe(0o755);
 
@@ -232,24 +265,18 @@ interface NpmPackReport extends PackReport {
 function pack(packageName: string, outputPath: string): PackReport {
   const result = run(
     corepack,
-    [
-      'pnpm',
-      '--filter',
-      packageName,
-      'pack',
-      '--out',
-      outputPath,
-      '--json',
-    ],
+    ['pnpm', '--filter', packageName, 'pack', '--out', outputPath, '--json'],
     repositoryRoot,
   );
   const jsonStart = result.stdout.lastIndexOf('\n{');
   if (jsonStart === -1) {
-    throw new Error(`pnpm pack did not return its JSON report:\n${result.stdout}`);
+    throw new Error(
+      `pnpm pack did not return its JSON report:\n${result.stdout}`,
+    );
   }
   const report = JSON.parse(result.stdout.slice(jsonStart + 1)) as PackReport;
   expect(report.name).toBe(packageName);
-  expect(report.version).toBe('0.1.0');
+  expect(report.version).toBe(expectedVersion);
   expect(fs.existsSync(outputPath)).toBe(true);
   return report;
 }
@@ -279,13 +306,11 @@ function npmPackDryRun(
     throw new Error('npm pack --dry-run returned an empty JSON report');
   }
   expect(report.name).toBe(`@actionproxy/${packageDirectory}`);
-  expect(report.version).toBe('0.1.0');
+  expect(report.version).toBe(expectedVersion);
   return report;
 }
 
-function assertExactPackageInventory(
-  files: Array<{ path: string }>,
-): void {
+function assertExactPackageInventory(files: Array<{ path: string }>): void {
   const actual = files
     .map(({ path: filePath }) => filePath)
     .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
@@ -317,7 +342,7 @@ function assertCanonicalPackageManifests(): void {
       expect(readJson(publicCanonicalPath)).toEqual(workspace);
     }
     expect(workspace.private).toBeUndefined();
-    expect(workspace.version).toBe('0.1.0');
+    expect(workspace.version).toBe(expectedVersion);
     expect(workspace.files).toEqual(['dist']);
     expect(workspace.engines).toEqual({ node: '>=22 <25' });
     expect(workspace.repository).toEqual({
@@ -326,28 +351,17 @@ function assertCanonicalPackageManifests(): void {
       directory: `packages/${packageName}`,
     });
     expect(workspace.homepage).toBe(
-      'https://github.com/ActionProxy/actionproxy#readme',
+      expectedPackageMetadata[
+        packageName as keyof typeof expectedPackageMetadata
+      ].homepage,
     );
     expect(workspace.bugs).toEqual({
       url: 'https://github.com/ActionProxy/actionproxy/issues',
     });
     expect(workspace.keywords).toEqual(
-      packageName === 'sdk-js'
-        ? [
-            'ai-agents',
-            'approval-gateway',
-            'audit',
-            'human-in-the-loop',
-            'tool-calls',
-          ]
-        : [
-            'ai-agents',
-            'approval-gateway',
-            'audit',
-            'human-in-the-loop',
-            'mcp',
-            'model-context-protocol',
-          ],
+      expectedPackageMetadata[
+        packageName as keyof typeof expectedPackageMetadata
+      ].keywords,
     );
     expect(workspace.publishConfig).toEqual({
       access: 'public',
@@ -381,7 +395,7 @@ function assertInstalledManifest(
 ): void {
   const manifest = readJson(path.join(installedRoot, 'package.json'));
   expect(manifest.name).toBe(packageName);
-  expect(manifest.version).toBe('0.1.0');
+  expect(manifest.version).toBe(expectedVersion);
   expect(manifest.private).toBeUndefined();
   expect(manifest.files).toEqual(['dist']);
   expect(manifest.engines).toEqual({ node: '>=22 <25' });
@@ -427,9 +441,7 @@ function run(
     ]
       .filter(Boolean)
       .join('\n');
-    throw new Error(
-      `${command} ${args.join(' ')} failed: ${detail}`,
-    );
+    throw new Error(`${command} ${args.join(' ')} failed: ${detail}`);
   }
   return { stderr: result.stderr, stdout: result.stdout };
 }

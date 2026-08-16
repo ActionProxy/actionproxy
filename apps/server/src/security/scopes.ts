@@ -7,9 +7,6 @@ export const ALL_SCOPES = [
   'approval:read',
   'approval:approve',
   'approval:reject',
-  'agent:read',
-  'agent:write',
-  'agent:run',
   'audit:read',
   'policy:read',
   'policy:write',
@@ -17,13 +14,11 @@ export const ALL_SCOPES = [
   'admin:integrations',
   'admin:service_accounts',
   'execution_grant:consume',
-  'user_connection:read',
-  'user_connection:write',
 ] as const;
 
 export type ActionProxyScope = (typeof ALL_SCOPES)[number];
 
-export function hasScope(auth: AuthContext | undefined, scope: ActionProxyScope): boolean {
+export function hasScope(auth: AuthContext | undefined, scope: string): boolean {
   if (!auth) return false;
   return auth.scopes.includes('*') || auth.scopes.includes(scope);
 }
@@ -33,7 +28,7 @@ export function requireAuth(auth: AuthContext | undefined): AuthContext {
   return auth;
 }
 
-export function requireScope(auth: AuthContext | undefined, scope: ActionProxyScope): AuthContext {
+export function requireScope(auth: AuthContext | undefined, scope: string): AuthContext {
   const context = requireAuth(auth);
   if (!hasScope(context, scope)) {
     throw new ForbiddenError(`Missing required scope: ${scope}`);

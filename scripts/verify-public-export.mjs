@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import {
   comparePublicPaths as comparePaths,
   gitModeFromStat,
@@ -19,9 +21,10 @@ const destination = path.resolve(
 const strict = process.argv.includes("--strict");
 const checkoutMode = process.argv.includes("--checkout");
 const jsonOutput = process.argv.includes("--json");
+const bootstrapMode = process.argv.includes("--bootstrap");
 const approvedRepository = "https://github.com/ActionProxy/actionproxy";
-const approvedReleaseTag = "v0.1.0";
-const verificationReportSchemaVersion = "actionproxy.public-verification.v1";
+const approvedReleaseTag = "v0.1.1";
+const verificationReportSchemaVersion = "actionproxy.public-verification.v2";
 const failures = [];
 let verifiedManifest;
 let verificationFiles;
@@ -65,6 +68,8 @@ const requiredPaths = [
   "apps/server/src/storage/migrations/0001_initial.sql",
   "apps/server/src/storage/migrations/0002_legacy_schema_reconciliation.sql",
   "apps/server/src/storage/migrations/0003_approver_principal_identity.sql",
+  "apps/server/src/storage/migrations/0004_unique_approver_principal.sql",
+  "apps/server/src/storage/migrations/0005_unique_approver_effective_identity.sql",
   "apps/web/index.html",
   "apps/web/package.json",
   "apps/web/src/App.tsx",
@@ -110,6 +115,8 @@ const requiredPaths = [
   "package.json",
   "packages/mcp-wrapper/LICENSE",
   "packages/mcp-wrapper/package.json",
+  "packages/mcp-wrapper/src/npm-release-artifacts.mjs",
+  "packages/mcp-wrapper/src/npm-release-artifacts.test.mjs",
   "packages/mcp-wrapper/src/package-artifacts.test.ts",
   "packages/mcp-wrapper/src/doctor.ts",
   "packages/sdk-js/LICENSE",
@@ -196,8 +203,115 @@ const requiredRootScripts = [
   "workflow:check",
 ];
 
+const reviewedNpmPackageSurfaceFields = [
+  "type",
+  "files",
+  "sideEffects",
+  "main",
+  "module",
+  "types",
+  "exports",
+  "bin",
+  "scripts",
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "peerDependenciesMeta",
+  "optionalDependencies",
+  "bundledDependencies",
+  "bundleDependencies",
+  "publishConfig",
+  "engines",
+];
+
+const reviewedNpmPackageSurfaces = {
+  "packages/sdk-js": {
+    type: "module",
+    files: ["dist"],
+    sideEffects: false,
+    main: "dist/index.js",
+    types: "dist/index.d.ts",
+    exports: {
+      ".": {
+        types: "./dist/index.d.ts",
+        import: "./dist/index.js",
+      },
+    },
+    scripts: {
+      build: "tsup src/index.ts --format esm --dts --out-dir dist",
+      prepack: "npm run build",
+      test: "vitest run",
+      lint: "tsc --noEmit",
+    },
+    devDependencies: {
+      "@types/node": "^22.7.4",
+      tsup: "^8.3.0",
+      typescript: "^5.6.3",
+      vitest: "^3.2.6",
+    },
+    publishConfig: {
+      access: "public",
+      registry: "https://registry.npmjs.org/",
+    },
+    engines: {
+      node: ">=22 <25",
+    },
+  },
+  "packages/mcp-wrapper": {
+    type: "module",
+    files: ["dist"],
+    bin: {
+      "actionproxy-mcp": "dist/index.js",
+    },
+    main: "dist/index.js",
+    types: "dist/index.d.ts",
+    exports: {
+      ".": {
+        types: "./dist/index.d.ts",
+        import: "./dist/index.js",
+      },
+    },
+    scripts: {
+      build: "tsup src/index.ts --format esm --dts --out-dir dist",
+      prepack: "npm run build",
+      test: "vitest run",
+      lint: "tsc --noEmit",
+    },
+    dependencies: {
+      yaml: "^2.5.1",
+    },
+    devDependencies: {
+      "@types/node": "^22.7.4",
+      tsup: "^8.3.0",
+      typescript: "^5.6.3",
+      vitest: "^3.2.6",
+    },
+    publishConfig: {
+      access: "public",
+      registry: "https://registry.npmjs.org/",
+    },
+    engines: {
+      node: ">=22 <25",
+    },
+  },
+};
+
+const reviewedRootVerificationToolchain = {
+  "@readme/openapi-parser": "6.3.0",
+  ajv: "8.20.0",
+  typescript: "5.9.3",
+};
+
+const forbiddenInstallLifecycleScripts = [
+  "preinstall",
+  "install",
+  "postinstall",
+  "prepare",
+];
+
 const forbiddenPaths = [
   ".git",
+  ".npmrc",
   "Makefile",
   "PUBLIC_EXPORT_NOTES.md",
   "codex",
@@ -295,12 +409,28 @@ const forbiddenContentRules = [
     "platform provider stub or test-only HTTP endpoint leaked into public export",
   ],
   [
-    /\b(?:AgentRunService|AgentFlowBuilderService|AgentRunRecord|CompanyAgentRecord|CustomAgentFlowRecord|UserConnectedAccountRecord)\b|\b(?:agent_runs|company_agents|custom_agent_flows|user_connected_accounts)\b/,
+    /\b(?:AgentRun|AgentRunService|AgentFlowBuilderService|AgentRunRecord|CompanyAgentRecord|CustomAgentFlowRecord|UserConnectedAccountRecord)\b|\b(?:agent_runs|company_agents|custom_agent_flows|user_connected_accounts)\b/,
     "platform agent or connected-account model leaked into public export",
   ],
   [
     /\b(?:GoogleWorkspaceConnector|HubSpotConnector|SlackOAuthService|StripeConnector|ZendeskConnector|TeamsService)\b/,
     "native provider runtime leaked into public export",
+  ],
+  [
+    /--platform\b|\/v1\/system\/mcp-status\b|\bactionproxy\.(?:agents\.list|connections\.status|email\.propose_exact|runs\.(?:get|start)|approvals\.get)\b/,
+    "private platform MCP preflight or catalog surface leaked into public export",
+  ],
+  [
+    /\b(?:agent:(?:read|write|run)|user_connection:(?:read|write))\b/,
+    "private platform authorization scope leaked into public export",
+  ],
+  [
+    /\b(?:agent_run_continue|nativeAction)\b/,
+    "private authorized-action projection leaked into public export",
+  ],
+  [
+    /\bactionproxy\.(?:exact-email|native\.[a-z0-9_.-]+)\b|\bgoogle\.gmail\.send_email\b/i,
+    "private provider prepared-action fixture leaked into public export",
   ],
   [
     /ACTIONPROXY_(?:GOOGLE|HUBSPOT|MAILGUN|MANAGED_EMAIL|MODEL_PROVIDER|RESEND|SLACK_(?:CONNECTOR|OAUTH)|STRIPE|TEAMS|ZENDESK)_[A-Z0-9_]+|OPENAI_API_KEY/,
@@ -556,6 +686,7 @@ for (const relativePath of forbiddenPaths) {
 }
 
 await verifyManifestArtifact();
+if (!bootstrapMode) await verifyRelativeImportClosure();
 await verifyCommunityMigrationSequence();
 await verifyPackagesAndCommands();
 await verifyCommunityTypeVocabulary();
@@ -580,7 +711,7 @@ if (failures.length > 0) {
 if (jsonOutput) writeVerificationReport(true, []);
 else
   console.log(
-    `Public ${checkoutMode ? "checkout boundary" : "export artifact"} verification passed${strict ? " in strict mode" : ""}: ${destination}`,
+    `Public ${checkoutMode ? "checkout boundary" : "export artifact"} verification passed${strict ? " in strict mode" : ""}${bootstrapMode ? " (bootstrap checks; source closure deferred)" : ""}: ${destination}`,
   );
 
 async function verifyManifestArtifact() {
@@ -781,11 +912,360 @@ async function verifyManifestArtifact() {
   verifiedManifest = manifest;
 }
 
+async function verifyRelativeImportClosure() {
+  let ts;
+  let typeScriptModuleUrl;
+  try {
+    typeScriptModuleUrl = import.meta.resolve("typescript");
+    ts = await import(typeScriptModuleUrl);
+  } catch {
+    failures.push(
+      "Full source-closure verification requires the frozen TypeScript dependency; run --bootstrap only before dependency installation, then rerun full verification",
+    );
+    return;
+  }
+  if (checkoutMode) {
+    const candidateNodeModules = path.join(destination, "node_modules");
+    const resolvedTypeScriptPath = fileURLToPath(typeScriptModuleUrl);
+    const relativeTypeScriptPath = path.relative(
+      candidateNodeModules,
+      resolvedTypeScriptPath,
+    );
+    if (
+      relativeTypeScriptPath === "" ||
+      relativeTypeScriptPath === ".." ||
+      relativeTypeScriptPath.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relativeTypeScriptPath)
+    ) {
+      failures.push(
+        "Full tracked-checkout source closure must resolve TypeScript from the candidate root node_modules",
+      );
+    }
+  }
+  const sourceExtensions = new Set([
+    ".cjs",
+    ".cts",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".mts",
+    ".ts",
+    ".tsx",
+  ]);
+  const resolvableExtensions = [
+    ".ts",
+    ".tsx",
+    ".mts",
+    ".cts",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".json",
+  ];
+  const files = await getVerificationFiles();
+  const fileSet = new Set(files);
+  const declaredBuildOutputs = await collectDeclaredPackageBuildOutputs(files);
+  for (const relativePath of files) {
+    if (!sourceExtensions.has(path.extname(relativePath))) continue;
+    let body;
+    try {
+      body = await fs.readFile(path.join(destination, relativePath), "utf8");
+    } catch (error) {
+      failures.push(
+        `Cannot inspect imports in ${relativePath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      continue;
+    }
+    let sourceReferences;
+    try {
+      sourceReferences = collectSourceReferences(ts, relativePath, body);
+    } catch {
+      failures.push(
+        `Cannot analyze source closure in ${relativePath} (TypeScript traversal failed)`,
+      );
+      continue;
+    }
+    for (const reference of sourceReferences) {
+      const specifier = reference.specifier;
+      if (!specifier.startsWith(".")) continue;
+      const cleanSpecifier = specifier.replace(/[?#].*$/u, "");
+      const base = normalizePath(
+        path.posix.normalize(
+          path.posix.join(path.posix.dirname(relativePath), cleanSpecifier),
+        ),
+      );
+      if (
+        base === ".." ||
+        base.startsWith("../") ||
+        path.posix.isAbsolute(base) ||
+        !relativeImportResolves(
+          base,
+          fileSet,
+          resolvableExtensions,
+          declaredBuildOutputs,
+        )
+      ) {
+        failures.push(
+          `Unresolved relative ${reference.kind} in ${relativePath}: ${specifier}`,
+        );
+      }
+    }
+  }
+}
+
+function collectSourceReferences(ts, relativePath, source) {
+  const scriptKind = scriptKindForPath(ts, relativePath);
+  const parserSource = source.startsWith("\ufeff#!") ? source.slice(1) : source;
+  const sourceFile = ts.createSourceFile(
+    relativePath,
+    parserSource,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKind,
+  );
+  if (sourceFile.parseDiagnostics.length > 0) {
+    for (const diagnostic of sourceFile.parseDiagnostics) {
+      const position = sourceFile.getLineAndCharacterOfPosition(
+        diagnostic.start ?? 0,
+      );
+      failures.push(
+        `Cannot parse source closure in ${relativePath}:${String(position.line + 1)}:${String(position.character + 1)} (TypeScript diagnostic ${String(diagnostic.code)})`,
+      );
+    }
+    return [];
+  }
+
+  const references = sourceFile.referencedFiles.map((reference) => ({
+    kind: "triple-slash path reference",
+    specifier: reference.fileName,
+  }));
+  for (const reference of sourceFile.typeReferenceDirectives) {
+    references.push({
+      kind: "triple-slash types reference",
+      specifier: reference.fileName,
+    });
+  }
+  for (const reference of sourceFile.libReferenceDirectives) {
+    references.push({
+      kind: "triple-slash lib reference",
+      specifier: reference.fileName,
+    });
+  }
+  for (const dependency of sourceFile.amdDependencies) {
+    references.push({
+      kind: "AMD dependency",
+      specifier: dependency.path,
+    });
+  }
+
+  const addLiteral = (kind, literal) => {
+    if (literal && ts.isStringLiteralLike(literal)) {
+      references.push({ kind, specifier: literal.text });
+      return true;
+    }
+    return false;
+  };
+  const nodes = [sourceFile];
+  while (nodes.length > 0) {
+    const node = nodes.pop();
+    if (!node) continue;
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      addLiteral("import", node.moduleSpecifier);
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      addLiteral("import", node.moduleReference.expression);
+    } else if (ts.isModuleDeclaration(node)) {
+      addLiteral("module declaration", node.name);
+    } else if (ts.isImportTypeNode(node)) {
+      if (ts.isLiteralTypeNode(node.argument)) {
+        addLiteral("import type", node.argument.literal);
+      }
+    } else if (ts.isCallExpression(node)) {
+      const expression = node.expression;
+      const firstArgument = node.arguments[0];
+      if (expression.kind === ts.SyntaxKind.ImportKeyword) {
+        addLiteral("import", firstArgument);
+      } else if (isDependencyRequireExpression(ts, expression)) {
+        addLiteral("import", firstArgument);
+      } else if (isImportMetaResolveExpression(ts, expression)) {
+        addLiteral("import.meta.resolve", firstArgument);
+      }
+    }
+    // Recursively calling back through TypeScript's binary-expression walker
+    // can overflow the JavaScript stack on generated-but-valid, left-deep
+    // chains. Keep our traversal iterative, visit binary operands directly,
+    // and use `forEachChild` only for bounded immediate-child walks.
+    if (ts.isBinaryExpression(node)) {
+      nodes.push(node.right, node.left);
+    } else {
+      ts.forEachChild(node, (child) => {
+        nodes.push(child);
+      });
+    }
+  }
+  return references;
+}
+
+function scriptKindForPath(ts, relativePath) {
+  const extension = path.extname(relativePath).toLowerCase();
+  if (extension === ".jsx") return ts.ScriptKind.JSX;
+  if (extension === ".tsx") return ts.ScriptKind.TSX;
+  if ([".ts", ".mts", ".cts"].includes(extension)) return ts.ScriptKind.TS;
+  return ts.ScriptKind.JS;
+}
+
+function isDependencyRequireExpression(ts, expression) {
+  expression = unwrapDependencyExpression(ts, expression);
+  if (ts.isIdentifier(expression)) return expression.text === "require";
+  if (ts.isPropertyAccessExpression(expression)) {
+    return isApprovedRequireMember(
+      ts,
+      expression.expression,
+      expression.name.text,
+    );
+  }
+  if (
+    ts.isElementAccessExpression(expression) &&
+    expression.argumentExpression &&
+    ts.isStringLiteralLike(expression.argumentExpression)
+  ) {
+    return isApprovedRequireMember(
+      ts,
+      expression.expression,
+      expression.argumentExpression.text,
+    );
+  }
+  return false;
+}
+
+function isImportMetaResolveExpression(ts, expression) {
+  expression = unwrapDependencyExpression(ts, expression);
+  if (ts.isPropertyAccessExpression(expression)) {
+    return (
+      expression.name.text === "resolve" &&
+      isImportMetaExpression(ts, expression.expression)
+    );
+  }
+  if (
+    ts.isElementAccessExpression(expression) &&
+    expression.argumentExpression &&
+    ts.isStringLiteralLike(expression.argumentExpression)
+  ) {
+    return (
+      expression.argumentExpression.text === "resolve" &&
+      isImportMetaExpression(ts, expression.expression)
+    );
+  }
+  return false;
+}
+
+function isImportMetaExpression(ts, expression) {
+  expression = unwrapDependencyExpression(ts, expression);
+  return (
+    ts.isMetaProperty(expression) &&
+    expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
+    expression.name.text === "meta"
+  );
+}
+
+function isApprovedRequireMember(ts, owner, member) {
+  owner = unwrapDependencyExpression(ts, owner);
+  return (
+    ts.isIdentifier(owner) &&
+    ((owner.text === "require" && member === "resolve") ||
+      (owner.text === "module" && member === "require"))
+  );
+}
+
+function unwrapDependencyExpression(ts, expression) {
+  while (
+    ts.isParenthesizedExpression(expression) ||
+    ts.isNonNullExpression(expression) ||
+    ts.isAsExpression(expression) ||
+    ts.isTypeAssertionExpression(expression) ||
+    ts.isSatisfiesExpression(expression)
+  ) {
+    expression = expression.expression;
+  }
+  return expression;
+}
+
+function relativeImportResolves(
+  base,
+  fileSet,
+  extensions,
+  declaredBuildOutputs,
+) {
+  const candidates = [base];
+  const extension = path.posix.extname(base);
+  if (extension === "") {
+    for (const candidateExtension of extensions) {
+      candidates.push(`${base}${candidateExtension}`);
+      candidates.push(`${base}/index${candidateExtension}`);
+    }
+  } else {
+    const sourceExtensionMappings = {
+      ".cjs": [".cts"],
+      ".js": [".ts", ".tsx"],
+      ".jsx": [".tsx"],
+      ".mjs": [".mts"],
+    };
+    for (const mappedExtension of sourceExtensionMappings[extension] ?? []) {
+      candidates.push(`${base.slice(0, -extension.length)}${mappedExtension}`);
+    }
+  }
+  return candidates.some(
+    (candidate) =>
+      fileSet.has(candidate) || declaredBuildOutputs.has(candidate),
+  );
+}
+
+async function collectDeclaredPackageBuildOutputs(files) {
+  const outputs = new Set();
+  for (const relativePath of files) {
+    if (!relativePath.endsWith("/package.json")) continue;
+    let manifest;
+    try {
+      manifest = JSON.parse(
+        await fs.readFile(path.join(destination, relativePath), "utf8"),
+      );
+    } catch {
+      continue;
+    }
+    const directory = path.posix.dirname(relativePath);
+    const collect = (value) => {
+      if (typeof value === "string") {
+        const normalized = value.replace(/^\.\//u, "");
+        if (normalized.startsWith("dist/") && !normalized.includes("..")) {
+          outputs.add(path.posix.join(directory, normalized));
+        }
+        return;
+      }
+      if (Array.isArray(value)) {
+        for (const item of value) collect(item);
+        return;
+      }
+      if (value && typeof value === "object") {
+        for (const item of Object.values(value)) collect(item);
+      }
+    };
+    for (const field of ["main", "module", "types", "exports", "bin"]) {
+      collect(manifest[field]);
+    }
+  }
+  return outputs;
+}
+
 async function verifyCommunityMigrationSequence() {
   const expected = [
     "apps/server/src/storage/migrations/0001_initial.sql",
     "apps/server/src/storage/migrations/0002_legacy_schema_reconciliation.sql",
     "apps/server/src/storage/migrations/0003_approver_principal_identity.sql",
+    "apps/server/src/storage/migrations/0004_unique_approver_principal.sql",
+    "apps/server/src/storage/migrations/0005_unique_approver_effective_identity.sql",
   ];
   const actual = (await getVerificationFiles()).filter(
     (relativePath) =>
@@ -841,6 +1321,22 @@ async function verifyPackagesAndCommands() {
       `Root package scripts must match the public allowlist exactly: ${expectedScripts.join(", ")}`,
     );
   }
+  if (
+    rootPackage.scripts?.["verify:oss-boundary"] !==
+    "node scripts/verify-public-export.mjs . --checkout --strict"
+  ) {
+    failures.push(
+      "package.json verify:oss-boundary must run the full strict checkout verifier without bootstrap deferral",
+    );
+  }
+  if (
+    rootPackage.scripts?.["verify:tracked-checkout"] !==
+    "node scripts/attest-public-checkout.mjs ."
+  ) {
+    failures.push(
+      "package.json verify:tracked-checkout must run the reviewed tracked-checkout attestor",
+    );
+  }
   if (rootPackage.engines?.node !== ">=22 <25") {
     failures.push("package.json engines.node must support exactly Node 22–24");
   }
@@ -849,16 +1345,21 @@ async function verifyPackagesAndCommands() {
       "package.json packageManager must pin an exact pnpm 11 release",
     );
   }
-  for (const [dependency, version] of [
-    ["@readme/openapi-parser", "6.3.0"],
-    ["ajv", "8.20.0"],
-  ]) {
-    if (rootPackage.devDependencies?.[dependency] !== version) {
-      failures.push(
-        `package.json must pin ${dependency} exactly to ${version}`,
-      );
-    }
+  if (
+    !isDeepStrictEqual(
+      rootPackage.devDependencies,
+      reviewedRootVerificationToolchain,
+    )
+  ) {
+    failures.push(
+      `package.json devDependencies must match the reviewed root verification toolchain exactly: ${Object.entries(
+        reviewedRootVerificationToolchain,
+      )
+        .map(([dependency, version]) => `${dependency}@${version}`)
+        .join(", ")}`,
+    );
   }
+  await verifyRootVerificationToolchainLock();
   for (const versionFile of [".node-version", ".nvmrc"]) {
     const version = (await readTextIfPresent(versionFile))?.trim();
     if (version !== "24") failures.push(`${versionFile} must pin Node 24`);
@@ -870,24 +1371,37 @@ async function verifyPackagesAndCommands() {
   for (const expected of [
     {
       directory: "packages/sdk-js",
+      homepage: "https://actionproxy.com/quickstart/",
       keywords: [
+        "actionproxy",
         "ai-agents",
+        "agent-security",
+        "ai-governance",
         "approval-gateway",
         "audit",
         "human-in-the-loop",
-        "tool-calls",
+        "tool-calling",
+        "tool-governance",
       ],
       name: "@actionproxy/sdk-js",
     },
     {
       directory: "packages/mcp-wrapper",
+      homepage: "https://actionproxy.com/quickstart/",
       keywords: [
+        "actionproxy",
         "ai-agents",
+        "agent-security",
+        "ai-governance",
         "approval-gateway",
         "audit",
         "human-in-the-loop",
         "mcp",
+        "mcp-proxy",
+        "mcp-server",
         "model-context-protocol",
+        "tool-calling",
+        "tool-governance",
       ],
       name: "@actionproxy/mcp-wrapper",
     },
@@ -907,8 +1421,7 @@ async function verifyPackagesAndCommands() {
       candidate.repository?.url !==
         "git+https://github.com/ActionProxy/actionproxy.git" ||
       candidate.repository?.directory !== expected.directory ||
-      candidate.homepage !==
-        "https://github.com/ActionProxy/actionproxy#readme" ||
+      candidate.homepage !== expected.homepage ||
       candidate.bugs?.url !==
         "https://github.com/ActionProxy/actionproxy/issues" ||
       JSON.stringify(candidate.keywords) !== JSON.stringify(expected.keywords)
@@ -916,6 +1429,27 @@ async function verifyPackagesAndCommands() {
       failures.push(
         `${expected.directory}/package.json must remain the reviewed public, version-aligned, dist-only npm candidate`,
       );
+    }
+    const reviewedSurface = reviewedNpmPackageSurfaces[expected.directory];
+    for (const field of reviewedNpmPackageSurfaceFields) {
+      const actualHasField = Object.hasOwn(candidate, field);
+      const expectedHasField = Object.hasOwn(reviewedSurface, field);
+      if (
+        actualHasField !== expectedHasField ||
+        (actualHasField &&
+          !isDeepStrictEqual(candidate[field], reviewedSurface[field]))
+      ) {
+        failures.push(
+          `${expected.directory}/package.json ${field} must match the reviewed npm package surface exactly`,
+        );
+      }
+    }
+    for (const scriptName of forbiddenInstallLifecycleScripts) {
+      if (Object.hasOwn(candidate.scripts ?? {}, scriptName)) {
+        failures.push(
+          `${expected.directory}/package.json must not define install lifecycle script ${scriptName}`,
+        );
+      }
     }
   }
   for (const { directory, manifest, relativePath } of packages) {
@@ -972,6 +1506,48 @@ async function verifyPackagesAndCommands() {
         }
       }
     }
+  }
+}
+
+async function verifyRootVerificationToolchainLock() {
+  const lockfile = await readTextIfPresent("pnpm-lock.yaml");
+  if (lockfile === undefined) return;
+  const importerMarker = "\n  .:\n";
+  const importerStart = lockfile.indexOf(importerMarker);
+  let rootImporter;
+  if (importerStart !== -1) {
+    const importerBodyStart = importerStart + importerMarker.length;
+    const remainder = lockfile.slice(importerBodyStart);
+    const nextImporter = /^  [^\s].*:\s*$/mu.exec(remainder);
+    rootImporter = remainder.slice(0, nextImporter?.index ?? remainder.length);
+  }
+  const typeScriptEntries = rootImporter
+    ? [
+        ...rootImporter.matchAll(
+          /^      typescript:\n        specifier: ([^\n]+)\n        version: ([^\n]+)$/gmu,
+        ),
+      ]
+    : [];
+  if (
+    typeScriptEntries.length !== 1 ||
+    typeScriptEntries[0]?.[1] !==
+      reviewedRootVerificationToolchain.typescript ||
+    typeScriptEntries[0]?.[2] !== reviewedRootVerificationToolchain.typescript
+  ) {
+    failures.push(
+      `pnpm-lock.yaml root importer must pin typescript exactly to specifier/version ${reviewedRootVerificationToolchain.typescript}`,
+    );
+  }
+  const version = reviewedRootVerificationToolchain.typescript;
+  if (
+    !lockfile.includes(
+      `\n  typescript@${version}:\n    resolution: {integrity: `,
+    ) ||
+    !lockfile.includes(`\n  typescript@${version}: {}\n`)
+  ) {
+    failures.push(
+      `pnpm-lock.yaml must contain the frozen typescript@${version} package resolution and snapshot`,
+    );
   }
 }
 
@@ -1317,8 +1893,29 @@ async function verifyDockerAndWorkflow() {
       /\n  secret-scan:\n[\s\S]*?(?=\n  [a-z][a-z0-9-]*:\n|$)/u.exec(
         workflow,
       )?.[0];
+    const npmPrepareJob =
+      /\n  npm-release-prepare:\n[\s\S]*?(?=\n  [a-z][a-z0-9-]*:\n|$)/u.exec(
+        workflow,
+      )?.[0];
+    const npmReleaseJob =
+      /\n  npm-release:\n[\s\S]*?(?=\n  [a-z][a-z0-9-]*:\n|$)/u.exec(
+        workflow,
+      )?.[0];
+    const npmVerifyJob =
+      /\n  npm-release-verify:\n[\s\S]*?(?=\n  [a-z][a-z0-9-]*:\n|$)/u.exec(
+        workflow,
+      )?.[0];
+    const npmReleaseHelper = await readTextIfPresent(
+      "packages/mcp-wrapper/src/npm-release-artifacts.mjs",
+    );
     const attestationIndex = workflow.indexOf(
       "corepack pnpm verify:tracked-checkout",
+    );
+    const bootstrapBoundaryIndex = workflow.indexOf(
+      "node scripts/verify-public-export.mjs . --checkout --strict --bootstrap",
+    );
+    const installIndex = workflow.indexOf(
+      "corepack pnpm install --frozen-lockfile",
     );
     const boundaryIndex = workflow.indexOf("corepack pnpm verify:oss-boundary");
     if (!/^\s{2}workflow_dispatch:\s*$/mu.test(workflow)) {
@@ -1329,13 +1926,29 @@ async function verifyDockerAndWorkflow() {
     if (attestationIndex === -1) {
       failures.push("Public workflow does not attest the tracked checkout");
     }
+    if (bootstrapBoundaryIndex === -1) {
+      failures.push(
+        "Public workflow does not bootstrap-verify the tracked checkout before dependency installation",
+      );
+    } else if (
+      attestationIndex === -1 ||
+      bootstrapBoundaryIndex < attestationIndex
+    ) {
+      failures.push(
+        "Public workflow must attest before bootstrap-verifying the tracked checkout boundary",
+      );
+    }
     if (boundaryIndex === -1) {
       failures.push(
-        "Public workflow does not scan the tracked checkout boundary",
+        "Public workflow does not fully verify the tracked checkout boundary",
       );
-    } else if (attestationIndex === -1 || boundaryIndex < attestationIndex) {
+    } else if (
+      installIndex === -1 ||
+      bootstrapBoundaryIndex === -1 ||
+      !(bootstrapBoundaryIndex < installIndex && installIndex < boundaryIndex)
+    ) {
       failures.push(
-        "Public workflow must attest before scanning the tracked checkout boundary",
+        "Public workflow must bootstrap-verify before install and fully verify source closure after install",
       );
     }
     if (!workflow.includes("corepack pnpm release:versions:check")) {
@@ -1368,6 +1981,195 @@ async function verifyDockerAndWorkflow() {
       !workflow.includes("['22', '24']")
     ) {
       failures.push("Public workflow does not test Node 22 and 24");
+    }
+    if (!npmPrepareJob) {
+      failures.push(
+        "Public workflow does not define the owner-only npm release preparation job",
+      );
+    } else {
+      for (const requirement of [
+        "github.event_name == 'workflow_dispatch'",
+        "inputs.npm_operation != 'none'",
+        "needs['first-run-macos'].result == 'success'",
+        "needs.verify.result == 'success'",
+        "needs['postgres-atomicity'].result == 'success'",
+        "needs['docker-community'].result == 'success'",
+        "needs.codeql.result == 'success'",
+        "needs['secret-scan'].result == 'success'",
+        "needs['workflow-lint'].result == 'success'",
+        "timeout-minutes: 45",
+        "fetch-depth: 0",
+        "persist-credentials: false",
+        "corepack pnpm verify:tracked-checkout",
+        "node scripts/verify-public-export.mjs . --checkout --strict --bootstrap",
+        "corepack pnpm verify:oss-boundary",
+        "corepack pnpm release:versions:check",
+        "corepack pnpm install --frozen-lockfile",
+        "corepack pnpm test:consumer-conformance",
+        "npm-release-artifacts.mjs prepare npm-release-bundle",
+        "node-version: 22",
+        "node-version: 24",
+        "npm-release-artifacts.mjs consume npm-release-bundle",
+        "npm-release-artifacts.mjs verify npm-release-bundle",
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "path: npm-release-bundle",
+      ]) {
+        if (!npmPrepareJob.includes(requirement)) {
+          failures.push(
+            `Public npm release preparation is missing: ${requirement}`,
+          );
+        }
+      }
+      if (
+        npmPrepareJob.includes("id-token: write") ||
+        npmPrepareJob.includes("NODE_AUTH_TOKEN")
+      ) {
+        failures.push(
+          "Public npm release preparation must not receive an OIDC or registry credential",
+        );
+      }
+    }
+    if (!npmVerifyJob) {
+      failures.push(
+        "Public workflow does not define the credential-free npm artifact verification job",
+      );
+    } else {
+      for (const requirement of [
+        "needs['npm-release-prepare'].result == 'success'",
+        "timeout-minutes: 20",
+        "fetch-depth: 0",
+        "persist-credentials: false",
+        "node-version: 24.11.0",
+        "corepack pnpm install --frozen-lockfile",
+        "corepack pnpm --filter @actionproxy/sdk-js build",
+        "corepack pnpm --filter @actionproxy/mcp-wrapper build",
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "path: npm-release-bundle",
+        "npm-release-artifacts.mjs verify npm-release-bundle",
+      ]) {
+        if (!npmVerifyJob.includes(requirement)) {
+          failures.push(
+            `Public npm artifact verification is missing: ${requirement}`,
+          );
+        }
+      }
+      if (
+        npmVerifyJob.includes("id-token: write") ||
+        npmVerifyJob.includes("NODE_AUTH_TOKEN")
+      ) {
+        failures.push(
+          "Public npm artifact verification must not receive an OIDC or registry credential",
+        );
+      }
+    }
+    if (!npmReleaseJob) {
+      failures.push(
+        "Public workflow does not define the environment-protected npm registry job",
+      );
+    } else {
+      for (const requirement of [
+        "needs['npm-release-prepare'].result == 'success'",
+        "needs['npm-release-verify'].result == 'success'",
+        "timeout-minutes: 20",
+        "environment: npm-production",
+        "group: actionproxy-npm-production",
+        "cancel-in-progress: false",
+        "contents: read",
+        "id-token: write",
+        "fetch-depth: 0",
+        "persist-credentials: false",
+        "node-version: 24.11.0",
+        'test "$(npm --version)" = 11.6.1',
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "npm-release-artifacts.mjs write npm-release-bundle",
+        "ACTIONPROXY_NPM_TARGET_TAG: next",
+        "ACTIONPROXY_NPM_TARGET_TAG: latest",
+        'NODE_AUTH_TOKEN: ""',
+        "npm-release-artifacts.mjs registry-verify npm-release-bundle",
+        "path: npm-release-bundle",
+      ]) {
+        if (!npmReleaseJob.includes(requirement)) {
+          failures.push(`Public npm registry job is missing: ${requirement}`);
+        }
+      }
+      const registryTokenBindings = npmReleaseJob.match(
+        /NODE_AUTH_TOKEN:\s*\$\{\{ secrets\.NPM_BOOTSTRAP_TOKEN \}\}/gu,
+      );
+      if ((registryTokenBindings?.length ?? 0) !== 2) {
+        failures.push(
+          "Public npm registry job must bind the bootstrap token to exactly two direct-write steps",
+        );
+      }
+      if (npmReleaseJob.includes("registry-url:")) {
+        failures.push(
+          "Public npm registry job must not inherit setup-node's placeholder registry credential",
+        );
+      }
+      if ((npmReleaseJob.match(/NODE_AUTH_TOKEN:\s*""/gu)?.length ?? 0) !== 1) {
+        failures.push(
+          "Public npm registry job must explicitly clear the token for anonymous verification",
+        );
+      }
+      if (
+        npmReleaseJob.includes("corepack pnpm install") ||
+        npmReleaseJob.includes("corepack pnpm --filter") ||
+        npmReleaseJob.includes("npm install --global")
+      ) {
+        failures.push(
+          "Public npm registry job must not execute repository dependencies or install a new npm CLI",
+        );
+      }
+    }
+    if (!npmReleaseHelper) {
+      failures.push("Public npm release artifact helper is missing");
+    } else {
+      for (const requirement of [
+        "@actionproxy/sdk-js",
+        "@actionproxy/mcp-wrapper",
+        "SUPPORTED_NPM_RELEASE_COMMANDS",
+        '"registry-verify"',
+        "assertOperationTarget",
+        "assertBootstrapRegistryState",
+        '"--provenance"',
+        '"--access"',
+        '"public"',
+        "hasExactRegistryAttestations",
+        "hasExactRegistryManifestMetadata",
+        "hasExpectedTagState",
+        "dist.signatures",
+        "dist.attestations",
+        '"cat-file"',
+        '"rev-parse"',
+        '"merge-base"',
+        '"refs/remotes/origin/main"',
+        "sanitizeChildEnvironment",
+        "createSensitiveNpmContext",
+        'path.join(os.tmpdir(), "actionproxy-npm-config-")',
+        "NPM_CONFIG_USERCONFIG",
+        "NPM_CONFIG_GLOBALCONFIG",
+        'path.join(npmConfigRoot, ".npmrc")',
+        "cwd: context.cwd",
+        "/^npm_config_/",
+        '["BASH_ENV", "ENV", "NODE_OPTIONS"]',
+        "packaged manifest differs from the reviewed workspace manifest",
+        "package namespaces to be absent",
+        "partial bootstrap",
+        '"dist/index.d.ts"',
+        '"dist/index.js"',
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
+        "{ includeGitHubOidc: true, includeNpmToken: true }",
+        "{ includeNpmToken: true }",
+        "installPackageTarball",
+        "The frozen workspace yaml dependency is outside node_modules",
+        "data after its terminator",
+        "unsupported permission bits",
+        "nonzero entry padding",
+      ]) {
+        if (!npmReleaseHelper.includes(requirement)) {
+          failures.push(`Public npm release helper is missing: ${requirement}`);
+        }
+      }
     }
     if (!codeqlJob) {
       failures.push("Public workflow does not define the CodeQL job");
@@ -1446,6 +2248,7 @@ async function verifyDocumentation() {
   }
   if (adoptionGuide) {
     for (const requirement of [
+      "records and their release evidence are independently verified",
       "does not yet publish an npm package or a registry container image",
       "corepack pnpm --filter @actionproxy/sdk-js pack --out",
       "runExternalAction",
@@ -1874,6 +2677,7 @@ function writeVerificationReport(ok, reportFailures) {
         ok,
         mode: checkoutMode ? "checkout" : "artifact",
         strict,
+        sourceClosure: bootstrapMode ? "deferred" : "verified",
         failureCount: reportFailures.length,
         failures: [...reportFailures],
       },

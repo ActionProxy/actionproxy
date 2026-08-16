@@ -219,10 +219,11 @@ boundaries:
   downstream function; or
 - implement the documented HTTP grant lifecycle from another runtime.
 
-The SDK and MCP-wrapper package sources are independently versioned at
-`0.1.0`. Their manifests and isolated packed-consumer tests are release-ready,
-but this document does not claim that either package exists in npm until the
-exact registry records are independently verified. The guide includes the
+The SDK and MCP-wrapper package candidates are independently versioned at
+`0.1.1`. Their manifests and isolated packed-consumer tests are release-ready,
+but this document does not claim that either package exists in npm until both
+exact registry records, repository metadata, integrity values, and provenance
+are independently verified. The guide includes the
 truthful local-tarball fallback, machine-readable OpenAPI and JSON Schema
 contracts, a mock-first completion contract, and a prompt developers can give
 directly to a coding agent. Do not let an agent invent package availability,
@@ -321,9 +322,10 @@ The expected behavior is:
 The JavaScript SDK is a workspace component in `packages/sdk-js/`. It contains
 the HTTP client, polling helper, gated-tool helper, and external-runner
 authority flow. Its independently packable candidate is
-`@actionproxy/sdk-js@0.1.0`. This README does not infer registry availability
-from the manifest; verify the exact npm record after an owner-authorized
-release, or use the pinned local-tarball workflow in
+`@actionproxy/sdk-js@0.1.1`. This README does not infer registry availability
+from the manifest; use it from npm only after both coordinated package records
+and their release evidence are independently verified, or use the pinned
+local-tarball workflow in
 [the adoption guide](docs/ADOPTING.md#javascript-consumer-path).
 
 Start ActionProxy without local tool execution before testing an external
@@ -347,8 +349,8 @@ See [External runners and MCP](docs/EXTERNAL_RUNNERS_MCP.md).
 
 The stdio wrapper in `packages/mcp-wrapper/` lets an MCP host expose downstream
 tools only through ActionProxy policy and approval. Its independently packable
-candidate is `@actionproxy/mcp-wrapper@0.1.0`; the same registry-verification
-rule and local-tarball fallback apply.
+candidate is `@actionproxy/mcp-wrapper@0.1.1`; the same coordinated
+registry-verification rule and local-tarball fallback apply.
 
 ```bash
 corepack pnpm dev:proxy

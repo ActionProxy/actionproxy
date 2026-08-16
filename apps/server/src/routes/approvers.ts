@@ -93,16 +93,20 @@ export async function registerApproverRoutes(
       return reply.status(404).send({ error: 'approver_not_found', message: `Approver user not found: ${params.data.id}` });
     }
 
-    const user = await approverDirectory.upsertUser(auth.workspaceId, params.data.id, parsed.data);
-    await appendApproverAudit(auditStore, auth, {
-      action: 'update_user',
-      defaultApprover: user.defaultApprover,
-      enabled: user.enabled,
-      groups: user.groups,
-      principalId: user.principalId ?? null,
-      userId: user.id,
-    });
-    return { user };
+    try {
+      const user = await approverDirectory.upsertUser(auth.workspaceId, params.data.id, parsed.data);
+      await appendApproverAudit(auditStore, auth, {
+        action: 'update_user',
+        defaultApprover: user.defaultApprover,
+        enabled: user.enabled,
+        groups: user.groups,
+        principalId: user.principalId ?? null,
+        userId: user.id,
+      });
+      return { user };
+    } catch (error) {
+      return mapKnownError(reply, error);
+    }
   });
 
   app.post('/v1/approvers/users/:id/telegram-connect', async (request, reply) => {

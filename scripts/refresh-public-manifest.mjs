@@ -15,7 +15,7 @@ import {
 const root = path.resolve(process.argv[2] ?? '.');
 const manifestPath = path.join(root, 'PUBLIC_MANIFEST.json');
 const approvedRepository = 'https://github.com/ActionProxy/actionproxy';
-const approvedReleaseTag = 'v0.1.0';
+const approvedReleaseTag = 'v0.1.1';
 
 let manifestStat;
 try {

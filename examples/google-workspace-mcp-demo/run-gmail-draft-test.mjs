@@ -126,7 +126,7 @@ async function run() {
 
     await peer.request('initialize', {
       capabilities: {},
-      clientInfo: { name: 'actionproxy-google-workspace-mcp-demo', version: '0.1.0' },
+      clientInfo: { name: 'actionproxy-google-workspace-mcp-demo', version: '0.1.1' },
       protocolVersion: '2025-06-18',
     }, OUTER_DOWNSTREAM_TIMEOUT_MS);
     peer.notify('notifications/initialized', {});

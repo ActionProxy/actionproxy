@@ -80,9 +80,31 @@ describe('enterprise security controls', () => {
 
   it('requires auth in API key mode and stores only hashed API keys', async () => {
     app = await makeApp({ authMode: 'api_key' });
+    const editionPrivateScopes = [
+      ['agent', 'read'].join(':'),
+      ['agent', 'write'].join(':'),
+      ['agent', 'run'].join(':'),
+      ['user_connection', 'read'].join(':'),
+      ['user_connection', 'write'].join(':'),
+    ];
 
     const unauthenticated = await app.inject({ method: 'GET', url: '/v1/tool-calls' });
     expect(unauthenticated.statusCode).toBe(401);
+
+    const unsupportedAccount = await app.inject({
+      headers: bootstrapHeaders(),
+      method: 'POST',
+      payload: {
+        name: 'unsupported-edition-scope',
+        scopes: ['tool_call:read', editionPrivateScopes[2], editionPrivateScopes[4]],
+      },
+      url: '/v1/service-accounts',
+    });
+    expect(unsupportedAccount.statusCode).toBe(403);
+    expect(unsupportedAccount.json()).toMatchObject({
+      error: 'forbidden',
+      message: `Unsupported scope for this edition: ${editionPrivateScopes[2]}`,
+    });
 
     const createdAccount = await app.inject({
       headers: bootstrapHeaders(),
@@ -111,6 +133,7 @@ describe('enterprise security controls', () => {
     const me = await app.inject({ headers: bearerHeaders(keyBody.token), method: 'GET', url: '/v1/me' });
     expect(me.statusCode).toBe(200);
     expect(me.json().auth).toMatchObject({ principalId: serviceAccountId, principalType: 'service_account' });
+    expect(me.json().availableScopes).not.toEqual(expect.arrayContaining(editionPrivateScopes));
   });
 
   it('fails closed for malformed OIDC bearer tokens', async () => {
@@ -133,7 +156,7 @@ describe('enterprise security controls', () => {
       groups: ['support-managers'],
       iss: 'https://issuer.example.com',
       name: 'Alice Admin',
-      scope: 'tool_call:read',
+      scope: ['tool_call:read', ['agent', 'run'].join(':'), ['user_connection', 'write'].join(':')].join(' '),
       sub: 'user_alice',
     });
     app = await makeApp({
@@ -176,7 +199,7 @@ describe('enterprise security controls', () => {
     expect(missingScope.json().message).toContain('audit:read');
   });
 
-  it('binds directory approvers to exact OIDC principals instead of generated directory ids', async () => {
+  it('binds an existing directory approver to an explicit OIDC principal under bootstrap authority', async () => {
     const { jwksJson, tokens } = signedJwts([
       {
         aud: 'actionproxy-api',
@@ -206,18 +229,38 @@ describe('enterprise security controls', () => {
     });
 
     const createdApprover = await app.inject({
-      headers: bearerHeaders(aliceToken!),
+      headers: bootstrapHeaders(),
       method: 'POST',
       payload: {
         defaultApprover: true,
         displayName: 'Alice Approver',
         email: 'alice@example.com',
-        principalId: 'oidc|alice',
       },
       url: '/v1/approvers/users',
     });
     expect(createdApprover.statusCode).toBe(201);
     expect(createdApprover.json().user).toMatchObject({
+      id: 'u_alice_approver',
+    });
+    expect(createdApprover.json().user).not.toHaveProperty('principalId');
+
+    const unauthorizedBinding = await app.inject({
+      headers: bearerHeaders(malloryToken!),
+      method: 'PUT',
+      payload: { principalId: 'oidc|alice' },
+      url: '/v1/approvers/users/u_alice_approver',
+    });
+    expect(unauthorizedBinding.statusCode).toBe(403);
+    expect(unauthorizedBinding.json().message).toContain('admin:approvers');
+
+    const boundApprover = await app.inject({
+      headers: bootstrapHeaders(),
+      method: 'PUT',
+      payload: { principalId: 'oidc|alice' },
+      url: '/v1/approvers/users/u_alice_approver',
+    });
+    expect(boundApprover.statusCode).toBe(200);
+    expect(boundApprover.json().user).toMatchObject({
       id: 'u_alice_approver',
       principalId: 'oidc|alice',
     });

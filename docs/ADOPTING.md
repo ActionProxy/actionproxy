@@ -4,8 +4,10 @@ This guide is for a developer or AI coding agent adding ActionProxy Community
 to an existing application. It is not the contribution guide for changing
 ActionProxy itself.
 
-ActionProxy v0.1.0 is an Apache-2.0 developer preview distributed as source. It
-does not yet publish an npm package or a registry container image. Keep the
+ActionProxy is an Apache-2.0 developer preview. Until both coordinated package
+records and their release evidence are independently verified, this guide
+treats it as source-distributed: it does not yet publish an npm package or a registry container image
+that this guide permits a consumer to use. Keep the
 ActionProxy checkout separate from the application that is adopting it, and do
 the first integration with mocks before connecting a real business tool.
 
@@ -14,8 +16,8 @@ the manual or live checks that remain before release.
 
 The two independently packable package candidates have exact versions:
 
-- `@actionproxy/sdk-js@0.1.0`;
-- `@actionproxy/mcp-wrapper@0.1.0`.
+- `@actionproxy/sdk-js@0.1.1`;
+- `@actionproxy/mcp-wrapper@0.1.1`.
 
 Their manifests are prepared for public npm publication, but a manifest is not
 evidence that a registry release exists. Until an owner-authorized release has
@@ -36,10 +38,10 @@ cd /absolute/path/to/your-consumer-project
 Choose exactly one mode:
 
 - `sdk` creates a JavaScript external-runner example whose exact
-  `@actionproxy/sdk-js@0.1.0` dependency points to a generated local-tarball
+  `@actionproxy/sdk-js@0.1.1` dependency points to a generated local-tarball
   path;
 - `mcp` creates a wrapper configuration and deterministic three-tool stdio MCP
-  server whose exact `@actionproxy/mcp-wrapper@0.1.0` dependency uses the same
+  server whose exact `@actionproxy/mcp-wrapper@0.1.1` dependency uses the same
   local-tarball flow; or
 - `http` creates a dependency-free Node client for the HTTP submission proof.
 
@@ -60,7 +62,7 @@ Generation is deliberately conservative:
 - it creates one new directory and never overwrites an existing entry;
 - generated code accepts only a loopback HTTP ActionProxy URL;
 - examples use deterministic mocks and contain no credential or auto-approval;
-- SDK and MCP dependencies use exact `0.1.0` package identities through
+- SDK and MCP dependencies use exact `0.1.1` package identities through
   `file:vendor/...tgz`, with a preparer using the generated source binding;
 - `actionproxy.policy.sample.yaml` is explicitly sample-only and is not loaded
   by First Run; and
@@ -87,8 +89,8 @@ shared consumer repository.
 
 For `sdk` and `mcp`, the generated `prepare-local-package.mjs` command reads the
 source binding, verifies
-the expected ActionProxy source/package identity, builds the unpublished
-candidate from that reviewed checkout, and writes it under the starter's
+the expected ActionProxy source/package identity, builds the exact candidate
+from that reviewed checkout, and writes it under the starter's
 `vendor/` directory before `npm install` consumes the file dependency. This
 flow neither assumes nor probes npm registry availability for ActionProxy. A
 future registry install remains a separate, explicitly verified migration.
@@ -218,20 +220,20 @@ not uninstall it.
 
 ## JavaScript consumer path
 
-For v0.1.0 evaluation before registry publication is independently verified,
-build a local tarball from the ActionProxy checkout:
+For v0.1.1 evaluation before coordinated registry publication is independently
+verified, build a local tarball from the ActionProxy checkout:
 
 ```bash
 corepack pnpm install --frozen-lockfile
 corepack pnpm --filter @actionproxy/sdk-js build
-corepack pnpm --filter @actionproxy/sdk-js pack --out actionproxy-sdk-js-0.1.0.tgz
+corepack pnpm --filter @actionproxy/sdk-js pack --out actionproxy-sdk-js-0.1.1.tgz
 ```
 
 Then, from the separate consumer repository, install the tarball by its
 absolute path:
 
 ```bash
-corepack pnpm add /absolute/path/to/actionproxy/actionproxy-sdk-js-0.1.0.tgz
+corepack pnpm add /absolute/path/to/actionproxy/actionproxy-sdk-js-0.1.1.tgz
 ```
 
 Do not import through `../actionproxy/packages/...` or add monorepo-relative
@@ -239,17 +241,18 @@ paths to the consumer. The tarball makes the evaluated source boundary
 explicit and gives the consumer the same package shape a future registry
 release would use.
 
-After an owner-authorized release, verify the exact registry record before
-switching a consumer from the reviewed tarball:
+After an owner-authorized release, verify both coordinated records and their
+release evidence before switching a consumer from the reviewed tarball:
 
 ```bash
-npm view @actionproxy/sdk-js@0.1.0 version dist.integrity &&
-  npm install --save-exact @actionproxy/sdk-js@0.1.0
+npm view @actionproxy/sdk-js@0.1.1 version dist.integrity repository.url dist.attestations
+npm view @actionproxy/mcp-wrapper@0.1.1 version dist.integrity repository.url dist.attestations
+npm install --save-exact @actionproxy/sdk-js@0.1.1
 ```
 
-The first command must resolve the exact version and an integrity value. A
-failed lookup is a release-availability failure, not permission to guess a tag
-or package name.
+Both lookups must resolve the exact versions, reviewed repository metadata,
+integrity values, and provenance attestations. A failed or mismatched lookup is
+a release-availability failure, not permission to guess a tag or package name.
 
 Start the gateway in external-runner mode from the ActionProxy checkout. Use a
 separate web-console terminal if a human will review approvals:
@@ -347,15 +350,16 @@ The source-tarball fallback is symmetrical with the SDK:
 corepack pnpm install --frozen-lockfile
 corepack pnpm --filter @actionproxy/mcp-wrapper build
 corepack pnpm --filter @actionproxy/mcp-wrapper pack \
-  --out actionproxy-mcp-wrapper-0.1.0.tgz
+  --out actionproxy-mcp-wrapper-0.1.1.tgz
 ```
 
-After publication is independently verified, the exact registry check and
-install are:
+After coordinated publication is independently verified, the exact registry
+checks and install are:
 
 ```bash
-npm view @actionproxy/mcp-wrapper@0.1.0 version dist.integrity &&
-  npm install --save-exact @actionproxy/mcp-wrapper@0.1.0
+npm view @actionproxy/sdk-js@0.1.1 version dist.integrity repository.url dist.attestations
+npm view @actionproxy/mcp-wrapper@0.1.1 version dist.integrity repository.url dist.attestations
+npm install --save-exact @actionproxy/mcp-wrapper@0.1.1
 ```
 
 ## HTTP consumer path
@@ -415,7 +419,7 @@ pretending unknown legacy fields are rejected everywhere.
 ## Isolated packed-consumer conformance
 
 The package conformance test does not import either workspace through a
-monorepo-relative path. It builds both `0.1.0` tarballs, installs them offline
+monorepo-relative path. It builds both `0.1.1` tarballs, installs them offline
 into a fresh temporary consumer, verifies the exact package contents and type
 declarations, imports only their public exports, exercises SDK success and
 `unknown_outcome`, and invokes the installed `actionproxy-mcp` binary's static

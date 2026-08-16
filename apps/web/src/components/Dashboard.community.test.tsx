@@ -878,6 +878,97 @@ describe("fixed Community dashboard", () => {
     ).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["a javascript URL", "javascript:alert(1)"],
+    ["an external URL", "https://evil.example/#/demo?journey=local"],
+    ["an invalid session", "#/demo?journey=local&session=bad"],
+    [
+      "an encoded query injection",
+      "#/demo?journey=local%26next%3Djavascript%3Aalert(1)",
+    ],
+    ["malformed encoding", "#/demo?journey=%E0%A4%A"],
+    ["duplicate journey values", "#/demo?journey=local&journey=chatgpt"],
+  ])(
+    "ignores %s supplied as an approval return target",
+    async (_label, returnTo) => {
+      const base = emailApprovalRecord();
+      const record = {
+        approval: { ...base.approval, status: "rejected" as const },
+        toolCall: { ...base.toolCall, status: "rejected" as const },
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.endsWith("/review"))
+            return jsonResponse(emailApprovalReview(record, "fresh"));
+          if (url === "/v1/approvals/approval_email")
+            return jsonResponse(record);
+          throw new Error(`Unexpected request: ${url}`);
+        }),
+      );
+      window.location.hash = `#/approvals/approval_email?returnTo=${encodeURIComponent(returnTo)}`;
+
+      render(
+        <Dashboard
+          data={{ ...data, pendingApprovals: [], toolCalls: [record.toolCall] }}
+          loading={false}
+          onRefresh={vi.fn()}
+        />,
+      );
+
+      expect(
+        await screen.findByRole("link", { name: "Return now" }),
+      ).toHaveAttribute("href", "#/demo?journey=local");
+    },
+  );
+
+  it.each([
+    [
+      "local",
+      "#/demo?guided=1&session=623e4567-e89b-42d3-a456-426614174000&journey=local",
+      "#/demo?journey=local&session=623e4567-e89b-42d3-a456-426614174000&guided=1",
+    ],
+    [
+      "chatgpt",
+      "#/demo?session=723e4567-e89b-42d3-a456-426614174000&journey=chatgpt",
+      "#/demo?journey=chatgpt&session=723e4567-e89b-42d3-a456-426614174000",
+    ],
+  ])(
+    "canonically reconstructs an encoded %s approval return target",
+    async (_journey, returnTo, expectedHref) => {
+      const base = emailApprovalRecord();
+      const record = {
+        approval: { ...base.approval, status: "rejected" as const },
+        toolCall: { ...base.toolCall, status: "rejected" as const },
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.endsWith("/review"))
+            return jsonResponse(emailApprovalReview(record, "fresh"));
+          if (url === "/v1/approvals/approval_email")
+            return jsonResponse(record);
+          throw new Error(`Unexpected request: ${url}`);
+        }),
+      );
+      window.location.hash = `#/approvals/approval_email?returnTo=${encodeURIComponent(returnTo)}`;
+
+      render(
+        <Dashboard
+          data={{ ...data, pendingApprovals: [], toolCalls: [record.toolCall] }}
+          loading={false}
+          onRefresh={vi.fn()}
+        />,
+      );
+
+      expect(
+        await screen.findByRole("link", { name: "Return now" }),
+      ).toHaveAttribute("href", expectedHref);
+    },
+  );
+
   it("shows a retry action when dashboard refresh fails", async () => {
     const user = userEvent.setup();
     const refresh = vi.fn();

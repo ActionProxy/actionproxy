@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
-const rawEndpoint = process.argv[2];
-if (!rawEndpoint) fail('Usage: node examples/chatgpt-app/check-endpoint.mjs https://your-host.example/mcp');
+const [rawEndpoint, unexpectedArgument] = process.argv.slice(2);
+if (!rawEndpoint || unexpectedArgument !== undefined) {
+  fail('Usage: node examples/chatgpt-app/check-endpoint.mjs https://your-host.example/mcp');
+}
 
 let endpoint;
 try {
@@ -40,7 +42,7 @@ const challengeResponse = await fetch(endpoint, {
     method: 'initialize',
     params: {
       capabilities: {},
-      clientInfo: { name: 'actionproxy-chatgpt-preflight', version: '0.1.0' },
+      clientInfo: { name: 'actionproxy-chatgpt-preflight', version: '0.1.1' },
       protocolVersion: '2025-11-25',
     },
   }),

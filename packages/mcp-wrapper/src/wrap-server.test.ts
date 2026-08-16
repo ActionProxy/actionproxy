@@ -698,6 +698,61 @@ describe('HttpActionProxyGateway', () => {
       !('idempotency-key' in (init?.headers ?? {})))).toBe(true);
   });
 
+  it('removes only a long trailing-slash suffix from the request base', async () => {
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify(submitted('executed')), {
+      headers: { 'content-type': 'application/json' },
+      status: 200,
+    }));
+    const gateway = new HttpActionProxyGateway(
+      `https://actionproxy.example/proxy//gateway${'/'.repeat(100_000)}`,
+      fetchSpy as unknown as typeof fetch,
+      { sessionId: '123e4567-e89b-42d3-a456-426614174000' },
+    );
+
+    await gateway.submitToolCall({
+      agentId: 'wrapper',
+      input: { query: 'refund' },
+      reason: 'MCP call',
+      requestedBy: 'mcp-host',
+      toolName: 'docs.search',
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://actionproxy.example/proxy//gateway/v1/mcp/tool-calls',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it(
+    'handles a long trailing-slash near miss without pathological backtracking',
+    async () => {
+      const fetchSpy = vi.fn(async () => new Response(JSON.stringify(submitted('executed')), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      }));
+      const slashNearMiss = `${'/'.repeat(200_000)}x`;
+      const gateway = new HttpActionProxyGateway(
+        `https://actionproxy.example/proxy${slashNearMiss}`,
+        fetchSpy as unknown as typeof fetch,
+        { sessionId: '123e4567-e89b-42d3-a456-426614174000' },
+      );
+
+      await gateway.submitToolCall({
+        agentId: 'wrapper',
+        input: { query: 'refund' },
+        reason: 'MCP call',
+        requestedBy: 'mcp-host',
+        toolName: 'docs.search',
+      });
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        `https://actionproxy.example/proxy${slashNearMiss}/v1/mcp/tool-calls`,
+        expect.objectContaining({ method: 'POST' }),
+      );
+    },
+    1_000,
+  );
+
   it('rejects an oversized ActionProxy response before parsing it', async () => {
     const fetchFn = vi.fn(async () => new Response(JSON.stringify({ padding: 'x'.repeat(100) }), { status: 200 })) as unknown as typeof fetch;
     const gateway = new HttpActionProxyGateway('https://actionproxy.example', fetchFn, { maxResponseBytes: 32 });

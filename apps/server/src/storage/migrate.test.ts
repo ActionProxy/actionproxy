@@ -19,7 +19,13 @@ describeIfSqlite('SQLite migration ledger', () => {
 
     expect(runSqliteMigrations(databasePath)).toEqual({
       adoptedLegacySchema: false,
-      applied: ['0001_initial', '0002_legacy_schema_reconciliation', '0003_approver_principal_identity'],
+      applied: [
+        '0001_initial',
+        '0002_legacy_schema_reconciliation',
+        '0003_approver_principal_identity',
+        '0004_unique_approver_principal',
+        '0005_unique_approver_effective_identity',
+      ],
     });
     expect(runSqliteMigrations(databasePath)).toEqual({ adoptedLegacySchema: false, applied: [] });
 
@@ -28,8 +34,121 @@ describeIfSqlite('SQLite migration ledger', () => {
       { id: '0001_initial', position: 1 },
       { id: '0002_legacy_schema_reconciliation', position: 2 },
       { id: '0003_approver_principal_identity', position: 3 },
+      { id: '0004_unique_approver_principal', position: 4 },
+      { id: '0005_unique_approver_effective_identity', position: 5 },
     ]);
     expect(records.every((record) => /^[a-f0-9]{64}$/.test(String(record.checksum)))).toBe(true);
+    expect(
+      runSqlite(
+        databasePath,
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'uq_approver_users_workspace_principal';",
+        { json: true },
+      ),
+    ).toEqual([
+      {
+        sql: expect.stringMatching(/UNIQUE INDEX[\s\S]*\(workspace_id, principal_id\)[\s\S]*WHERE principal_id IS NOT NULL/iu),
+      },
+    ]);
+    expect(
+      runSqlite(
+        databasePath,
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'uq_approver_users_workspace_effective_identity';",
+        { json: true },
+      ),
+    ).toEqual([
+      {
+        sql: expect.stringMatching(
+          /UNIQUE INDEX[\s\S]*\(workspace_id, COALESCE\(NULLIF\(principal_id, ''\), id\)\)/iu,
+        ),
+      },
+    ]);
+  });
+
+  it('fails closed when a pre-0004 database contains duplicate principal bindings', () => {
+    const databasePath = sqlitePath();
+    runSqliteMigrations(databasePath);
+    runSqlite(
+      databasePath,
+      `DROP INDEX uq_approver_users_workspace_effective_identity;
+       DROP INDEX uq_approver_users_workspace_principal;
+       DELETE FROM actionproxy_schema_migrations WHERE position >= 4;
+       INSERT INTO approver_users (
+         id, workspace_id, display_name, principal_id, groups_json, default_approver, enabled, created_at, updated_at
+       ) VALUES
+         ('u_alice', 'default', 'Alice', 'oidc|shared', '[]', 0, 1, '2026-08-09T10:00:00.000Z', '2026-08-09T10:00:00.000Z'),
+         ('u_bob', 'default', 'Bob', 'oidc|shared', '[]', 0, 1, '2026-08-09T10:00:00.000Z', '2026-08-09T10:00:00.000Z');`,
+    );
+
+    expect(() => runSqliteMigrations(databasePath)).toThrow(/unique constraint failed/i);
+    expect(migrationRows(databasePath).map(({ id, position }) => ({ id, position }))).toEqual([
+      { id: '0001_initial', position: 1 },
+      { id: '0002_legacy_schema_reconciliation', position: 2 },
+      { id: '0003_approver_principal_identity', position: 3 },
+    ]);
+  });
+
+  it('upgrades a recovered pre-0005 approver directory without rewriting records', () => {
+    const databasePath = sqlitePath();
+    runSqliteMigrations(databasePath);
+    runSqlite(
+      databasePath,
+      `DROP INDEX uq_approver_users_workspace_effective_identity;
+       DELETE FROM actionproxy_schema_migrations WHERE position = 5;
+       INSERT INTO approver_users (
+         id, workspace_id, display_name, principal_id, groups_json, default_approver, enabled, created_at, updated_at
+       ) VALUES
+         ('u_recovered', 'default', 'Recovered approver', NULL, '[]', 1, 1, '2026-08-09T10:00:00.000Z', '2026-08-09T10:00:00.000Z'),
+         ('u_operator', 'default', 'OIDC operator', 'oidc|operator', '[]', 0, 1, '2026-08-09T10:00:00.000Z', '2026-08-09T10:00:00.000Z');`,
+    );
+    const before = runSqlite(
+      databasePath,
+      `SELECT id, workspace_id, display_name, principal_id, default_approver, enabled, created_at, updated_at
+       FROM approver_users ORDER BY id;`,
+      { json: true },
+    );
+
+    expect(runSqliteMigrations(databasePath)).toEqual({
+      adoptedLegacySchema: false,
+      applied: ['0005_unique_approver_effective_identity'],
+    });
+    expect(
+      runSqlite(
+        databasePath,
+        `SELECT id, workspace_id, display_name, principal_id, default_approver, enabled, created_at, updated_at
+         FROM approver_users ORDER BY id;`,
+        { json: true },
+      ),
+    ).toEqual(before);
+    expect(migrationRows(databasePath).map(({ id, position }) => ({ id, position }))).toEqual([
+      { id: '0001_initial', position: 1 },
+      { id: '0002_legacy_schema_reconciliation', position: 2 },
+      { id: '0003_approver_principal_identity', position: 3 },
+      { id: '0004_unique_approver_principal', position: 4 },
+      { id: '0005_unique_approver_effective_identity', position: 5 },
+    ]);
+  });
+
+  it('fails closed when a recovered pre-0005 directory has an effective-identity collision', () => {
+    const databasePath = sqlitePath();
+    runSqliteMigrations(databasePath);
+    runSqlite(
+      databasePath,
+      `DROP INDEX uq_approver_users_workspace_effective_identity;
+       DELETE FROM actionproxy_schema_migrations WHERE position = 5;
+       INSERT INTO approver_users (
+         id, workspace_id, display_name, principal_id, groups_json, default_approver, enabled, created_at, updated_at
+       ) VALUES
+         ('u_recovered', 'default', 'Recovered approver', 'oidc|operator', '[]', 1, 1, '2026-08-09T10:00:00.000Z', '2026-08-09T10:00:00.000Z'),
+         ('oidc|operator', 'default', 'Legacy operator id', NULL, '[]', 0, 1, '2026-08-09T10:00:00.000Z', '2026-08-09T10:00:00.000Z');`,
+    );
+
+    expect(() => runSqliteMigrations(databasePath)).toThrow(/unique constraint failed/iu);
+    expect(migrationRows(databasePath).map(({ id, position }) => ({ id, position }))).toEqual([
+      { id: '0001_initial', position: 1 },
+      { id: '0002_legacy_schema_reconciliation', position: 2 },
+      { id: '0003_approver_principal_identity', position: 3 },
+      { id: '0004_unique_approver_principal', position: 4 },
+    ]);
   });
 
   it('fails closed when an applied migration checksum is rewritten', () => {
@@ -82,6 +201,8 @@ describeIfSqlite('SQLite migration ledger', () => {
       '0001_initial',
       '0002_legacy_schema_reconciliation',
       '0003_approver_principal_identity',
+      '0004_unique_approver_principal',
+      '0005_unique_approver_effective_identity',
     ]);
     expect(fs.existsSync(lockPath)).toBe(false);
   });
@@ -105,6 +226,8 @@ describeIfSqlite('SQLite migration ledger', () => {
       '0001_initial',
       '0002_legacy_schema_reconciliation',
       '0003_approver_principal_identity',
+      '0004_unique_approver_principal',
+      '0005_unique_approver_effective_identity',
     ]);
     expect(fs.existsSync(`${databasePath}.actionproxy-migrate.lock`)).toBe(false);
   }, 25_000);
@@ -118,7 +241,7 @@ describeIfPostgres('Postgres migration ledger', () => {
       await administrator.query(`CREATE SCHEMA ${quoteIdentifier(schema)}`);
       const scopedUrl = postgresUrlForSchema(postgresUrl!, schema);
       const reports = await Promise.all(Array.from({ length: 4 }, () => runPostgresMigrations(scopedUrl)));
-      expect(reports.filter((report) => report.applied.length === 3)).toHaveLength(1);
+      expect(reports.filter((report) => report.applied.length === 5)).toHaveLength(1);
       expect(reports.filter((report) => report.applied.length === 0)).toHaveLength(3);
 
       const scoped = await createPgPool(scopedUrl);
@@ -130,6 +253,8 @@ describeIfPostgres('Postgres migration ledger', () => {
           { id: '0001_initial', position: 1 },
           { id: '0002_legacy_schema_reconciliation', position: 2 },
           { id: '0003_approver_principal_identity', position: 3 },
+          { id: '0004_unique_approver_principal', position: 4 },
+          { id: '0005_unique_approver_effective_identity', position: 5 },
         ]);
         expect(records.rows.every((record) => /^[a-f0-9]{64}$/.test(record.checksum))).toBe(true);
         await scoped.query(
