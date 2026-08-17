@@ -444,7 +444,7 @@ function quoteIdentifier(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-function withSqliteMigrationLock<T>(databasePath: string, callback: () => T): T {
+export function withSqliteMigrationLock<T>(databasePath: string, callback: () => T): T {
   const lockPath = `${databasePath}.actionproxy-migrate.lock`;
   const deadline = Date.now() + SQLITE_MIGRATION_LOCK_TIMEOUT_MS;
   let descriptor: number | undefined;

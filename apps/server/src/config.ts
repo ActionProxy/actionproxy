@@ -144,9 +144,16 @@ export function loadConfig(): AppConfig {
     productEnv('DEPLOYMENT_MODE'),
     authMode,
   );
+  const publicBaseUrl = normalizeEmailPublicBaseUrl(
+    productEnv('PUBLIC_BASE_URL'),
+    {
+      label: 'ACTIONPROXY_PUBLIC_BASE_URL',
+      requireHttps: false,
+    },
+  );
   const emailPublicBaseUrl = normalizeEmailPublicBaseUrl(
     productEnv('EMAIL_PUBLIC_BASE_URL')?.trim() ||
-      productEnv('PUBLIC_BASE_URL'),
+      publicBaseUrl,
     {
       label: 'ACTIONPROXY_EMAIL_PUBLIC_BASE_URL or ACTIONPROXY_PUBLIC_BASE_URL',
       requireHttps: false,
@@ -285,7 +292,14 @@ export function loadConfig(): AppConfig {
     telegram: {
       approvalChatId: process.env.TELEGRAM_APPROVAL_CHAT_ID,
       botToken: process.env.TELEGRAM_BOT_TOKEN,
-      publicBaseUrl: process.env.TELEGRAM_PUBLIC_BASE_URL,
+      publicBaseUrl: normalizeEmailPublicBaseUrl(
+        process.env.TELEGRAM_PUBLIC_BASE_URL?.trim() || publicBaseUrl,
+        {
+          label:
+            'TELEGRAM_PUBLIC_BASE_URL or ACTIONPROXY_PUBLIC_BASE_URL',
+          requireHttps: false,
+        },
+      ),
       webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET,
     },
   };
@@ -310,8 +324,16 @@ export function withConfigDefaults(config: AppConfig): ResolvedAppConfig {
   };
 }
 
-export function assertSafeStartupConfig(config: AppConfig): void {
-  assertSafeMcpStreamableHttpConfig(config);
+export interface StartupConfigValidationOptions {
+  /** A composed edition supplies an MCP principal resolver and validates its own trust boundary. */
+  injectedMcpAuthentication?: boolean;
+}
+
+export function assertSafeStartupConfig(
+  config: AppConfig,
+  options: StartupConfigValidationOptions = {},
+): void {
+  assertSafeMcpStreamableHttpConfig(config, options);
   assertSafeQuickstartConfig(config);
   if (
     !isUnauthenticatedWildcardBind(config) ||
@@ -390,19 +412,16 @@ function assertSafeQuickstartConfig(config: AppConfig): void {
   }
 }
 
-function assertSafeMcpStreamableHttpConfig(config: AppConfig): void {
+function assertSafeMcpStreamableHttpConfig(
+  config: AppConfig,
+  options: StartupConfigValidationOptions,
+): void {
   const mcp = config.mcp?.streamableHttp;
   if (!mcp?.enabled) return;
 
   const resource = absoluteOAuthUrl(
     mcp.resourceUrl,
     'ACTIONPROXY_MCP_RESOURCE_URL',
-  );
-  const authorizationServerValue =
-    mcp.authorizationServer ?? config.auth?.oidc.issuer;
-  const authorizationServer = absoluteOAuthUrl(
-    authorizationServerValue,
-    'ACTIONPROXY_MCP_AUTHORIZATION_SERVER',
   );
   if (resource.search || resource.hash) {
     throw new Error(
@@ -414,37 +433,45 @@ function assertSafeMcpStreamableHttpConfig(config: AppConfig): void {
       'ACTIONPROXY_MCP_RESOURCE_URL must identify the exact standard /mcp endpoint without a trailing slash.',
     );
   }
-  if (authorizationServer.search || authorizationServer.hash) {
-    throw new Error(
-      'ACTIONPROXY_MCP_AUTHORIZATION_SERVER must not contain a query string or fragment.',
+  if (!options.injectedMcpAuthentication) {
+    const authorizationServerValue =
+      mcp.authorizationServer ?? config.auth?.oidc.issuer;
+    const authorizationServer = absoluteOAuthUrl(
+      authorizationServerValue,
+      'ACTIONPROXY_MCP_AUTHORIZATION_SERVER',
     );
-  }
-  if (config.auth?.mode !== 'oidc_jwt') {
-    throw new Error(
-      'MCP Streamable HTTP requires ACTIONPROXY_AUTH_MODE=oidc_jwt so ordinary ActionProxy API routes do not use local or API-key-only authentication.',
-    );
-  }
-  if (!config.auth.oidc.audience) {
-    throw new Error(
-      'MCP Streamable HTTP requires ACTIONPROXY_OIDC_AUDIENCE for audience validation on ordinary ActionProxy API routes.',
-    );
-  }
-  if (
-    !config.auth?.oidc.issuer ||
-    config.auth.oidc.issuer !== authorizationServerValue
-  ) {
-    throw new Error(
-      'MCP Streamable HTTP requires ACTIONPROXY_OIDC_ISSUER to match its authorization server.',
-    );
-  }
-  if (
-    !config.auth.oidc.jwksJson &&
-    !config.auth.oidc.jwksPath &&
-    !config.auth.oidc.jwksUri
-  ) {
-    throw new Error(
-      'MCP Streamable HTTP requires OIDC JWKS JSON, path, or URI for bearer validation.',
-    );
+    if (authorizationServer.search || authorizationServer.hash) {
+      throw new Error(
+        'ACTIONPROXY_MCP_AUTHORIZATION_SERVER must not contain a query string or fragment.',
+      );
+    }
+    if (config.auth?.mode !== 'oidc_jwt') {
+      throw new Error(
+        'MCP Streamable HTTP requires ACTIONPROXY_AUTH_MODE=oidc_jwt so ordinary ActionProxy API routes do not use local or API-key-only authentication.',
+      );
+    }
+    if (!config.auth.oidc.audience) {
+      throw new Error(
+        'MCP Streamable HTTP requires ACTIONPROXY_OIDC_AUDIENCE for audience validation on ordinary ActionProxy API routes.',
+      );
+    }
+    if (
+      !config.auth?.oidc.issuer ||
+      config.auth.oidc.issuer !== authorizationServerValue
+    ) {
+      throw new Error(
+        'MCP Streamable HTTP requires ACTIONPROXY_OIDC_ISSUER to match its authorization server.',
+      );
+    }
+    if (
+      !config.auth.oidc.jwksJson &&
+      !config.auth.oidc.jwksPath &&
+      !config.auth.oidc.jwksUri
+    ) {
+      throw new Error(
+        'MCP Streamable HTTP requires OIDC JWKS JSON, path, or URI for bearer validation.',
+      );
+    }
   }
   if (!mcp.sessionSecret || Buffer.byteLength(mcp.sessionSecret, 'utf8') < 32) {
     throw new Error(

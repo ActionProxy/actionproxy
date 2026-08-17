@@ -137,6 +137,121 @@ describe('HTTP canonical action request v1', () => {
       }),
     ).toThrow('Authenticated tenant does not match the server-resolved workspace');
   });
+
+  it('records the configured single-user tunnel identity as server-trusted, not externally verified', () => {
+    const normalized = normalizeActionRequest({
+      auth: {
+        ...verifiedAuth,
+        authProvider: 'tunnel_single_user',
+        clientId: 'tunnel_0123456789abcdef0123456789abcdef',
+        groups: [],
+        principalId: 'local-admin',
+      },
+      ingress: { environment: 'local', protocol: 'actionproxy_http', source: 'http' },
+      receivedAt: '2026-08-09T00:00:00.000Z',
+      request: forgedRequest(),
+      requestId: 'request_tunnel_single_user',
+      workspaceId: verifiedAuth.workspaceId,
+    });
+
+    expect(normalized.actor).toMatchObject({
+      provenance: {
+        source: 'server.tunnel-single-user.principal',
+        trust: 'trusted',
+      },
+      value: { authProvider: 'tunnel_single_user', id: 'local-admin' },
+    });
+    expect(normalized.tenant).toMatchObject({
+      provenance: {
+        source: 'server.tunnel-single-user.workspaceId',
+        trust: 'trusted',
+      },
+      value: { id: verifiedAuth.workspaceId },
+    });
+    expect(normalized.context.policy.approverGroup).toMatchObject({
+      present: false,
+      provenance: {
+        source: 'server.tunnel-single-user.no-approver-group',
+        trust: 'trusted',
+      },
+    });
+  });
+
+  it('uses server-owned prepared-action governance instead of caller-asserted policy and execution hints', () => {
+    const request = forgedRequest();
+    request.action = {
+      context: { risk: 'caller_claimed_safe' },
+      executionMode: 'local_mock',
+      operation: { kind: 'read', name: 'caller-claimed-read' },
+      resources: [{ id: 'caller-resource', type: 'caller_asserted' }],
+    };
+    const normalized = normalizeActionRequest({
+      auth: verifiedAuth,
+      ingress: { environment: 'self_hosted', protocol: 'actionproxy_http', source: 'http' },
+      receivedAt: '2026-08-10T00:00:00.000Z',
+      request,
+      requestId: 'request_prepared_governance',
+      trustedCredentialReference: {
+        source: 'prepared-intent:intent_1',
+        value: 'connection_google_company_1',
+      },
+      trustedExecutionMode: {
+        source: 'action-contract:google.drive.share_file@1',
+        value: 'external_grant',
+      },
+      trustedOperation: {
+        source: 'action-contract:google.drive.share_file@1',
+        value: { kind: 'write', name: 'google.drive.share_file' },
+      },
+      trustedPolicy: {
+        customerVisible: true,
+        operationKind: 'write',
+        risk: 'external_write',
+        source: 'action-contract:google.drive.share_file@1',
+      },
+      trustedResources: {
+        source: 'action-contract:google.drive.share_file@1',
+        value: [{ id: 'file_1', type: 'drive_file' }],
+      },
+      workspaceId: verifiedAuth.workspaceId,
+    });
+
+    expect(normalized.credentialReference).toMatchObject({
+      provenance: { source: 'prepared-intent:intent_1', trust: 'trusted' },
+      value: 'connection_google_company_1',
+    });
+    expect(normalized.executionMode).toMatchObject({
+      provenance: { source: 'action-contract:google.drive.share_file@1', trust: 'trusted' },
+      value: 'external_grant',
+    });
+    expect(normalized.operation).toMatchObject({
+      provenance: { source: 'action-contract:google.drive.share_file@1', trust: 'trusted' },
+      value: { kind: 'write', name: 'google.drive.share_file' },
+    });
+    expect(normalized.context.policy).toMatchObject({
+      customerVisible: {
+        present: true,
+        provenance: { source: 'action-contract:google.drive.share_file@1', trust: 'trusted' },
+        value: true,
+      },
+      operationKind: {
+        present: true,
+        provenance: { source: 'action-contract:google.drive.share_file@1', trust: 'trusted' },
+        value: 'write',
+      },
+      risk: {
+        present: true,
+        provenance: { source: 'action-contract:google.drive.share_file@1', trust: 'trusted' },
+        value: 'external_write',
+      },
+    });
+    expect(normalized.resources).toMatchObject({
+      provenance: { source: 'action-contract:google.drive.share_file@1', trust: 'derived' },
+      value: [{ id: 'file_1', type: 'drive_file' }],
+    });
+    expect(normalized.operation.value).not.toEqual(request.action.operation);
+    expect(normalized.resources.value).not.toEqual(request.action.resources);
+  });
 });
 
 describe('MCP canonical action request v1 adapter', () => {

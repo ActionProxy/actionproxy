@@ -62,11 +62,11 @@ v1 for compatibility; `resultSource` and `influence` reject unknown fields.
 
 ## Decisions
 
-| YAML value | Effective decision | Meaning |
-|---|---|---|
-| `never` | `allow` | The call may continue without a human decision. |
-| `required` | `require_approval` | Create a pending approval. |
-| `deny` | `deny` | Block before authorization or dispatch. |
+| YAML value | Effective decision | Meaning                                         |
+| ---------- | ------------------ | ----------------------------------------------- |
+| `never`    | `allow`            | The call may continue without a human decision. |
+| `required` | `require_approval` | Create a pending approval.                      |
+| `deny`     | `deny`             | Block before authorization or dispatch.         |
 
 The bundled policy deliberately requires approval for unknown tools and denies
 `dangerous.delete_customer`.

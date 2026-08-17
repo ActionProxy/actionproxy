@@ -1,5 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import { ConflictError, ForbiddenError, NotFoundError } from '../../errors';
+import {
+  ApprovalPresentationSynchronizedConflictError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from '../../errors';
 import type { AuthService } from '../../security/auth-service';
 import { safeEqual } from '../../security/crypto';
 import { normalizeTelegramUsername, type ApproverDirectoryService } from '../../services/approver-directory';
@@ -104,7 +109,7 @@ export async function registerTelegramWebhookRoutes(
         const result = await actionProxy.approveApproval(parsed.approvalId, {
           approvedBy: actor,
           note: 'Approved from Telegram',
-        }, auth);
+        }, auth, { source: 'telegram' });
         await answerCallbackQuery(config.botToken, callback.id, `Approved ${result.toolCall.toolName}.`, options.fetch);
         return reply.send({ ok: true, text: `Approved ${result.toolCall.toolName}.` });
       }
@@ -120,7 +125,7 @@ export async function registerTelegramWebhookRoutes(
         const result = await actionProxy.rejectApproval(parsed.approvalId, {
           rejectedBy: actor,
           reason: 'Rejected from Telegram',
-        }, auth);
+        }, auth, { source: 'telegram' });
         await answerCallbackQuery(config.botToken, callback.id, `Rejected ${result.toolCall.toolName}.`, options.fetch);
         return reply.send({ ok: true, text: `Rejected ${result.toolCall.toolName}.` });
       }
@@ -139,7 +144,20 @@ export async function registerTelegramWebhookRoutes(
         workspaceId: auth.workspaceId,
       });
 
-      if (error instanceof NotFoundError || error instanceof ConflictError || error instanceof ForbiddenError) {
+      if (error instanceof ConflictError) {
+        const terminal = await synchronizeStaleTelegramCallback(
+          actionProxy,
+          parsed.approvalId,
+          payload,
+          auth,
+          !(error instanceof ApprovalPresentationSynchronizedConflictError),
+        );
+        const message = terminal ?? error.message;
+        await answerCallbackQuery(config.botToken, callback.id, message, options.fetch);
+        return reply.send({ ok: true, text: message });
+      }
+
+      if (error instanceof NotFoundError || error instanceof ForbiddenError) {
         await answerCallbackQuery(config.botToken, callback.id, error.message, options.fetch);
         return reply.send({ ok: true, text: error.message });
       }
@@ -147,6 +165,65 @@ export async function registerTelegramWebhookRoutes(
       throw error;
     }
   });
+}
+
+async function synchronizeStaleTelegramCallback(
+  actionProxy: ActionProxyService,
+  approvalId: string,
+  payload: TelegramUpdatePayload,
+  auth: Awaited<ReturnType<AuthService['telegramContext']>>,
+  repair: boolean,
+): Promise<string | undefined> {
+  const chatId = payload.callback_query?.message?.chat?.id;
+  const messageId = payload.callback_query?.message?.message_id;
+  try {
+    const state = await actionProxy.syncApprovalPresentation(
+      approvalId,
+      undefined,
+      chatId === undefined || messageId === undefined
+        ? undefined
+        : {
+            channelId: 'telegram.default',
+            destination: String(chatId),
+            messageId: String(messageId),
+            provider: 'telegram',
+          },
+      {
+        auth,
+        repair,
+        repairUntrackedReference: !repair,
+      },
+    );
+    if (state.approval.status === 'pending') return undefined;
+    return terminalCallbackMessage(state.approval.status, state.resolution);
+  } catch {
+    return undefined;
+  }
+}
+
+function terminalCallbackMessage(
+  status: 'approved' | 'cancelled' | 'expired' | 'rejected' | 'superseded',
+  resolution: Awaited<ReturnType<ActionProxyService['syncApprovalPresentation']>>['resolution'],
+): string {
+  const statusLabel = status === 'superseded'
+    ? 'replaced'
+    : status;
+  const trustedAuth = resolution.auth?.authProvider === 'none' ? undefined : resolution.auth;
+  const reviewer = trustedAuth?.displayName?.trim()
+    || trustedAuth?.email?.trim()
+    || (resolution.actor?.startsWith('actionproxy:') ? undefined : resolution.actor?.trim());
+  const source = resolution.source === 'telegram'
+    ? 'Telegram'
+    : resolution.source === 'slack'
+      ? 'Slack'
+      : 'ActionProxy';
+  return truncateCallbackAnswer(
+    `Already ${statusLabel}${reviewer ? ` by ${reviewer}` : ''} via ${source}.`,
+  );
+}
+
+function truncateCallbackAnswer(value: string): string {
+  return value.length <= 200 ? value : `${value.slice(0, 197)}...`;
 }
 
 async function handleTelegramConnectMessage(

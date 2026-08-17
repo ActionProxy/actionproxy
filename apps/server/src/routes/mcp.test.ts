@@ -6,9 +6,18 @@ import { withConfigDefaults, type ResolvedAppConfig } from '../config';
 import { ConflictError, ForbiddenError, McpInsufficientScopeError, UnauthorizedError } from '../errors';
 import type { ApprovalRecord, AuthContext, JsonObject, ToolCallRecord } from '../models';
 import type { ExecutionAttemptRecordV1 } from '../contracts/execution-attempt';
+import type { AuthService } from '../security/auth-service';
+import { registerSecurityHooks, type McpRequestAuthentication } from '../security/http-security';
 import type { ActionProxyService } from '../services/action-gate';
 import type { Store } from '../storage/store';
-import { MCP_PROTOCOL_VERSION, registerMcpRoutes } from './mcp';
+import {
+  MCP_PROTOCOL_VERSION,
+  mcpCatalogRevision,
+  registerMcpRoutes,
+  type McpAdditionalTool,
+  type McpAdditionalToolContext,
+  type McpExtensionErrorProjection,
+} from './mcp';
 
 const fixture = JSON.parse(
   fs.readFileSync(path.resolve('../../fixtures/contracts/mcp-conformance-v1.json'), 'utf8'),
@@ -64,6 +73,8 @@ describe('Streamable HTTP MCP route', () => {
         protocolVersion: MCP_PROTOCOL_VERSION,
       },
     });
+    const initializedRevision = initialized.response.json().result._meta['actionproxy/catalogRevision'];
+    expect(initializedRevision).toMatch(/^mcp_catalog_[a-f0-9]{64}$/u);
     expect(initialized.response.body).not.toContain(sessionSecret);
 
     const negotiated = await harness.app.inject({
@@ -95,13 +106,15 @@ describe('Streamable HTTP MCP route', () => {
 
     const listed = await callRpc(harness.app, initialized.session, 'list_1', 'tools/list', {});
     const tools = listed.result.tools as Array<{
-      _meta: { securitySchemes: unknown[] };
+      _meta: { 'actionproxy/catalogRevision': string; securitySchemes: unknown[] };
       annotations: Record<string, boolean>;
       description: string;
       inputSchema: Record<string, unknown>;
       name: string;
       securitySchemes: unknown[];
     }>;
+    expect(listed.result._meta['actionproxy/catalogRevision']).toBe(initializedRevision);
+    expect(tools.every((tool) => tool._meta['actionproxy/catalogRevision'] === initializedRevision)).toBe(true);
     expect(tools.map((tool) => tool.name)).toEqual([
       'docs.search',
       'gmail.send_email',
@@ -160,9 +173,127 @@ describe('Streamable HTTP MCP route', () => {
     expect((await harness.app.inject({ headers: authHeaders(), method: 'DELETE', url: '/mcp' })).statusCode).toBe(405);
   });
 
-  it('maps allow, deny, pending approval, edited approval status, and canonical trusted ingress', async () => {
-    const harness = await makeHarness();
+  it('derives a stable catalog revision from names, schemas, scopes, descriptions, and annotations', () => {
+    const first = testAdditionalTool();
+    const second: McpAdditionalTool = {
+      ...testAdditionalTool(),
+      name: 'actionproxy.test.second',
+      title: 'Second Test Read',
+    };
+    const baseline = mcpCatalogRevision(false, [first, second]);
+
+    expect(mcpCatalogRevision(false, [second, first])).toBe(baseline);
+    for (const changed of [
+      { ...first, name: 'actionproxy.test.renamed' },
+      { ...first, description: 'Changed description.' },
+      { ...first, inputSchema: { additionalProperties: false, properties: { id: { type: 'string' } }, type: 'object' } },
+      { ...first, requiredScope: 'approval:read' as const },
+      { ...first, annotations: { ...first.annotations, readOnlyHint: false } },
+    ]) {
+      expect(mcpCatalogRevision(false, [changed, second])).not.toBe(baseline);
+    }
+  });
+
+  it('returns a redacted structured MCP error produced by an injected tool projector', async () => {
+    const error = new Error('secret extension detail');
+    const tool = testAdditionalTool();
+    const harness = await makeHarness({
+      additionalTools: [{
+        ...tool,
+        invoke: async () => {
+          throw error;
+        },
+      }],
+      projectAdditionalToolError: (thrown) => thrown === error
+        ? {
+            code: -32009,
+            data: {
+              code: 'extension_action_unavailable',
+              retrySafe: false,
+            },
+            message: 'The injected action could not be completed.',
+          }
+        : undefined,
+    });
     const { session } = await initialize(harness.app);
+
+    const response = await callTool(harness.app, session, 'extension_failure', tool.name, {});
+
+    expect(response.error).toMatchObject({
+      code: -32009,
+      data: { code: 'extension_action_unavailable', retrySafe: false },
+    });
+    expect(JSON.stringify(response)).not.toContain('secret');
+  });
+
+  it('does not apply an extension error projector to built-in governed tools', async () => {
+    const marker = new Error('built-in-secret');
+    const harness = await makeHarness({
+      projectAdditionalToolError: () => ({
+        code: -32009,
+        data: { code: 'extension_projection', retrySafe: false },
+        message: 'Extension projection.',
+      }),
+      submitError: marker,
+    });
+    const { session } = await initialize(harness.app);
+
+    const response = await callTool(harness.app, session, 'built_in_projection_scope', 'docs.search', {
+      query: 'x',
+    });
+
+    expect(response.error).toMatchObject({
+      code: -32603,
+      data: { code: 'internal_error', retrySafe: false },
+    });
+    expect(JSON.stringify(response)).not.toContain('built-in-secret');
+    expect(JSON.stringify(response)).not.toContain('extension_projection');
+  });
+
+  it('maps allow, deny, pending approval, edited approval status, and canonical trusted ingress', async () => {
+    let additionalContext: McpAdditionalToolContext | undefined;
+    const harness = await makeHarness({
+      additionalTools: [testAdditionalTool((context) => {
+        additionalContext = context;
+      })],
+    });
+    const { session } = await initialize(harness.app);
+
+    const additional = await callTool(harness.app, session, 'additional_context', 'actionproxy.test.read', {});
+    expect(additional.result).toMatchObject({ structuredContent: { ok: true } });
+    expect(additionalContext).toMatchObject({
+      adapterId: 'client_a',
+      agentId: 'mcp-client:client_a',
+      auth: {
+        authProvider: 'oidc_jwt',
+        clientId: 'client_a',
+        principalId: 'user_a',
+        workspaceId: 'tenant_a',
+      },
+      idempotencyKey: expect.stringMatching(/^mcp_[a-f0-9]{64}$/u),
+      ingress: {
+        adapterId: 'client_a',
+        adapterSource: 'oauth.access-token.client-id',
+        adapterTrust: 'externally_verified',
+        agent: {
+          id: 'mcp-client:client_a',
+          name: 'Authenticated MCP OAuth client',
+          source: 'oauth.access-token.client-id',
+          trust: 'derived',
+        },
+        environment: 'self_hosted',
+        idempotency: { source: 'mcp.signed-session+jsonrpc-id', trust: 'derived' },
+        protocol: 'mcp',
+        session: {
+          sessionId: expect.stringMatching(/^influence_[a-f0-9]{64}$/u),
+          source: 'actionproxy.verified-mcp-influence-scope',
+          trust: 'trusted',
+        },
+        source: 'mcp',
+      },
+      source: { id: 'client_a', name: 'MCP Streamable HTTP', type: 'mcp' },
+    });
+    expect(additionalContext?.ingress.session?.sessionId).not.toBe(session);
 
     const allowed = await callTool(harness.app, session, 'allow_1', 'docs.search', { query: 'refunds' });
     expect(allowed.result).toMatchObject({
@@ -207,6 +338,9 @@ describe('Streamable HTTP MCP route', () => {
     expect(resumed.result).toEqual(status.result);
 
     expect(harness.service.dispatches).toBe(2);
+    expect(harness.service.lastSubmission?.options.ingress).toEqual(additionalContext?.ingress);
+    expect(harness.service.lastSubmission?.request.agentId).toBe(additionalContext?.agentId);
+    expect(harness.service.lastSubmission?.request.action).toMatchObject({ source: additionalContext?.source });
     expect(harness.service.lastSubmission).toMatchObject({
       options: {
         idempotencyKey: expect.stringMatching(/^mcp_[a-f0-9]{64}$/u),
@@ -421,44 +555,259 @@ describe('Streamable HTTP MCP route', () => {
     expect(slow.service.submitCount).toBe(1);
     expect(slow.service.dispatches).toBe(0);
   });
+
+  it('uses a server-injected tunnel principal without OAuth presentation or caller-header identity', async () => {
+    let additionalContext: McpAdditionalToolContext | undefined;
+    let resolvedPrincipal = {
+      ...auth({
+        clientId: 'tunnel_client',
+        principalId: 'tunnel_user',
+        scopes: ['tool_call:read', 'tool_call:submit'],
+        tenantId: 'tenant_a',
+      }),
+      authProvider: 'tunnel_single_user',
+    } as AuthContext & { clientId: string };
+    const requestAuthentication: McpRequestAuthentication = {
+      oauthPresentation: 'none',
+      resolvePrincipal: () => resolvedPrincipal,
+    };
+    const harness = await makeHarness({
+      additionalTools: [testAdditionalTool((context) => {
+        additionalContext = context;
+      })],
+      requestAuthentication,
+    });
+
+    for (const url of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp']) {
+      const metadata = await harness.app.inject({ method: 'GET', url });
+      expect(metadata.statusCode, url).toBe(404);
+      expect(metadata.headers['www-authenticate'], url).toBeUndefined();
+    }
+
+    const initialized = await initialize(harness.app, {
+      clientId: 'caller-forged-client',
+      principalId: 'caller-forged-principal',
+      tenantId: 'caller-forged-tenant',
+    });
+    expect(initialized.response.statusCode).toBe(200);
+
+    const listed = await callRpc(harness.app, initialized.session, 'tunnel_list', 'tools/list', {});
+    expect(listed.result.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'docs.search', securitySchemes: [{ type: 'noauth' }] }),
+      expect.objectContaining({ name: 'actionproxy.test.read', securitySchemes: [{ type: 'noauth' }] }),
+    ]));
+    const additional = await callTool(
+      harness.app,
+      initialized.session,
+      'tunnel_additional',
+      'actionproxy.test.read',
+      {},
+      {
+        clientId: 'caller-forged-client',
+        principalId: 'caller-forged-principal',
+        tenantId: 'caller-forged-tenant',
+      },
+    );
+    expect(additional.result).toMatchObject({ structuredContent: { ok: true } });
+    expect(additionalContext).toMatchObject({
+      adapterId: 'tunnel_client',
+      agentId: 'mcp-client:tunnel_client',
+      auth: {
+        authProvider: 'tunnel_single_user',
+        clientId: 'tunnel_client',
+        principalId: 'tunnel_user',
+        workspaceId: 'tenant_a',
+      },
+      idempotencyKey: expect.stringMatching(/^mcp_[a-f0-9]{64}$/u),
+      ingress: {
+        adapterId: 'tunnel_client',
+        adapterSource: 'actionproxy.mcp-request-authentication.tunnel-single-user',
+        adapterTrust: 'trusted',
+        agent: {
+          id: 'mcp-client:tunnel_client',
+          name: 'Server-authenticated single-user MCP tunnel client',
+          source: 'actionproxy.mcp-request-authentication.tunnel-single-user',
+          trust: 'derived',
+        },
+        session: {
+          sessionId: expect.stringMatching(/^influence_[a-f0-9]{64}$/u),
+          source: 'actionproxy.verified-mcp-influence-scope',
+          trust: 'trusted',
+        },
+      },
+      source: { id: 'tunnel_client', name: 'Authenticated Single-User MCP Tunnel', type: 'mcp' },
+    });
+    expect(additionalContext?.ingress.session?.sessionId).not.toBe(initialized.session);
+    const submitted = await callTool(
+      harness.app,
+      initialized.session,
+      'tunnel_submit',
+      'docs.search',
+      { query: 'trusted tunnel' },
+      {
+        clientId: 'caller-forged-client',
+        principalId: 'caller-forged-principal',
+        tenantId: 'caller-forged-tenant',
+      },
+    );
+    expect(submitted.result).toMatchObject({ structuredContent: { actionproxy: { status: 'executed' } } });
+    expect(harness.service.lastSubmission?.options.ingress).toEqual(additionalContext?.ingress);
+    expect(harness.service.lastSubmission?.request.agentId).toBe(additionalContext?.agentId);
+    expect(harness.service.lastSubmission?.request.action).toMatchObject({ source: additionalContext?.source });
+    expect(harness.service.lastSubmission).toMatchObject({
+      options: {
+        auth: { clientId: 'tunnel_client', principalId: 'tunnel_user', workspaceId: 'tenant_a' },
+        ingress: {
+          adapterId: 'tunnel_client',
+          adapterSource: 'actionproxy.mcp-request-authentication.tunnel-single-user',
+          adapterTrust: 'trusted',
+          agent: {
+            name: 'Server-authenticated single-user MCP tunnel client',
+            source: 'actionproxy.mcp-request-authentication.tunnel-single-user',
+          },
+        },
+      },
+      request: {
+        action: {
+          source: { id: 'tunnel_client', name: 'Authenticated Single-User MCP Tunnel', type: 'mcp' },
+        },
+        requestedBy: 'user_a@example.com',
+      },
+    });
+
+    resolvedPrincipal = { ...resolvedPrincipal, clientId: 'different_tunnel_client' };
+    const rebound = await mcpRequest(harness.app, initialized.session, {
+      id: 'rebound',
+      jsonrpc: '2.0',
+      method: 'tools/list',
+      params: {},
+    });
+    expect(rebound.statusCode).toBe(400);
+    expect(rebound.json().error).toMatchObject({
+      code: -32001,
+      data: { code: 'mcp_session_binding_mismatch' },
+    });
+  });
+
+  it('fails closed on invalid injected principals without OAuth bearer challenges', async () => {
+    const invalid = await makeHarness({
+      requestAuthentication: {
+        oauthPresentation: 'none',
+        resolvePrincipal: () => ({
+          ...auth({ clientId: 'client', principalId: 'principal', scopes: [], tenantId: 'tenant' }),
+          authProvider: 'tunnel_single_user',
+        }) as AuthContext & { clientId: string },
+      },
+    });
+    const invalidResponse = await initialize(invalid.app);
+    expect(invalidResponse.response.statusCode).toBe(401);
+    expect(invalidResponse.response.headers['www-authenticate']).toBeUndefined();
+
+    const malformedIdentity = await makeHarness({
+      requestAuthentication: {
+        oauthPresentation: 'none',
+        resolvePrincipal: () => ({
+          ...auth({
+            clientId: 'client',
+            principalId: 'principal',
+            scopes: ['tool_call:read', 'tool_call:submit'],
+            tenantId: 'tenant',
+          }),
+          authProvider: 'caller_header',
+          groups: ['group-a', 'group-a'],
+        }) as unknown as AuthContext & { clientId: string },
+      },
+    });
+    const malformedResponse = await initialize(malformedIdentity.app);
+    expect(malformedResponse.response.statusCode).toBe(401);
+    expect(malformedResponse.response.headers['www-authenticate']).toBeUndefined();
+
+    const readOnly = await makeHarness({
+      requestAuthentication: {
+        oauthPresentation: 'none',
+        resolvePrincipal: () => ({
+          ...auth({ clientId: 'client', principalId: 'principal', scopes: ['tool_call:read'], tenantId: 'tenant_a' }),
+          authProvider: 'tunnel_single_user',
+        }) as AuthContext & { clientId: string },
+      },
+    });
+    const initialized = await initialize(readOnly.app);
+    const insufficient = await mcpRequest(readOnly.app, initialized.session, {
+      id: 'insufficient',
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: { arguments: { query: 'x' }, name: 'docs.search' },
+    });
+    expect(insufficient.statusCode).toBe(403);
+    expect(insufficient.headers['www-authenticate']).toBeUndefined();
+    expect(insufficient.json()).toMatchObject({ error: 'insufficient_scope', scope: 'tool_call:submit' });
+  });
 });
 
 interface HarnessOptions {
+  additionalTools?: readonly McpAdditionalTool[];
   delayMs?: number;
   hugeResult?: boolean;
   maxResponseBytes?: number;
   providerFailure?: boolean;
+  projectAdditionalToolError?: (error: unknown) => McpExtensionErrorProjection | undefined;
+  requestAuthentication?: McpRequestAuthentication;
   requestTimeoutMs?: number;
+  submitError?: unknown;
 }
 
 async function makeHarness(options: HarnessOptions = {}) {
   const config = testConfig(options);
   const service = new FakeActionProxy(options);
   const app = Fastify({ bodyLimit: 1024 * 1024, logger: false });
-  app.addHook('onRequest', async (request) => {
-    const clientId = header(request, 'x-test-client-id') ?? 'client_a';
-    const principalId = header(request, 'x-test-principal-id') ?? 'user_a';
-    const tenantId = header(request, 'x-test-tenant-id') ?? 'tenant_a';
-    const scopes = (header(request, 'x-test-scopes') ?? 'tool_call:read tool_call:submit').split(' ').filter(Boolean);
-    request.authContext = auth({ clientId, principalId, scopes, tenantId });
-  });
-  app.setErrorHandler((error, _request, reply) => {
-    if (error instanceof McpInsufficientScopeError) {
-      return reply.status(403).send({ error: 'insufficient_scope', scope: error.requiredScope });
-    }
-    if (error instanceof UnauthorizedError) return reply.status(401).send({ error: 'unauthorized' });
-    if (error instanceof ForbiddenError) return reply.status(403).send({ error: 'forbidden' });
-    const normalized = error as Error & { statusCode?: number };
-    return reply.status(normalized.statusCode ?? 500).send({ error: normalized.message });
-  });
+  if (options.requestAuthentication) {
+    registerSecurityHooks(app, config, {} as AuthService, {
+      mcpRequestAuthentication: options.requestAuthentication,
+    });
+  } else {
+    app.addHook('onRequest', async (request) => {
+      const clientId = header(request, 'x-test-client-id') ?? 'client_a';
+      const principalId = header(request, 'x-test-principal-id') ?? 'user_a';
+      const tenantId = header(request, 'x-test-tenant-id') ?? 'tenant_a';
+      const scopes = (header(request, 'x-test-scopes') ?? 'tool_call:read tool_call:submit').split(' ').filter(Boolean);
+      request.authContext = auth({ clientId, principalId, scopes, tenantId });
+    });
+    app.setErrorHandler((error, _request, reply) => {
+      if (error instanceof McpInsufficientScopeError) {
+        return reply.status(403).send({ error: 'insufficient_scope', scope: error.requiredScope });
+      }
+      if (error instanceof UnauthorizedError) return reply.status(401).send({ error: 'unauthorized' });
+      if (error instanceof ForbiddenError) return reply.status(403).send({ error: 'forbidden' });
+      const normalized = error as Error & { statusCode?: number };
+      return reply.status(normalized.statusCode ?? 500).send({ error: normalized.message });
+    });
+  }
   await registerMcpRoutes(app, {
     actionProxy: service as unknown as Pick<ActionProxyService, 'getToolCall' | 'submitToolCall'>,
+    additionalTools: options.additionalTools,
     config,
     redaction: {},
+    projectAdditionalToolError: options.projectAdditionalToolError,
+    requestAuthentication: options.requestAuthentication,
     store: service as unknown as Pick<Store, 'getApprovalByToolCallId' | 'getExecutionAttemptByToolCallId'>,
   });
   apps.push(app);
   return { app, service };
+}
+
+function testAdditionalTool(onInvoke?: (context: McpAdditionalToolContext) => void): McpAdditionalTool {
+  return {
+    annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false, readOnlyHint: true },
+    description: 'Read a deterministic test value.',
+    inputSchema: { additionalProperties: false, properties: {}, type: 'object' },
+    invoke: async (_input, context) => {
+      onInvoke?.(context);
+      return { contentText: 'ok', structuredContent: { ok: true } };
+    },
+    name: 'actionproxy.test.read',
+    requiredScope: 'tool_call:read',
+    title: 'Test Read',
+  };
 }
 
 class FakeActionProxy {
@@ -473,6 +822,7 @@ class FakeActionProxy {
   constructor(private readonly options: HarnessOptions) {}
 
   async submitToolCall(request: any, options: any): Promise<{ approval?: ApprovalRecord; toolCall: ToolCallRecord }> {
+    if (this.options.submitError) throw this.options.submitError;
     this.submitCount += 1;
     this.lastSubmission = { options, request };
     if (this.options.delayMs) await new Promise((resolve) => setTimeout(resolve, this.options.delayMs));

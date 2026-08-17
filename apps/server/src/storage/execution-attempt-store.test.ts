@@ -8,6 +8,7 @@ import {
 } from '../contracts/execution-attempt';
 import { buildApprovalAuthorization } from '../contracts/approval-authorization';
 import { buildContentInfluenceEvidence } from '../contracts/content-influence';
+import { hashJson } from '../security/crypto';
 import type {
   ActionReceiptRecord,
   ApprovalRecord,
@@ -410,6 +411,64 @@ describe.each(harnesses)('$name T4 storage invariants', ({ make }) => {
     });
     await expect(stores[0]!.getActionReceipt(receipt.id)).resolves.toEqual(stored);
   });
+
+  it('atomically records a complete prepared-native terminal outcome under races', async () => {
+    const { stores } = make();
+    const fixture = preparedNativeOutcomeFixture('atomic_known_outcome');
+    await stores[0]!.createToolCall(fixture.toolCall);
+    await stores[0]!.createActionReceipt(fixture.receipt);
+    await expect(stores[0]!.reserveExecutionAttemptAtomically(fixture.attempt))
+      .resolves.toMatchObject({ outcome: 'reserved' });
+    await stores[0]!.createExecutionGrant(fixture.grant);
+    await expect(stores[0]!.bindExecutionAttemptGrantAtomically({
+      attemptId: fixture.attempt.id,
+      grantId: fixture.grant.id,
+      reservationOwner: fixture.attempt.reservationOwner,
+      updatedAt: '2026-07-12T08:40:00.500Z',
+      workspaceId: 'default',
+    })).resolves.toMatchObject({ outcome: 'bound' });
+    await expect(stores[0]!.consumeExecutionGrantAndDispatchAttemptAtomically({
+      attemptId: fixture.attempt.id,
+      dispatchedAt: '2026-07-12T08:40:01.000Z',
+      grantId: fixture.grant.id,
+      reservationOwner: fixture.attempt.reservationOwner,
+      toolCallId: fixture.toolCall.id,
+      workspaceId: 'default',
+    })).resolves.toMatchObject({ outcome: 'dispatched' });
+    await expect(stores[0]!.recordKnownExternalExecutionOutcomeAtomically({
+      ...fixture.recording,
+      reservationOwner: 'wrong-owner',
+    })).resolves.toMatchObject({ outcome: 'owner_mismatch' });
+    await expect(stores[0]!.recordKnownExternalExecutionOutcomeAtomically({
+      ...fixture.recording,
+      toolCall: {
+        ...fixture.recording.toolCall,
+        actionEnvelope: {
+          ...fixture.recording.toolCall.actionEnvelope!,
+          preparedAction: {
+            ...fixture.recording.toolCall.actionEnvelope!.preparedAction!,
+            intentHash: 'tampered-intent-hash',
+          },
+        },
+      },
+    })).resolves.toMatchObject({ outcome: 'binding_mismatch' });
+    await expect(stores[0]!.getExecutionAttempt(fixture.attempt.id))
+      .resolves.toMatchObject({ state: 'dispatched' });
+    expect((await stores[0]!.getActionReceipt(fixture.receipt.id))?.outcome).toBeUndefined();
+    await expect(stores[0]!.getToolCall(fixture.toolCall.id))
+      .resolves.toMatchObject({ status: 'authorized' });
+
+    const results = await Promise.all(Array.from({ length: 12 }, (_, index) =>
+      stores[index % stores.length]!.recordKnownExternalExecutionOutcomeAtomically(fixture.recording)));
+    expect(results.filter(({ outcome }) => outcome === 'recorded')).toHaveLength(1);
+    expect(results.filter(({ outcome }) => outcome === 'replay')).toHaveLength(11);
+    await expect(stores[0]!.getExecutionAttempt(fixture.attempt.id))
+      .resolves.toMatchObject({ outcome: fixture.recording.attemptOutcome, state: 'succeeded' });
+    await expect(stores[0]!.getActionReceipt(fixture.receipt.id))
+      .resolves.toMatchObject({ outcome: fixture.recording.receiptOutcome });
+    await expect(stores[0]!.getToolCall(fixture.toolCall.id))
+      .resolves.toMatchObject({ status: 'executed' });
+  });
 });
 
 function toolCall(id: string, workspaceId = 'default'): ToolCallRecord {
@@ -585,6 +644,150 @@ function approvedAttemptFixture(
       now: '2026-07-12T08:00:02.000Z',
       toolCall: toolCallRecord,
     }),
+    toolCall: toolCallRecord,
+  };
+}
+
+function preparedNativeOutcomeFixture(suffix: string) {
+  const input = { body: 'Exact body', subject: 'Exact subject', to: 'recipient@example.com' };
+  const inputHash = hashJson(input);
+  const envelopeHash = `envelope_hash_${suffix}`;
+  const createdAt = '2026-07-12T08:40:00.000Z';
+  const toolCallRecord: ToolCallRecord = {
+    actionEnvelope: {
+      actor: { id: 'storage-test', type: 'local' },
+      agent: { id: 'storage-test-agent' },
+      context: { reason: 'Prepared native atomic outcome test' },
+      envelopeHash,
+      executionMode: 'external_grant',
+      input,
+      inputHash,
+      operation: { name: 'notifications.deliver' },
+      preparedAction: {
+        adapterId: 'google_workspace',
+        adapterVersion: '1',
+        contractHash: `contract_hash_${suffix}`,
+        contractId: 'actionproxy.prepared-test.v1',
+        contractVersion: '1',
+        intentHash: `intent_hash_${suffix}`,
+        intentId: `intent_${suffix}`,
+        operationHash: `operation_hash_${suffix}`,
+        serializerVersion: '1',
+        version: 'actionproxy.prepared-action-binding.v1',
+      },
+      protocol: 'actionproxy_http',
+      source: { name: 'storage-test', type: 'sdk' },
+      toolName: 'notifications.deliver',
+      version: 'actionproxy.action.v1',
+    },
+    actionEnvelopeHash: envelopeHash,
+    agentId: 'storage-test-agent',
+    createdAt,
+    decision: 'require_approval',
+    id: `toolcall_${suffix}`,
+    input,
+    inputHash,
+    metadata: {},
+    policyVersionHash: `policy_hash_${suffix}`,
+    reason: 'Prepared native atomic outcome test',
+    requestedBy: 'storage-test',
+    result: { externalExecution: true },
+    status: 'authorized',
+    toolName: 'notifications.deliver',
+    updatedAt: createdAt,
+    workspaceId: 'default',
+  };
+  const receipt: ActionReceiptRecord = {
+    approvedEnvelopeHash: envelopeHash,
+    approvedInputHash: inputHash,
+    createdAt,
+    decisionActor: 'storage-test',
+    decisionKind: 'human_approval',
+    executionMode: 'external_grant',
+    id: `receipt_${suffix}`,
+    issuedAt: createdAt,
+    keyId: 'test-key',
+    operation: toolCallRecord.actionEnvelope!.operation,
+    originalEnvelopeHash: envelopeHash,
+    originalInputHash: inputHash,
+    policyVersionHash: toolCallRecord.policyVersionHash,
+    protocol: 'actionproxy_http',
+    receiptHash: `receipt_hash_${suffix}`,
+    signature: 'test-signature',
+    signatureAlg: 'HMAC-SHA256',
+    source: toolCallRecord.actionEnvelope!.source,
+    toolCallId: toolCallRecord.id,
+    toolName: toolCallRecord.toolName,
+    version: 'actionproxy.receipt.v1',
+    workspaceId: 'default',
+  };
+  const attempt = buildExecutionAttempt({
+    executionMode: 'external_grant',
+    id: `attempt_${suffix}`,
+    inputHash,
+    now: createdAt,
+    receipt,
+    reservationOwner: `owner_${suffix}`,
+    toolCall: toolCallRecord,
+  });
+  const grant: ExecutionGrantRecord = {
+    actor: 'storage-test',
+    approvedEnvelopeHash: envelopeHash,
+    approvedInputHash: inputHash,
+    createdAt,
+    expiresAt: '2099-07-12T08:40:00.000Z',
+    id: `grant_${suffix}`,
+    inputHash,
+    nonce: 'grant-nonce',
+    policyVersionHash: toolCallRecord.policyVersionHash,
+    receiptHash: receipt.receiptHash,
+    receiptId: receipt.id,
+    signature: 'grant-signature',
+    toolCallId: toolCallRecord.id,
+    toolName: toolCallRecord.toolName,
+    workspaceId: 'default',
+  };
+  const providerResult = { id: `provider_${suffix}` };
+  const resultDelivery = {
+    byteCount: 32,
+    canonicalResultHash: hashJson(providerResult),
+    modelVisible: true,
+    version: 'actionproxy.result-delivery.v1' as const,
+  };
+  const completedAt = '2026-07-12T08:40:02.000Z';
+  const receiptOutcome: NonNullable<ActionReceiptRecord['outcome']> = {
+    recordedAt: completedAt,
+    recordedBy: 'storage-test',
+    result: providerResult,
+    resultDelivery,
+    status: 'succeeded',
+  };
+  return {
+    attempt,
+    grant,
+    receipt,
+    recording: {
+      attemptId: attempt.id,
+      attemptOutcome: executionAttemptOutcome('succeeded', {
+        recordedAt: completedAt,
+        result: providerResult,
+        resultDelivery,
+      }),
+      receiptOutcome,
+      reservationOwner: attempt.reservationOwner,
+      toolCall: {
+        ...toolCallRecord,
+        result: {
+          ...(toolCallRecord.result as Record<string, unknown>),
+          externalExecutionOutcome: providerResult,
+        },
+        resultDelivery,
+        resultWithheld: false,
+        status: 'executed' as const,
+        updatedAt: completedAt,
+      },
+      workspaceId: 'default',
+    },
     toolCall: toolCallRecord,
   };
 }

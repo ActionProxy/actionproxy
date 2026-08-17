@@ -12,6 +12,18 @@ All notable public changes to ActionProxy are documented here. The format is bas
 
 ### Changed
 
+- Preserved Community single-reviewer edited approvals through both the
+  `inputDecision` contract and the legacy `editedInput` form. Policy is
+  re-evaluated and subsequent authorization evidence binds the approved input;
+  original-only and multi-reviewer actions still reject inline edits.
+- Aligned the Community route inventory, OpenAPI surface, and documentation so
+  only registered Community endpoints are advertised.
+- Made Telegram approval and status links inherit the configured
+  `ACTIONPROXY_PUBLIC_BASE_URL`, including its port and path, with
+  `TELEGRAM_PUBLIC_BASE_URL` retained only as an explicit channel override.
+  Telegram approval cards now also synchronize their terminal decision state
+  across Web, API, and Telegram decisions while retaining the configured status
+  link; card edits remain bounded, best-effort presentation updates.
 - Closed the generated Community source import graph and added verification
   that rejects unresolved relative imports.
 
@@ -27,6 +39,10 @@ All notable public changes to ActionProxy are documented here. The format is bas
   an authenticated principal and another approver's legacy ID fallback.
 - Pinned the transitive `nanoid` 3.x dependency to `3.3.18`, the patched floor
   for the zero-size custom-generator denial-of-service advisory.
+- Kept the grant-dispatch extension point connector-neutral and install-once,
+  while retaining generic grant, receipt, execution-attempt, and known-outcome
+  atomicity. Community's one-use guarantee remains scoped to a single
+  execution authorization.
 
 ### Distribution
 

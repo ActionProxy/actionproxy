@@ -1,13 +1,20 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError } from '../errors';
 import type { AuthContext } from '../models';
+import type { HttpErrorProjector } from '../security/http-security';
 
 export function authContext(request: FastifyRequest): AuthContext {
   if (!request.authContext) return localRouteContext();
   return request.authContext;
 }
 
-export function mapKnownError(reply: FastifyReply, error: unknown) {
+export function mapKnownError(
+  reply: FastifyReply,
+  error: unknown,
+  projectExtensionError?: HttpErrorProjector,
+) {
+  const projected = projectExtensionError?.(error);
+  if (projected) return reply.status(projected.statusCode).send(projected.body);
   if (error instanceof NotFoundError) return reply.status(404).send({ error: 'not_found', message: error.message });
   if (error instanceof ConflictError) return reply.status(409).send({ error: 'conflict', message: error.message });
   if (error instanceof UnauthorizedError) return reply.status(401).send({ error: 'unauthorized', message: error.message });

@@ -17,6 +17,12 @@ import type {
 import type {
   AtomicActionReceiptOutcomeInput,
   AtomicActionReceiptOutcomeResult,
+  AtomicApprovedExternalAuthorizationPublicationInput,
+  AtomicApprovedExternalAuthorizationPublicationResult,
+  AtomicKnownExternalExecutionOutcomeAdoptionInput,
+  AtomicKnownExternalExecutionOutcomeAdoptionResult,
+  AtomicKnownExternalExecutionOutcomeRecordingInput,
+  AtomicKnownExternalExecutionOutcomeRecordingResult,
   AtomicExecutionAttemptGrantBindingInput,
   AtomicExecutionAttemptGrantBindingResult,
   AtomicExecutionAttemptReservationResult,
@@ -54,6 +60,25 @@ import {
 import { validContentInfluenceBindingHash } from '../contracts/content-influence';
 import { hashJson } from '../security/crypto';
 import { assertApproverPrincipalAvailable } from './approver-principal-constraint';
+import {
+  approvedExternalAuthorizationMatchesCurrent,
+  assertApprovedExternalAuthorizationPublicationCandidate,
+  sameApprovedExternalAuthorizationPublication,
+} from './approved-external-authorization-atomicity';
+import {
+  assertKnownExternalExecutionOutcomeAdoptionCandidate,
+  externalOutcomeAdoptionState,
+  knownExternalOutcomeMatchesCurrent,
+  outcomeProjectionCanBeAdopted,
+  sameKnownExternalOutcomeProjection,
+} from './external-outcome-adoption-atomicity';
+import {
+  assertKnownExternalExecutionOutcomeRecordingCandidate,
+  knownExternalOutcomeRecordingBindingsMatch,
+  knownExternalOutcomeRecordingConflictDisposition,
+  knownExternalOutcomeRecordingMatchesCurrent,
+  sameRecordedKnownExternalOutcomeProjection,
+} from './external-outcome-recording-atomicity';
 
 export class MemoryStore implements Store {
   private toolCalls = new Map<string, ToolCallRecord>();
@@ -591,6 +616,146 @@ export class MemoryStore implements Store {
     this.executionGrants.set(consumedGrant.id, consumedGrant);
     this.executionAttempts.set(dispatchedAttempt.id, dispatchedAttempt);
     return { attempt: dispatchedAttempt, grant: consumedGrant, outcome: 'dispatched' };
+  }
+
+  async publishApprovedExternalAuthorizationAtomically(
+    input: AtomicApprovedExternalAuthorizationPublicationInput,
+  ): Promise<AtomicApprovedExternalAuthorizationPublicationResult> {
+    assertApprovedExternalAuthorizationPublicationCandidate(input);
+    const workspaceId = input.toolCall.workspaceId ?? 'default';
+    const approval = this.approvals.get(input.approvalId);
+    const toolCall = this.toolCalls.get(input.toolCall.id);
+    if (!approval || !toolCall || (toolCall.workspaceId ?? 'default') !== workspaceId) {
+      return { approval, outcome: 'not_found', toolCall };
+    }
+    const attemptId = this.executionAttemptByToolCall.get(executionAttemptToolCallKey(workspaceId, toolCall.id));
+    const attempt = attemptId ? this.executionAttempts.get(attemptId) : undefined;
+    const receipt = [...this.actionReceipts.values()].find(
+      (candidate) => candidate.workspaceId === workspaceId && candidate.toolCallId === toolCall.id,
+    );
+    const grant = [...this.executionGrants.values()].find(
+      (candidate) => candidate.workspaceId === workspaceId && candidate.toolCallId === toolCall.id,
+    );
+    const publicationExists = attempt !== undefined || receipt !== undefined || grant !== undefined || toolCall.status === 'authorized';
+    if (publicationExists) {
+      return sameApprovedExternalAuthorizationPublication(input, { attempt, grant, receipt, toolCall })
+        ? { approval, attempt, grant, outcome: 'replay', receipt, toolCall }
+        : { approval, attempt, grant, outcome: 'conflict', receipt, toolCall };
+    }
+    if (approval.status !== 'approved' || toolCall.status !== 'pending_approval') {
+      return { approval, outcome: 'state_mismatch', toolCall };
+    }
+    if (!approvedExternalAuthorizationMatchesCurrent(input, approval, toolCall)) {
+      return { approval, outcome: 'binding_mismatch', toolCall };
+    }
+    if (
+      this.executionAttempts.has(input.attempt.id)
+      || this.executionGrants.has(input.grant.id)
+      || this.actionReceipts.has(input.receipt.id)
+    ) {
+      return { approval, outcome: 'conflict', toolCall };
+    }
+    this.actionReceipts.set(input.receipt.id, input.receipt);
+    this.executionGrants.set(input.grant.id, input.grant);
+    this.executionAttempts.set(input.attempt.id, input.attempt);
+    this.executionAttemptByToolCall.set(executionAttemptToolCallKey(workspaceId, toolCall.id), input.attempt.id);
+    this.toolCalls.set(input.toolCall.id, input.toolCall);
+    return {
+      approval,
+      attempt: input.attempt,
+      grant: input.grant,
+      outcome: 'created',
+      receipt: input.receipt,
+      toolCall: input.toolCall,
+    };
+  }
+
+  async adoptKnownExternalExecutionOutcomeAtomically(
+    input: AtomicKnownExternalExecutionOutcomeAdoptionInput,
+  ): Promise<AtomicKnownExternalExecutionOutcomeAdoptionResult> {
+    assertKnownExternalExecutionOutcomeAdoptionCandidate(input);
+    const attempt = this.executionAttempts.get(input.attemptId);
+    const toolCall = this.toolCalls.get(input.toolCall.id);
+    const receipt = this.actionReceipts.get(input.receipt.id);
+    const grant = attempt?.grantId ? this.executionGrants.get(attempt.grantId) : undefined;
+    if (!attempt || !toolCall || !receipt || !grant) return { attempt, grant, outcome: 'not_found', receipt, toolCall };
+    const state = externalOutcomeAdoptionState(attempt);
+    if (state === 'reconciliation_required') return { attempt, grant, outcome: state, receipt, toolCall };
+    if (state === 'state_mismatch') return { attempt, grant, outcome: state, receipt, toolCall };
+    if (sameKnownExternalOutcomeProjection(input, receipt, toolCall)) {
+      return { attempt, grant, outcome: 'replay', receipt, toolCall };
+    }
+    if (!knownExternalOutcomeMatchesCurrent(input, { attempt, grant, receipt, toolCall })) {
+      return { attempt, grant, outcome: 'binding_mismatch', receipt, toolCall };
+    }
+    if (!outcomeProjectionCanBeAdopted(input, receipt, toolCall)) {
+      return { attempt, grant, outcome: 'conflict', receipt, toolCall };
+    }
+    const adoptedReceipt = receipt.outcome ? receipt : input.receipt;
+    const adoptedToolCall = toolCall.status === 'authorized' ? input.toolCall : toolCall;
+    this.actionReceipts.set(adoptedReceipt.id, adoptedReceipt);
+    this.toolCalls.set(adoptedToolCall.id, adoptedToolCall);
+    return { attempt, grant, outcome: 'adopted', receipt: adoptedReceipt, toolCall: adoptedToolCall };
+  }
+
+  async recordKnownExternalExecutionOutcomeAtomically(
+    input: AtomicKnownExternalExecutionOutcomeRecordingInput,
+  ): Promise<AtomicKnownExternalExecutionOutcomeRecordingResult> {
+    assertKnownExternalExecutionOutcomeRecordingCandidate(input);
+    const attempt = this.executionAttempts.get(input.attemptId);
+    if (!attempt || attempt.workspaceId !== input.workspaceId) return { outcome: 'not_found' };
+    const toolCall = this.toolCalls.get(attempt.toolCallId);
+    const receipt = attempt.binding.receiptId
+      ? this.actionReceipts.get(attempt.binding.receiptId)
+      : undefined;
+    const grant = attempt.grantId ? this.executionGrants.get(attempt.grantId) : undefined;
+    if (!toolCall || !receipt || !grant) return { attempt, grant, outcome: 'not_found', receipt, toolCall };
+    if (attempt.reservationOwner !== input.reservationOwner) {
+      return { attempt, grant, outcome: 'owner_mismatch', receipt, toolCall };
+    }
+    const current = { attempt, grant, receipt, toolCall };
+    if (!knownExternalOutcomeRecordingBindingsMatch(input, current)) {
+      return { attempt, grant, outcome: 'binding_mismatch', receipt, toolCall };
+    }
+    if (sameRecordedKnownExternalOutcomeProjection(input, attempt, receipt, toolCall)) {
+      return { attempt, grant, outcome: 'replay', receipt, toolCall };
+    }
+    if (!knownExternalOutcomeRecordingMatchesCurrent(input, current)) {
+      return {
+        attempt,
+        grant,
+        outcome: knownExternalOutcomeRecordingConflictDisposition(attempt),
+        receipt,
+        toolCall,
+      };
+    }
+    if (attempt.state !== 'dispatched') {
+      return {
+        attempt,
+        grant,
+        outcome: knownExternalOutcomeRecordingConflictDisposition(attempt),
+        receipt,
+        toolCall,
+      };
+    }
+    const completedAttempt: ExecutionAttemptRecordV1 = {
+      ...attempt,
+      completedAt: input.attemptOutcome.recordedAt,
+      outcome: input.attemptOutcome,
+      state: input.attemptOutcome.status,
+      updatedAt: input.attemptOutcome.recordedAt,
+    };
+    const completedReceipt = { ...receipt, outcome: input.receiptOutcome };
+    this.executionAttempts.set(completedAttempt.id, completedAttempt);
+    this.actionReceipts.set(completedReceipt.id, completedReceipt);
+    this.toolCalls.set(input.toolCall.id, input.toolCall);
+    return {
+      attempt: completedAttempt,
+      grant,
+      outcome: 'recorded',
+      receipt: completedReceipt,
+      toolCall: input.toolCall,
+    };
   }
 
   async createActionReceipt(record: ActionReceiptRecord): Promise<ActionReceiptRecord> {

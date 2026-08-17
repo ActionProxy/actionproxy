@@ -114,19 +114,17 @@ describe('Streamable MCP adapter-to-core storage conformance', () => {
       });
       expect(dispatches).toBe(1);
 
-      const approvedInput = {
-        body: 'Approved edited body',
-        subject: 'Approved edited subject',
-        to: 'edited@example.com',
-      };
       const approved = await app.inject({
         headers: { authorization: `Bearer ${approverToken}` },
         method: 'POST',
-        payload: { inputDecision: { input: approvedInput, mode: 'edited' } },
+        payload: { inputDecision: { mode: 'original' } },
         url: `/v1/approvals/${approvalId}/approve`,
       });
       expect(approved.statusCode).toBe(200);
-      expect(approved.json().toolCall).toMatchObject({ input: approvedInput, status: 'executed' });
+      expect(approved.json().toolCall).toMatchObject({
+        input: { body: 'Original body', subject: 'Original subject', to: 'original@example.com' },
+        status: 'executed',
+      });
       expect(dispatches).toBe(2);
 
       const status = await callTool(app, mcpToken, session, 'approval_status', 'actionproxy.get_action_status', {
@@ -136,7 +134,7 @@ describe('Streamable MCP adapter-to-core storage conformance', () => {
         structuredContent: {
           actionproxy: { status: 'executed' },
           executionAttempt: { retryPolicy: 'never_automatic', state: 'succeeded' },
-          result: { to: 'edited@example.com' },
+          result: { to: 'original@example.com' },
         },
       });
 

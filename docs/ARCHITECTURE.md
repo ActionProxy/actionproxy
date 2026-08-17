@@ -134,9 +134,12 @@ turn approval or denial into automatic execution.
 ## Approval lifecycle
 
 A pending approval retains the original proposed input and its envelope hash.
-If a reviewer edits the input, ActionProxy keeps both the original and edited
-payloads, evaluates the edited action again, and binds subsequent evidence to
-the accepted input hash.
+In a single-reviewer flow, the reviewer may approve the original input or an
+edited input. ActionProxy retains both payloads, evaluates policy against the
+edited action, and binds the receipt, grant, attempt, hashes, and execution to
+the accepted input. Inline edits fail closed when the stored action is marked
+original-only or when more than one approval is required; Community has no
+separate approval-revision route.
 
 Atomic compare-and-set transitions ensure one final decision wins a concurrent
 approval race. Repeated approval, rejection, cancellation, or expired review
@@ -165,6 +168,13 @@ second consumer fails before dispatch.
 Timeouts and disconnects are not proof of cancellation. Ambiguous results are
 recorded without automatic retry. A runner reports its immutable outcome back
 through the grant endpoint.
+
+The shared grant service has one optional, install-once,
+connector-neutral dispatch coordinator at the atomic grant-consumption seam.
+The Community composition uses the ordinary store transition and includes no
+edition-specific dispatch claims, tables, or retry policy. Generic storage
+contracts preserve atomic grant, receipt, and known-outcome evidence so an
+edition extension does not need an alternate policy or approval path.
 
 ## MCP adapters
 

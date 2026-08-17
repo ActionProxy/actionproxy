@@ -66,9 +66,10 @@ and `500` internal failure.
   audience, key material, time bounds, subject, and scopes.
 
 Handlers enforce scopes such as `tool_call:submit`, `tool_call:read`,
-`approval:read`, `approval:decide`, `audit:read`, `policy:read`, `policy:write`,
-`execution_grant:consume`, and `admin:integrations`. Authentication creates the
-authoritative workspace/principal context; request bodies cannot select it.
+`approval:read`, `approval:approve`, `approval:reject`, `audit:read`,
+`policy:read`, `policy:write`, `execution_grant:consume`, and
+`admin:integrations`. Authentication creates the authoritative
+workspace/principal context; request bodies cannot select it.
 
 The standard `/mcp` resource has stricter OAuth requirements described below.
 
@@ -241,23 +242,43 @@ Approves the original payload:
 }
 ```
 
-Or approves edited input:
+Or approves edited input in a single-reviewer flow:
 
 ```json
 {
   "approvedBy": "reviewer@example.com",
-  "editedInput": { "to": "customer@example.com", "body": "Edited" },
   "inputDecision": {
     "mode": "edited",
-    "input": { "to": "customer@example.com", "body": "Edited" }
+    "input": {
+      "to": "customer@example.com",
+      "subject": "Reviewed update",
+      "body": "Replacement"
+    }
   },
   "reviewHash": "..."
 }
 ```
 
-The service retains both original and edited payloads, re-evaluates policy, and
-revalidates lifecycle/policy/influence bindings before authorization. Edited
-input is not accepted for a multi-review approval.
+The legacy `editedInput` form remains accepted for compatibility:
+
+```json
+{
+  "approvedBy": "reviewer@example.com",
+  "editedInput": {
+    "to": "customer@example.com",
+    "subject": "Reviewed update",
+    "body": "Replacement"
+  },
+  "reviewHash": "..."
+}
+```
+
+ActionProxy retains the original and edited payload evidence, re-evaluates
+policy against the edited input, and binds the receipt, grant, execution
+attempt, hashes, and execution to that approved input. Edited input is rejected
+when the action is marked `approvalInputMode: "original_only"` or the approval
+requires more than one reviewer. Community does not register an approval
+revision route; an unknown route returns `404`.
 
 ### `POST /v1/approvals/:id/reject`
 

@@ -4,7 +4,7 @@ import { MCP_SESSION_VERSION, McpSessionAuthority, McpSessionError } from './mcp
 const secret = 'mcp-test-session-secret-with-at-least-32-bytes';
 
 describe('MCP signed session authority', () => {
-  it('issues and verifies a session bound to resource, tenant, principal, adapter, and protocol', () => {
+  it('issues and verifies a session bound to resource, tenant, principal, adapter, protocol, and catalog', () => {
     const authority = new McpSessionAuthority(secret, 60_000, {
       now: () => 1_000,
       randomId: () => 'session_01',
@@ -34,6 +34,7 @@ describe('MCP signed session authority', () => {
     expectMcpSessionError(() => authority.verify(`${payload}x.${signature}`, binding()), 'mcp_session_invalid');
     for (const mismatch of [
       { adapterId: 'other-client' },
+      { catalogRevision: 'mcp_catalog_other' },
       { principalId: 'other-user' },
       { protocolVersion: '2024-11-05' },
       { resource: 'https://other.example/mcp' },
@@ -73,6 +74,7 @@ describe('MCP signed session authority', () => {
 function binding() {
   return {
     adapterId: 'chatgpt-client',
+    catalogRevision: 'mcp_catalog_test',
     principalId: 'user_01',
     protocolVersion: '2025-06-18',
     resource: 'https://proxy.example/mcp',

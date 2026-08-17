@@ -10,7 +10,7 @@ export type JsonObject = Record<string, unknown>;
 
 export type PolicyDecision = 'allow' | 'require_approval' | 'deny';
 export type ToolCallStatus = 'submitted' | 'authorized' | 'executed' | 'pending_approval' | 'blocked' | 'rejected' | 'failed';
-export type ApprovalStatus = 'pending' | 'approved' | 'cancelled' | 'expired' | 'rejected';
+export type ApprovalStatus = 'pending' | 'approved' | 'cancelled' | 'expired' | 'rejected' | 'superseded';
 export type ActionProtocol =
   | 'actionproxy_http'
   | 'cli'
@@ -118,6 +118,18 @@ export interface ActionEnvelope<TInput extends JsonObject = JsonObject> {
   input: TInput;
   inputHash: string;
   operation: { kind?: ActionOperationKind; name: string };
+  preparedAction?: {
+    adapterId: string;
+    adapterVersion: string;
+    contractHash: string;
+    contractId: string;
+    contractVersion: string;
+    intentHash: string;
+    intentId: string;
+    operationHash: string;
+    serializerVersion: string;
+    version: 'actionproxy.prepared-action-binding.v1';
+  };
   protocol: ActionProtocol;
   resources?: Array<{ id?: string; metadata?: JsonObject; name?: string; type: string; url?: string }>;
   source: { id?: string; metadata?: JsonObject; name?: string; type: string };
@@ -187,7 +199,7 @@ export interface ApprovalRecord<TInput extends JsonObject = JsonObject> {
   requestedBy: string;
   authorization?: ApprovalAuthorizationEvidenceV1;
   authorizationConsumedAt?: string;
-  authorizationConsumedReason?: 'approved' | 'cancelled' | 'expired' | 'rejected';
+  authorizationConsumedReason?: 'approved' | 'cancelled' | 'expired' | 'rejected' | 'superseded';
   approvedBy?: string;
   cancelledAt?: string;
   cancelledBy?: string;
@@ -208,12 +220,14 @@ export interface ApprovalRecord<TInput extends JsonObject = JsonObject> {
   approverGroups?: string[];
   requiredApprovals?: number;
   separationOfDuties?: boolean;
+  supersededAt?: string;
+  supersededByApprovalId?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface AuditAuthContext {
-  authProvider: 'api_key' | 'none' | 'oidc_jwt' | 'slack' | 'telegram';
+  authProvider: 'api_key' | 'none' | 'oidc_jwt' | 'slack' | 'telegram' | 'tunnel_single_user';
   clientId?: string;
   displayName: string;
   email?: string;
@@ -241,6 +255,11 @@ export interface AuditEvent {
     | 'approval.cancelled'
     | 'approval.expired'
     | 'approval.rejected'
+    | 'approval.revised'
+    | 'approval.superseded'
+    | 'prepared_action.created'
+    | 'provider.dispatch_recorded'
+    | 'exact_email.duplicate_suppressed'
     | 'execution.attempt_reserved'
     | 'execution.attempt_dispatched'
     | 'execution.attempt_completed'
@@ -259,6 +278,8 @@ export interface AuditEvent {
     | 'remediation.submitted'
     | 'approval_notification.sent'
     | 'approval_notification.failed'
+    | 'approval_notification.presentation_updated'
+    | 'approval_notification.presentation_update_failed'
     | 'approver_directory.updated'
     | 'service_account.created'
     | 'api_key.created'

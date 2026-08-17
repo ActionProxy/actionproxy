@@ -57,7 +57,7 @@ describe('authorized action routes', () => {
     await app.close();
   });
 
-  it('does not expose private workflow continuation metadata', async () => {
+  it('does not expose internal tool-call metadata', async () => {
     const store = new MemoryStore();
     const app = Fastify({ logger: false });
     const auth: AuthContext = {
@@ -79,9 +79,9 @@ describe('authorized action routes', () => {
         id: 'toolcall_plan',
         metadata: {
           actionproxyExecution: 'external',
-          agentRunId: 'run_scheduler_123',
+          internalCorrelationId: 'correlation_scheduler_123',
           hiddenInternalNote: 'do-not-return',
-          purpose: 'agent_plan_authorization',
+          purpose: 'proposal_authorization',
         },
         policyReason: 'Unknown tool behavior should require approval until reviewed.',
         toolName: 'planning.authorize_plan',
@@ -113,9 +113,50 @@ describe('authorized action routes', () => {
         toolCall: { id: 'toolcall_plan', toolName: 'planning.authorize_plan' },
       },
     ]);
-    expect(body.authorizedActions[0]).not.toHaveProperty('continuation');
     expect(body.authorizedActions[0].toolCall).not.toHaveProperty('metadata');
     expect(JSON.stringify(body)).not.toContain('do-not-return');
+
+    await app.close();
+  });
+
+  it('adds only server-derived extension fields without allowing core-field replacement', async () => {
+    const store = new MemoryStore();
+    const app = Fastify({ logger: false });
+    app.addHook('onRequest', async (request) => {
+      request.authContext = {
+        authProvider: 'api_key',
+        displayName: 'Authorized action reader',
+        groups: [],
+        principalId: 'reader',
+        principalType: 'service_account',
+        scopes: ['tool_call:read'],
+        workspaceId: 'default',
+      };
+    });
+    await registerAuthorizedActionRoutes(app, store, {
+      projectAuthorizedAction: async ({ toolCall }) => ({
+        extensionState: { classification: `reviewed:${toolCall.toolName}` },
+        status: 'extension-must-not-replace-core-status',
+      }),
+    });
+
+    const record = toolCall({ id: 'toolcall_extension', toolName: 'records.lookup' });
+    await store.createToolCall(record);
+    await store.createExecutionGrant(executionGrant({
+      id: 'grant_extension',
+      toolCallId: record.id,
+      toolName: record.toolName,
+    }));
+
+    const response = await app.inject({ method: 'GET', url: '/v1/authorized-actions?status=all' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().authorizedActions).toEqual([
+      expect.objectContaining({
+        extensionState: { classification: 'reviewed:records.lookup' },
+        status: 'waiting',
+        toolCall: expect.objectContaining({ id: 'toolcall_extension' }),
+      }),
+    ]);
 
     await app.close();
   });

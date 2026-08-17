@@ -9,7 +9,8 @@ export type ToolCallStatus =
   | 'blocked'
   | 'rejected'
   | 'failed';
-export type ApprovalStatus = 'pending' | 'approved' | 'cancelled' | 'expired' | 'rejected';
+export type ApprovalStatus = 'pending' | 'approved' | 'cancelled' | 'expired' | 'rejected' | 'superseded';
+export type ApprovalDecisionSource = 'actionproxy' | 'slack' | 'system' | 'telegram';
 export type PrincipalType = 'local' | 'service_account' | 'slack' | 'telegram' | 'user';
 export type ObservedToolSource = 'local_demo' | 'mcp_discovery' | 'runtime';
 export type ObservedToolStatus = 'dismissed' | 'resolved' | 'unresolved';
@@ -36,8 +37,8 @@ export interface AuthContext {
   email?: string;
   groups: string[];
   scopes: string[];
-  authProvider: 'api_key' | 'none' | 'oidc_jwt' | 'slack' | 'telegram';
-  /** OAuth client identity verified from a signed access token. Never caller metadata. */
+  authProvider: 'api_key' | 'none' | 'oidc_jwt' | 'slack' | 'telegram' | 'tunnel_single_user';
+  /** Verified OAuth client id or server-configured tunnel id. Never caller metadata. */
   clientId?: string;
   workspaceId: string;
 }
@@ -82,6 +83,20 @@ export interface ActionResourceHint {
   url?: string;
 }
 
+/** Secret-free pointer to an immutable private-edition prepared action. */
+export interface PreparedActionEnvelopeBindingV1 {
+  adapterId: string;
+  adapterVersion: string;
+  contractHash: string;
+  contractId: string;
+  contractVersion: string;
+  intentHash: string;
+  intentId: string;
+  operationHash: string;
+  serializerVersion: string;
+  version: 'actionproxy.prepared-action-binding.v1';
+}
+
 export interface ActionEnvelope {
   actor: ActionActor;
   agent: ActionAgent;
@@ -102,6 +117,7 @@ export interface ActionEnvelope {
     name: string;
   };
   protocol: ActionProtocol;
+  preparedAction?: PreparedActionEnvelopeBindingV1;
   resources?: ActionResourceHint[];
   source: {
     id?: string;
@@ -182,6 +198,7 @@ export interface ApprovalDecisionRecord {
   inputDecision?: 'edited' | 'original';
   note?: string;
   reviewHash?: string;
+  source?: ApprovalDecisionSource;
 }
 
 export interface ApprovalRecord {
@@ -193,7 +210,7 @@ export interface ApprovalRecord {
   requestedByAuth?: AuthContext;
   authorization?: import('./contracts/approval-authorization').ApprovalAuthorizationV1;
   authorizationConsumedAt?: string;
-  authorizationConsumedReason?: 'approved' | 'cancelled' | 'expired' | 'rejected';
+  authorizationConsumedReason?: 'approved' | 'cancelled' | 'expired' | 'rejected' | 'superseded';
   approvedBy?: string;
   cancelledAt?: string;
   cancelledBy?: string;
@@ -214,6 +231,8 @@ export interface ApprovalRecord {
   approverGroups?: string[];
   requiredApprovals?: number;
   separationOfDuties?: boolean;
+  supersededAt?: string;
+  supersededByApprovalId?: string;
   decisions?: ApprovalDecisionRecord[];
   createdAt: string;
   updatedAt: string;
@@ -456,6 +475,11 @@ export interface AuditEvent {
     | 'approval.cancelled'
     | 'approval.expired'
     | 'approval.rejected'
+    | 'approval.revised'
+    | 'approval.superseded'
+    | 'prepared_action.created'
+    | 'provider.dispatch_recorded'
+    | 'exact_email.duplicate_suppressed'
     | 'execution_grant.created'
     | 'execution_grant.consumed'
     | 'execution_grant.rejected'
@@ -474,6 +498,8 @@ export interface AuditEvent {
     | 'remediation.submitted'
     | 'approval_notification.sent'
     | 'approval_notification.failed'
+    | 'approval_notification.presentation_updated'
+    | 'approval_notification.presentation_update_failed'
     | 'approver_directory.updated'
     | 'service_account.created'
     | 'api_key.created'

@@ -706,7 +706,7 @@ describe('enterprise security controls', () => {
     expect(response.statusCode).toBe(409);
     expect(response.json()).toMatchObject({
       error: 'conflict',
-      message: 'Edited input is not supported when requiredApprovals is greater than 1.',
+      message: expect.stringContaining('requiredApprovals is greater than 1'),
     });
   });
 
@@ -928,12 +928,12 @@ describe('enterprise security controls', () => {
       url: '/v1/tool-calls',
     });
     const approvalId = submitted.json().approval.id as string;
-    const editedInput = { body: 'Edited', subject: 'Approved update', to: 'customer@example.com' };
+    const originalInput = { body: 'Original', subject: 'Original', to: 'customer@example.com' };
     const approved = await app.inject({
       method: 'POST',
       payload: {
         approvedBy: 'manager@example.com',
-        editedInput,
+        inputDecision: { mode: 'original' },
       },
       url: `/v1/approvals/${approvalId}/approve`,
     });
@@ -943,7 +943,7 @@ describe('enterprise security controls', () => {
     const wrongPayload = await app.inject({
       method: 'POST',
       payload: {
-        input: { body: 'Original', subject: 'Original', to: 'customer@example.com' },
+        input: { body: 'Edited', subject: 'Approved update', to: 'customer@example.com' },
         policyVersionHash: grant.policyVersionHash,
         toolCallId: approvedBody.toolCall.id,
         toolName: 'gmail.send_email',
@@ -955,7 +955,7 @@ describe('enterprise security controls', () => {
     const consumed = await app.inject({
       method: 'POST',
       payload: {
-        input: editedInput,
+        input: originalInput,
         policyVersionHash: grant.policyVersionHash,
         toolCallId: approvedBody.toolCall.id,
         toolName: 'gmail.send_email',

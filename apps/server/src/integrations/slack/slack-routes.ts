@@ -97,7 +97,7 @@ export async function registerSlackInteractionRoutes(
         const result = await actionProxy.approveApproval(approvalId, {
           approvedBy: actor,
           note: 'Approved from Slack',
-        }, auth);
+        }, auth, { source: 'slack' });
         return reply.send({
           response_type: 'ephemeral',
           text: `Approved ${result.toolCall.toolName}.`,
@@ -114,7 +114,7 @@ export async function registerSlackInteractionRoutes(
       const result = await actionProxy.rejectApproval(approvalId, {
         rejectedBy: actor,
         reason: 'Rejected from Slack',
-      }, auth);
+      }, auth, { source: 'slack' });
       return reply.send({
         response_type: 'ephemeral',
         text: `Rejected ${result.toolCall.toolName}.`,

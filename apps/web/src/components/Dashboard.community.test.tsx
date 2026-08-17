@@ -1,5 +1,6 @@
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -824,6 +825,83 @@ describe("fixed Community dashboard", () => {
       "href",
       "#/demo?journey=local",
     );
+  });
+
+  it("serializes an inline-edited approval and renders the edited proposal", async () => {
+    const user = userEvent.setup();
+    let record = emailApprovalRecord();
+    const editedInput = {
+      body: "Your refund has been approved.",
+      subject: "Refund approved",
+      to: "customer@example.com",
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/review")) {
+          return jsonResponse(emailApprovalReview(record, "fresh"));
+        }
+        if (init?.method === "POST" && url.endsWith("/approve")) {
+          expect(JSON.parse(String(init.body))).toEqual({
+            approvedBy: "local-reviewer@example.com",
+            inputDecision: { input: editedInput, mode: "edited" },
+            reviewHash: "hash_review",
+          });
+          record = {
+            approval: {
+              ...record.approval,
+              editedInput,
+              status: "approved",
+            },
+            toolCall: {
+              ...record.toolCall,
+              input: editedInput,
+              status: "executed",
+            },
+          };
+          return jsonResponse(record);
+        }
+        if (url === "/v1/approvals/approval_email") {
+          return jsonResponse(record);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    window.location.hash = "#/approvals/approval_email";
+    render(
+      <Dashboard
+        data={emailApprovalDashboardData()}
+        loading={false}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Approve exact proposal" }),
+    ).toBeEnabled();
+    await user.click(
+      screen.getByText("Technical details and integrity evidence"),
+    );
+    fireEvent.change(screen.getByLabelText("Approved input JSON"), {
+      target: { value: JSON.stringify(editedInput, null, 2) },
+    });
+
+    expect(screen.getByText("Your refund has been approved.")).toBeInTheDocument();
+    expect(screen.getByText("Edited in technical details")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Approve edited proposal" }),
+    );
+
+    expect(
+      await screen.findByText("Executed successfully exactly once."),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([input, init]) =>
+          String(input).endsWith("/approve") && init?.method === "POST",
+      ),
+    ).toHaveLength(1);
   });
 
   it("describes only the locally verified MCP provenance while an approved tunnel call finishes", async () => {

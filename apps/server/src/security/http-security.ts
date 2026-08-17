@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AppConfig, AuthConfig } from '../config';
 import { ForbiddenError, McpInsufficientScopeError, RateLimitError, UnauthorizedError } from '../errors';
-import type { AuthContext } from '../models';
+import type { AuthContext, JsonObject } from '../models';
 import type { AuthService } from './auth-service';
 
 declare module 'fastify' {
@@ -13,6 +13,50 @@ declare module 'fastify' {
 interface RateBucket {
   count: number;
   resetAt: number;
+}
+
+const AUTH_PROVIDERS = new Set<AuthContext['authProvider']>([
+  'api_key',
+  'none',
+  'oidc_jwt',
+  'slack',
+  'telegram',
+  'tunnel_single_user',
+]);
+const PRINCIPAL_TYPES = new Set<AuthContext['principalType']>([
+  'local',
+  'service_account',
+  'slack',
+  'telegram',
+  'user',
+]);
+
+export type McpAuthenticatedPrincipal = AuthContext & { clientId: string };
+
+/**
+ * Server-owned authentication seam for the standard MCP endpoint.
+ *
+ * A resolver may use a trusted transport identity or another verified server
+ * dependency. Request headers are deliberately not interpreted here as
+ * identity assertions. `oauthPresentation: 'none'` is intended for an
+ * authenticated transport such as a single-user Secure MCP Tunnel.
+ */
+export interface McpRequestAuthentication {
+  oauthPresentation: 'none' | 'protected-resource';
+  resolvePrincipal: (request: FastifyRequest) => McpAuthenticatedPrincipal | Promise<McpAuthenticatedPrincipal>;
+}
+
+export interface HttpErrorProjection {
+  body: JsonObject;
+  statusCode: number;
+}
+
+/** Edition-owned, static projection for errors absent from Community core. */
+export type HttpErrorProjector = (error: unknown) => HttpErrorProjection | undefined;
+
+export interface SecurityHookOptions {
+  projectHttpError?: HttpErrorProjector;
+  mcpRequestAuthentication?: McpRequestAuthentication;
 }
 
 const publicRoutes = new Set([
@@ -29,8 +73,11 @@ export function registerSecurityHooks(
   app: FastifyInstance,
   config: AppConfig & { auth: AuthConfig },
   authService: AuthService,
+  options: SecurityHookOptions = {},
 ): void {
   const buckets = new Map<string, RateBucket>();
+  const mcpRequestAuthentication = options.mcpRequestAuthentication;
+  const projectHttpError = options.projectHttpError;
 
   app.addHook('onRequest', async (request, reply) => {
     applySecurityHeaders(reply);
@@ -45,16 +92,20 @@ export function registerSecurityHooks(
     if (isMcpEndpoint(request)) {
       if (!config.mcp?.streamableHttp?.enabled) return;
       try {
-        request.authContext = await authService.authenticateMcpAuthorizationHeader(
-          headerValue(request.headers.authorization),
-          config.mcp.streamableHttp.resourceUrl!,
+        request.authContext = assertMcpAuthenticatedPrincipal(
+          mcpRequestAuthentication
+            ? await mcpRequestAuthentication.resolvePrincipal(request)
+            : await authService.authenticateMcpAuthorizationHeader(
+                headerValue(request.headers.authorization),
+                config.mcp.streamableHttp.resourceUrl!,
+              ),
         );
       } catch (error) {
         if (error instanceof UnauthorizedError) {
-          return reply
-            .header('www-authenticate', mcpBearerChallenge(config))
-            .status(401)
-            .send({ error: 'unauthorized', message: error.message });
+          if (presentsMcpOAuth(mcpRequestAuthentication)) {
+            reply.header('www-authenticate', mcpBearerChallenge(config));
+          }
+          return reply.status(401).send({ error: 'unauthorized', message: error.message });
         }
         throw error;
       }
@@ -68,13 +119,13 @@ export function registerSecurityHooks(
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof UnauthorizedError) {
-      if (isMcpEndpoint(request) && config.mcp?.streamableHttp?.enabled) {
+      if (isMcpEndpoint(request) && config.mcp?.streamableHttp?.enabled && presentsMcpOAuth(mcpRequestAuthentication)) {
         reply.header('www-authenticate', mcpBearerChallenge(config));
       }
       return reply.status(401).send({ error: 'unauthorized', message: error.message });
     }
     if (error instanceof McpInsufficientScopeError) {
-      if (isMcpEndpoint(request) && config.mcp?.streamableHttp?.enabled) {
+      if (isMcpEndpoint(request) && config.mcp?.streamableHttp?.enabled && presentsMcpOAuth(mcpRequestAuthentication)) {
         reply.header(
           'www-authenticate',
           `${mcpBearerChallenge(config)}, error="insufficient_scope", scope="${error.requiredScope}"`,
@@ -88,8 +139,40 @@ export function registerSecurityHooks(
     if (error instanceof RateLimitError) {
       return reply.status(429).send({ error: 'rate_limited', message: error.message });
     }
+    const projected = projectHttpError?.(error);
+    if (projected) return reply.status(projected.statusCode).send(projected.body);
     return reply.send(error);
   });
+}
+
+export function assertMcpAuthenticatedPrincipal(value: unknown): McpAuthenticatedPrincipal {
+  const principal = value as Partial<AuthContext> | null | undefined;
+  if (
+    !principal ||
+    !boundedIdentity(principal.clientId, 256) ||
+    !boundedIdentity(principal.principalId, 512) ||
+    !boundedIdentity(principal.workspaceId, 256) ||
+    !boundedIdentity(principal.displayName, 512) ||
+    !AUTH_PROVIDERS.has(principal.authProvider as AuthContext['authProvider']) ||
+    !PRINCIPAL_TYPES.has(principal.principalType as AuthContext['principalType']) ||
+    (principal.email !== undefined && !boundedIdentity(principal.email, 1024)) ||
+    !Array.isArray(principal.groups) ||
+    principal.groups.length > 128 ||
+    principal.groups.some((group) => !boundedIdentity(group, 256)) ||
+    new Set(principal.groups).size !== principal.groups.length ||
+    !Array.isArray(principal.scopes) ||
+    principal.scopes.length < 1 ||
+    principal.scopes.length > 128 ||
+    principal.scopes.some((scope) => !boundedIdentity(scope, 256)) ||
+    new Set(principal.scopes).size !== principal.scopes.length
+  ) {
+    throw new UnauthorizedError('MCP authentication did not resolve a valid bounded principal.');
+  }
+  return value as McpAuthenticatedPrincipal;
+}
+
+export function presentsMcpOAuth(authentication: McpRequestAuthentication | undefined): boolean {
+  return authentication?.oauthPresentation !== 'none';
 }
 
 function isPublicRequest(request: FastifyRequest): boolean {
@@ -108,6 +191,16 @@ function mcpBearerChallenge(config: AppConfig): string {
     ? new URL('/.well-known/oauth-protected-resource/mcp', resourceUrl).toString()
     : '/.well-known/oauth-protected-resource/mcp';
   return `Bearer resource_metadata="${metadataUrl}"`;
+}
+
+function boundedIdentity(value: unknown, maxLength: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    Buffer.byteLength(value, 'utf8') <= maxLength &&
+    value === value.trim() &&
+    !/[\u0000-\u001f\u007f]/u.test(value)
+  );
 }
 
 function applySecurityHeaders(reply: { header: (name: string, value: string) => unknown }): void {

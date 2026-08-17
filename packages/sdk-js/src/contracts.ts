@@ -41,7 +41,7 @@ export type CanonicalPolicyContextV1 = Readonly<
 >;
 
 export interface CanonicalActionActorEvidenceV1 {
-  readonly authProvider?: 'api_key' | 'none' | 'oidc_jwt' | 'slack' | 'telegram';
+  readonly authProvider?: 'api_key' | 'none' | 'oidc_jwt' | 'slack' | 'telegram' | 'tunnel_single_user';
   readonly displayName?: string;
   readonly email?: string;
   readonly id: string;

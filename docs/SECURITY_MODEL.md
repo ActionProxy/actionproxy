@@ -78,8 +78,8 @@ server-derived active-session marker; ordinary HTTP submissions always lose
 reserved Quickstart provenance fields.
 
 Secure MCP Tunnel is a transport boundary, not an ActionProxy identity upgrade.
-The demo still uses the implicit `local-admin` context from
-`AUTH_MODE=none`, so it must remain loopback/mock-only. Tunnel entitlement and
+The Community demo still uses the implicit `local-admin` context from
+`AUTH_MODE=none`, so it remains loopback/mock-only. Tunnel entitlement and
 workspace association authorize use of the OpenAI tunnel; they do not identify
 the ChatGPT user to ActionProxy or authorize production business actions. The
 advanced ChatGPT path remains the standard `/mcp` protected resource with
@@ -107,6 +107,10 @@ id used by policy and delivery to an authenticated principal. Slack and
 Telegram callbacks map provider identities to that same principal. Email uses
 a local outbox by default and may use an operator-owned SMTP service. Messages
 are sent one recipient at a time for privacy and per-user delivery audit.
+Telegram review/status links inherit the deployment-owned
+`ACTIONPROXY_PUBLIC_BASE_URL`, including its configured port and path; the
+optional `TELEGRAM_PUBLIC_BASE_URL` is only for an intentionally different
+Telegram origin. Neither setting is a fixed product port.
 
 MCP wrapper profiles are executable configuration. Saving a profile and generating its wrapper YAML are safe while server-side discovery is disabled. `ACTIONPROXY_MCP_STDIO_DISCOVERY_ENABLED=true` explicitly permits the server to start profile-defined commands for `tools/list` discovery. Those commands, arguments, working directories, and environment additions run with the server process's operating-system privileges and are not sandboxed. Enable discovery only for trusted profiles and tightly control `admin:integrations` access.
 
@@ -230,11 +234,20 @@ The design baseline is OWASP ASVS for application controls, OWASP API Security T
   explicit source-integrity policy intersection, pre-release result evidence,
   binding revalidation, result withholding, and minimized lifecycle audit.
 - Trusted approval review hashes bound to approval id, tool call id, envelope hash, and policy version.
-- Stored original input/envelope binding validation, edited-input policy evaluation, and active-policy revalidation before approval finalization and execution authorization.
+- Stored original input/envelope binding validation, edited-input policy
+  evaluation, original/edited evidence retention, and active-policy
+  revalidation before approval finalization and execution authorization.
 - Signed receipts for policy allow and final human approval decisions.
 - Signed one-time external execution grants bound to receipt, tool call, tool name, approved input hash, approved envelope hash, policy version hash, expiry, and nonce.
-- Atomic storage transitions for approval finalization and one-time execution-grant consumption; multi-approval edited payloads are rejected rather than merged without consensus.
-- External execution outcome reporting that appends receipt outcomes and moves authorized calls to executed or failed.
+- Atomic storage transitions for approval finalization and one-time
+  execution-grant consumption; multi-approval and explicitly original-only
+  actions reject edited payloads rather than authorizing them without a valid
+  binding.
+- A connector-neutral, install-once grant-dispatch coordinator seam and generic
+  atomic known-outcome storage contracts. Community ships no edition-specific
+  dispatch claims, tables, or suppression guarantee.
+- External execution outcome reporting that appends receipt outcomes and moves
+  authorized calls to executed or failed.
 - Governed remediation plans for supported successful outcomes, submitted as linked normal tool calls rather than privileged undo operations.
 - Hash-chained audit events with verification endpoint.
 - Redacted API reads for common secret keys and configured policy redaction fields.

@@ -10,12 +10,28 @@ const authorizedActionStatuses = ['all', 'completed', 'consumed', 'expired', 'fa
 type AuthorizedActionFilter = (typeof authorizedActionStatuses)[number];
 type AuthorizedActionStatus = Exclude<AuthorizedActionFilter, 'all'>;
 
+export interface AuthorizedActionRouteOptions {
+  /** Edition-owned, server-derived fields. Core summary fields always win on key collisions. */
+  projectAuthorizedAction?: (context: {
+    approval?: ApprovalRecord;
+    auth: AuthContext;
+    grant: ExecutionGrantRecord;
+    receipt?: ActionReceiptRecord;
+    status: AuthorizedActionStatus;
+    toolCall: ToolCallRecord;
+  }) => Promise<Record<string, unknown> | undefined>;
+}
+
 const authorizedActionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(100),
   status: z.enum(authorizedActionStatuses).default('waiting'),
 });
 
-export async function registerAuthorizedActionRoutes(app: FastifyInstance, store: Store): Promise<void> {
+export async function registerAuthorizedActionRoutes(
+  app: FastifyInstance,
+  store: Store,
+  options: AuthorizedActionRouteOptions = {},
+): Promise<void> {
   app.get('/v1/authorized-actions', async (request) => {
     const auth = requireScope(authContext(request), 'tool_call:read');
     const query = authorizedActionsQuerySchema.parse(request.query);
@@ -35,7 +51,18 @@ export async function registerAuthorizedActionRoutes(app: FastifyInstance, store
         ]);
         const status = authorizedActionStatus(grant, receipt, toolCall);
         if (query.status !== 'all' && status !== query.status) return undefined;
-        return toAuthorizedActionSummary({ approval, grant, receipt, status, toolCall });
+        const extensionFields = await options.projectAuthorizedAction?.({
+          approval,
+          auth,
+          grant,
+          receipt,
+          status,
+          toolCall,
+        });
+        return {
+          ...extensionFields,
+          ...toAuthorizedActionSummary({ approval, grant, receipt, status, toolCall }),
+        };
       }),
     );
 

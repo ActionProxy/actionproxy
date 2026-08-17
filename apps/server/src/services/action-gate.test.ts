@@ -3,10 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ActionProxyService } from './action-gate';
+import { ActionProxyService, type ExecutionGrantIssuer } from './action-gate';
 import { ToolRegistry } from './tool-registry';
 import { ApproverDirectoryService } from './approver-directory';
-import type { ApprovalNotificationRequest } from '../integrations/approval-notifications';
+import type {
+  ApprovalNotifier,
+  ApprovalNotificationRequest,
+  ApprovalPresentationRequest,
+} from '../integrations/approval-notifications';
 import { MemoryStore } from '../storage/memory-store';
 import { SqliteStore } from '../storage/sqlite-store';
 import { JsonlAuditStore } from '../storage/jsonl-audit-store';
@@ -29,6 +33,12 @@ import type { AuthContext } from '../models';
 import { ExecutionGrantService } from '../security/execution-grants';
 import { deriveInfluenceScopeId } from '../security/influence-scope';
 import { hashJson } from '../security/crypto';
+import {
+  PreparedActionEditConflict,
+  type PreparedActionEditDisposition,
+  type PreparedActionLifecycle,
+  type PreparedActionSubmission,
+} from '../contracts/prepared-action-lifecycle';
 
 const testExecutionAuthorizations = createExecutionAuthorizationAuthority();
 
@@ -95,6 +105,20 @@ function makeHarness(options: Partial<ConstructorParameters<typeof ActionProxySe
   });
 
   return { auditStore, service, store, tools };
+}
+
+function telegramNotificationResult() {
+  return {
+    channelId: 'telegram.default',
+    data: {
+      approvalUrl: 'https://actionproxy.example/#/approvals/approval_test',
+      telegramChatId: '222',
+    },
+    destination: '222',
+    messageId: '42',
+    provider: 'telegram' as const,
+    status: 'sent' as const,
+  };
 }
 
 describe('ActionProxyService', () => {
@@ -1488,6 +1512,834 @@ describe('ActionProxyService', () => {
     );
   });
 
+  it('persists successful terminal presentation state and audits the Telegram update', async () => {
+    const syncApprovalPresentation = vi.fn(async (context: ApprovalPresentationRequest) =>
+      context.deliveries.map((delivery) => ({
+        deliveryId: delivery.id,
+        status: 'updated' as const,
+      })),
+    );
+    const approvalNotifier: ApprovalNotifier = {
+      notifyApprovalRequired: vi.fn(async () => [telegramNotificationResult()]),
+      syncApprovalPresentation,
+    };
+    const { auditStore, service } = makeHarness({ approvalNotifier });
+    const submitted = await service.submitToolCall({
+      agentId: 'demo',
+      input: { to: 'customer@example.com' },
+      reason: 'Send email',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+
+    const approved = await service.approveApproval(
+      submitted.approval!.id,
+      { approvedBy: 'manager@example.com' },
+      undefined,
+      { source: 'actionproxy' },
+    );
+    const [delivery] = await service.listApprovalDeliveries(submitted.approval!.id);
+    const events = await auditStore.list(50);
+
+    expect(approved).toMatchObject({
+      approval: { status: 'approved' },
+      toolCall: { status: 'executed' },
+    });
+    expect(syncApprovalPresentation).toHaveBeenCalledOnce();
+    expect(syncApprovalPresentation).toHaveBeenCalledWith(expect.objectContaining({
+      approval: expect.objectContaining({ status: 'approved' }),
+      deliveries: [expect.objectContaining({ id: delivery!.id, status: 'sent' })],
+      resolution: expect.objectContaining({
+        actor: 'manager@example.com',
+        source: 'actionproxy',
+      }),
+    }));
+    expect(delivery).toMatchObject({
+      status: 'sent',
+      data: {
+        approvalUrl: 'https://actionproxy.example/#/approvals/approval_test',
+        messageTs: null,
+        telegramPresentation: {
+          attemptedAt: expect.any(String),
+          result: 'updated',
+          syncedAt: expect.any(String),
+          targetStatus: 'approved',
+          version: 1,
+        },
+      },
+    });
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        approvalId: submitted.approval!.id,
+        data: expect.objectContaining({
+          data: expect.objectContaining({
+            telegramPresentation: expect.objectContaining({
+              result: 'updated',
+              targetStatus: 'approved',
+            }),
+          }),
+          deliveryId: delivery!.id,
+          status: 'sent',
+        }),
+        type: 'approval_notification.presentation_updated',
+      }),
+    ]));
+  });
+
+  it('persists a sanitized presentation failure without changing approval execution or result', async () => {
+    const execute = vi.fn(async () => ({ businessMessageId: 'sent_once', ok: true }));
+    const tools = newTestToolRegistry();
+    tools.register('gmail.send_email', execute);
+    const syncApprovalPresentation = vi.fn(async (context: ApprovalPresentationRequest) =>
+      context.deliveries.map((delivery) => ({
+        deliveryId: delivery.id,
+        error: 'Telegram editMessageText failed for 123456789:super_secret_token_value\n\tprovider unreachable',
+        status: 'failed' as const,
+      })),
+    );
+    const approvalNotifier: ApprovalNotifier = {
+      notifyApprovalRequired: vi.fn(async () => [telegramNotificationResult()]),
+      syncApprovalPresentation,
+    };
+    const { auditStore, service } = makeHarness({ approvalNotifier, tools });
+    const submitted = await service.submitToolCall({
+      agentId: 'demo',
+      input: { to: 'customer@example.com' },
+      reason: 'Send email',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+
+    const approved = await service.approveApproval(submitted.approval!.id, {
+      approvedBy: 'manager@example.com',
+    });
+    const [delivery] = await service.listApprovalDeliveries(submitted.approval!.id);
+    const events = await auditStore.list(50);
+
+    expect(approved).toMatchObject({
+      approval: { status: 'approved' },
+      toolCall: {
+        result: { businessMessageId: 'sent_once', ok: true },
+        status: 'executed',
+      },
+    });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(delivery).toMatchObject({
+      error: undefined,
+      status: 'sent',
+      data: {
+        telegramPresentation: {
+          attemptedAt: expect.any(String),
+          error: 'Telegram editMessageText failed for bot[redacted] provider unreachable',
+          result: 'failed',
+          targetStatus: 'approved',
+          version: 1,
+        },
+      },
+    });
+    expect(JSON.stringify(delivery)).not.toContain('super_secret_token_value');
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        approvalId: submitted.approval!.id,
+        data: expect.objectContaining({
+          data: expect.objectContaining({
+            telegramPresentation: expect.objectContaining({
+              error: 'Telegram editMessageText failed for bot[redacted] provider unreachable',
+              result: 'failed',
+            }),
+          }),
+        }),
+        type: 'approval_notification.presentation_update_failed',
+      }),
+    ]));
+  });
+
+  it('still synchronizes an authoritatively approved card when decision audit persistence fails', async () => {
+    const backingAudit = new JsonlAuditStore(fs.mkdtempSync(path.join(os.tmpdir(), 'actionproxy-audit-finally-')));
+    const auditStore: AuditStore = {
+      append: async (event) => {
+        if (event.type === 'approval.approved') throw new Error('audit backend unavailable');
+        await backingAudit.append(event);
+      },
+      list: (...args) => backingAudit.list(...args),
+    };
+    const syncApprovalPresentation = vi.fn(async (context: ApprovalPresentationRequest) =>
+      context.deliveries.map((delivery) => ({ deliveryId: delivery.id, status: 'updated' as const })),
+    );
+    const approvalNotifier: ApprovalNotifier = {
+      notifyApprovalRequired: vi.fn(async () => [telegramNotificationResult()]),
+      syncApprovalPresentation,
+    };
+    const { service } = makeHarness({ approvalNotifier, auditStore });
+    const submitted = await service.submitToolCall({
+      agentId: 'demo',
+      input: { to: 'customer@example.com' },
+      reason: 'Exercise terminal presentation finally path',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+
+    await expect(service.approveApproval(submitted.approval!.id, {
+      approvedBy: 'manager@example.com',
+    })).rejects.toThrow('audit backend unavailable');
+
+    await expect(service.getApproval(submitted.approval!.id)).resolves.toMatchObject({ status: 'approved' });
+    expect(syncApprovalPresentation).toHaveBeenCalledOnce();
+    expect(syncApprovalPresentation).toHaveBeenCalledWith(expect.objectContaining({
+      approval: expect.objectContaining({ status: 'approved' }),
+    }));
+  });
+
+  it('waits for final approval quorum before synchronizing the terminal presentation', async () => {
+    const syncApprovalPresentation = vi.fn(async (context: ApprovalPresentationRequest) =>
+      context.deliveries.map((delivery) => ({
+        deliveryId: delivery.id,
+        status: 'updated' as const,
+      })),
+    );
+    const approvalNotifier: ApprovalNotifier = {
+      notifyApprovalRequired: vi.fn(async () => [telegramNotificationResult()]),
+      syncApprovalPresentation,
+    };
+    const { service } = makeHarness({
+      approvalNotifier,
+      policy: {
+        default: { approval: 'required', risk: 'unknown' },
+        tools: {
+          'gmail.send_email': {
+            approval: 'required',
+            approvers: { requiredApprovals: 2 },
+            risk: 'external',
+          },
+        },
+        version: 1,
+      },
+    });
+    const submitted = await service.submitToolCall({
+      agentId: 'demo',
+      input: { to: 'customer@example.com' },
+      reason: 'Send email with quorum',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+
+    const firstVote = await service.approveApproval(submitted.approval!.id, {
+      approvedBy: 'first@example.com',
+    });
+
+    expect(firstVote).toMatchObject({
+      approval: { decisions: [expect.any(Object)], status: 'pending' },
+      toolCall: { status: 'pending_approval' },
+    });
+    expect(syncApprovalPresentation).not.toHaveBeenCalled();
+
+    const finalVote = await service.approveApproval(submitted.approval!.id, {
+      approvedBy: 'second@example.com',
+    });
+
+    expect(finalVote).toMatchObject({
+      approval: { decisions: [expect.any(Object), expect.any(Object)], status: 'approved' },
+      toolCall: { status: 'executed' },
+    });
+    expect(syncApprovalPresentation).toHaveBeenCalledOnce();
+    expect(syncApprovalPresentation).toHaveBeenCalledWith(expect.objectContaining({
+      approval: expect.objectContaining({ status: 'approved' }),
+      resolution: expect.objectContaining({ actor: 'second@example.com' }),
+    }));
+  });
+
+  it('synchronizes terminal presentation after cancellation and observed lazy expiry', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-13T10:00:00.000Z'));
+    const syncApprovalPresentation = vi.fn(async (context: ApprovalPresentationRequest) =>
+      context.deliveries.map((delivery) => ({
+        deliveryId: delivery.id,
+        status: 'updated' as const,
+      })),
+    );
+    const approvalNotifier: ApprovalNotifier = {
+      notifyApprovalRequired: vi.fn(async () => [telegramNotificationResult()]),
+      syncApprovalPresentation,
+    };
+    const { service } = makeHarness({
+      approvalAuthorizationTtlMs: 1_000,
+      approvalNotifier,
+    });
+    const cancelledCandidate = await service.submitToolCall({
+      agentId: 'demo',
+      input: { subject: 'Cancel me', to: 'customer@example.com' },
+      reason: 'Exercise cancellation presentation',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+    const expiringCandidate = await service.submitToolCall({
+      agentId: 'demo',
+      input: { subject: 'Expire me', to: 'customer@example.com' },
+      reason: 'Exercise expiry presentation',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+
+    const cancelled = await service.cancelApproval(cancelledCandidate.approval!.id, {
+      cancelledBy: 'requester@example.com',
+      reason: 'No longer needed',
+    });
+    vi.setSystemTime(new Date('2026-08-13T10:00:01.001Z'));
+    const expired = await service.getApproval(expiringCandidate.approval!.id);
+
+    expect(cancelled.approval.status).toBe('cancelled');
+    expect(expired.status).toBe('expired');
+    expect(syncApprovalPresentation).toHaveBeenCalledTimes(2);
+    expect(syncApprovalPresentation.mock.calls.map(([context]) => ({
+      reason: context.resolution.reason,
+      source: context.resolution.source,
+      status: context.approval.status,
+    }))).toEqual([
+      { reason: 'No longer needed', source: 'actionproxy', status: 'cancelled' },
+      { reason: undefined, source: 'system', status: 'expired' },
+    ]);
+  });
+
+  it('synchronizes one complete delivery batch persisted after approval finalized while notification send was in flight', async () => {
+    let releaseNotification!: () => void;
+    let signalNotificationStarted!: () => void;
+    let notificationContext: ApprovalNotificationRequest | undefined;
+    const notificationRelease = new Promise<void>((resolve) => {
+      releaseNotification = resolve;
+    });
+    const notificationStarted = new Promise<void>((resolve) => {
+      signalNotificationStarted = resolve;
+    });
+    const syncApprovalPresentation = vi.fn(async (context: ApprovalPresentationRequest) =>
+      context.deliveries.map((delivery) => ({
+        deliveryId: delivery.id,
+        status: 'updated' as const,
+      })),
+    );
+    const approvalNotifier: ApprovalNotifier = {
+      notifyApprovalRequired: vi.fn(async (context) => {
+        notificationContext = context;
+        signalNotificationStarted();
+        await notificationRelease;
+        return [
+          telegramNotificationResult(),
+          {
+            ...telegramNotificationResult(),
+            data: {
+              approvalUrl: 'https://actionproxy.example/#/approvals/approval_test',
+              telegramChatId: '223',
+            },
+            destination: '223',
+            messageId: '43',
+          },
+        ];
+      }),
+      syncApprovalPresentation,
+    };
+    const { service } = makeHarness({ approvalNotifier });
+
+    const submitPromise = service.submitToolCall({
+      agentId: 'demo',
+      input: { to: 'customer@example.com' },
+      reason: 'Exercise notification finalization race',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+    await notificationStarted;
+    const approvalId = notificationContext!.approval.id;
+
+    const approved = await service.approveApproval(approvalId, {
+      approvedBy: 'manager@example.com',
+    });
+    expect(approved.toolCall.status).toBe('executed');
+    expect(syncApprovalPresentation).not.toHaveBeenCalled();
+
+    releaseNotification();
+    const submitted = await submitPromise;
+    const deliveries = await service.listApprovalDeliveries(approvalId);
+
+    expect(submitted.approval!.id).toBe(approvalId);
+    expect(deliveries).toHaveLength(2);
+    expect(syncApprovalPresentation).toHaveBeenCalledOnce();
+    expect(syncApprovalPresentation).toHaveBeenCalledWith(expect.objectContaining({
+      approval: expect.objectContaining({ status: 'approved' }),
+      deliveries: expect.arrayContaining(deliveries.map((delivery) =>
+        expect.objectContaining({ id: delivery.id, status: 'sent' }),
+      )),
+    }));
+    expect(deliveries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          telegramPresentation: expect.objectContaining({
+            result: 'updated',
+            targetStatus: 'approved',
+            version: 1,
+          }),
+        }),
+        status: 'sent',
+      }),
+      expect.objectContaining({
+        data: expect.objectContaining({
+          telegramPresentation: expect.objectContaining({
+            result: 'updated',
+            targetStatus: 'approved',
+            version: 1,
+          }),
+        }),
+        status: 'sent',
+      }),
+    ]));
+  });
+
+  it('repairs the initial delivery and an in-flight resend together after terminal approval', async () => {
+    let releaseResend!: () => void;
+    let signalResendStarted!: () => void;
+    const resendRelease = new Promise<void>((resolve) => {
+      releaseResend = resolve;
+    });
+    const resendStarted = new Promise<void>((resolve) => {
+      signalResendStarted = resolve;
+    });
+    let notificationAttempt = 0;
+    const syncApprovalPresentation = vi.fn(async (context: ApprovalPresentationRequest) =>
+      context.deliveries.map((delivery) => ({
+        deliveryId: delivery.id,
+        status: 'updated' as const,
+      })),
+    );
+    const approvalNotifier: ApprovalNotifier = {
+      notifyApprovalRequired: vi.fn(async () => {
+        notificationAttempt += 1;
+        if (notificationAttempt === 1) return [telegramNotificationResult()];
+        signalResendStarted();
+        await resendRelease;
+        return [{
+          ...telegramNotificationResult(),
+          data: {
+            approvalUrl: 'https://actionproxy.example/#/approvals/approval_test',
+            telegramChatId: '223',
+          },
+          destination: '223',
+          messageId: '43',
+        }];
+      }),
+      syncApprovalPresentation,
+    };
+    const { service } = makeHarness({ approvalNotifier });
+    const submitted = await service.submitToolCall({
+      agentId: 'demo',
+      input: { to: 'customer@example.com' },
+      reason: 'Exercise terminal presentation after resend',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+
+    const resend = service.resendApprovalNotifications(submitted.approval!.id);
+    await resendStarted;
+    const approved = await service.approveApproval(submitted.approval!.id, {
+      approvedBy: 'manager@example.com',
+    });
+    expect(approved.toolCall.status).toBe('executed');
+    expect(syncApprovalPresentation).toHaveBeenCalledOnce();
+    syncApprovalPresentation.mockClear();
+
+    releaseResend();
+    await resend;
+    const deliveries = await service.listApprovalDeliveries(submitted.approval!.id);
+
+    expect(deliveries).toHaveLength(2);
+    expect(syncApprovalPresentation).toHaveBeenCalledOnce();
+    expect(syncApprovalPresentation.mock.calls[0]![0].deliveries
+      .map((delivery) => delivery.messageId)
+      .sort()).toEqual(['42', '43']);
+    for (const delivery of deliveries) {
+      expect(delivery).toMatchObject({
+        data: {
+          telegramPresentation: {
+            attemptedAt: expect.any(String),
+            result: 'updated',
+            syncedAt: expect.any(String),
+            targetStatus: 'approved',
+            version: 1,
+          },
+        },
+        status: 'sent',
+      });
+    }
+  });
+
+  it('coalesces concurrent terminal presentation requests into at most one trailing provider pass', async () => {
+    let releaseFirstSync!: () => void;
+    let signalFirstSyncStarted!: () => void;
+    const firstSyncRelease = new Promise<void>((resolve) => {
+      releaseFirstSync = resolve;
+    });
+    const firstSyncStarted = new Promise<void>((resolve) => {
+      signalFirstSyncStarted = resolve;
+    });
+    const approvalNotifier: ApprovalNotifier = {
+      notifyApprovalRequired: vi.fn(async () => [telegramNotificationResult()]),
+    };
+    const { service, store } = makeHarness({ approvalNotifier });
+    const submitted = await service.submitToolCall({
+      agentId: 'demo',
+      input: { to: 'customer@example.com' },
+      reason: 'Exercise presentation request coalescing',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+    const approved = await service.approveApproval(submitted.approval!.id, {
+      approvedBy: 'manager@example.com',
+    });
+    const syncApprovalPresentation = vi.fn(async (context: ApprovalPresentationRequest) => {
+      if (syncApprovalPresentation.mock.calls.length === 1) {
+        signalFirstSyncStarted();
+        await firstSyncRelease;
+      }
+      return context.deliveries.map((delivery) => ({
+        deliveryId: delivery.id,
+        status: 'updated' as const,
+      }));
+    });
+    approvalNotifier.syncApprovalPresentation = syncApprovalPresentation;
+    const listDeliveries = vi.spyOn(store, 'listApprovalDeliveries');
+
+    const firstRequest = service.syncApprovalPresentation(submitted.approval!.id);
+    await firstSyncStarted;
+    const burstSize = 12;
+    const burst = Array.from({ length: burstSize }, () =>
+      service.syncApprovalPresentation(submitted.approval!.id),
+    );
+    await vi.waitFor(() => {
+      expect(listDeliveries).toHaveBeenCalledTimes(burstSize + 1);
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseFirstSync();
+    await Promise.all([firstRequest, ...burst]);
+
+    expect(approved.approval.status).toBe('approved');
+    expect(syncApprovalPresentation).toHaveBeenCalledTimes(2);
+    expect(syncApprovalPresentation.mock.calls).toEqual([
+      [expect.objectContaining({ approval: expect.objectContaining({ status: 'approved' }) })],
+      [expect.objectContaining({ approval: expect.objectContaining({ status: 'approved' }) })],
+    ]);
+  });
+
+  it('eventually synchronizes an untracked coordinate that arrives while the trailing pass is running', async () => {
+    let releaseFirstSync!: () => void;
+    let releaseTrailingSync!: () => void;
+    let signalFirstSyncStarted!: () => void;
+    let signalTrailingSyncStarted!: () => void;
+    const firstSyncRelease = new Promise<void>((resolve) => {
+      releaseFirstSync = resolve;
+    });
+    const trailingSyncRelease = new Promise<void>((resolve) => {
+      releaseTrailingSync = resolve;
+    });
+    const firstSyncStarted = new Promise<void>((resolve) => {
+      signalFirstSyncStarted = resolve;
+    });
+    const trailingSyncStarted = new Promise<void>((resolve) => {
+      signalTrailingSyncStarted = resolve;
+    });
+    const approvalNotifier: ApprovalNotifier = {
+      notifyApprovalRequired: vi.fn(async () => [telegramNotificationResult()]),
+    };
+    const { service, store } = makeHarness({ approvalNotifier });
+    const submitted = await service.submitToolCall({
+      agentId: 'demo',
+      input: { to: 'customer@example.com' },
+      reason: 'Exercise late untracked presentation repair',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+    await service.approveApproval(submitted.approval!.id, {
+      approvedBy: 'manager@example.com',
+    });
+    const syncApprovalPresentation = vi.fn(async (context: ApprovalPresentationRequest) => {
+      const callNumber = syncApprovalPresentation.mock.calls.length;
+      if (callNumber === 1) {
+        signalFirstSyncStarted();
+        await firstSyncRelease;
+      } else if (callNumber === 2) {
+        signalTrailingSyncStarted();
+        await trailingSyncRelease;
+      }
+      return context.deliveries.map((delivery) => ({
+        deliveryId: delivery.id,
+        status: 'updated' as const,
+      }));
+    });
+    approvalNotifier.syncApprovalPresentation = syncApprovalPresentation;
+    const listDeliveries = vi.spyOn(store, 'listApprovalDeliveries');
+
+    const firstRequest = service.syncApprovalPresentation(submitted.approval!.id);
+    await firstSyncStarted;
+    const trailingRequest = service.syncApprovalPresentation(
+      submitted.approval!.id,
+      undefined,
+      {
+        channelId: 'telegram.default',
+        destination: '222',
+        messageId: '98',
+        provider: 'telegram',
+      },
+      { repair: false, repairUntrackedReference: true },
+    );
+    await vi.waitFor(() => expect(listDeliveries).toHaveBeenCalledTimes(2));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseFirstSync();
+    await trailingSyncStarted;
+
+    const lateRequest = service.syncApprovalPresentation(
+      submitted.approval!.id,
+      undefined,
+      {
+        channelId: 'telegram.default',
+        destination: '222',
+        messageId: '99',
+        provider: 'telegram',
+      },
+      { repair: false, repairUntrackedReference: true },
+    );
+    await vi.waitFor(() => expect(listDeliveries).toHaveBeenCalledTimes(3));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(syncApprovalPresentation).toHaveBeenCalledTimes(2);
+
+    releaseTrailingSync();
+    await Promise.all([firstRequest, trailingRequest, lateRequest]);
+
+    expect(syncApprovalPresentation).toHaveBeenCalledTimes(3);
+    expect(syncApprovalPresentation.mock.calls.map(([context]) =>
+      context.deliveries.map((delivery) => delivery.messageId))).toEqual([
+      ['42'],
+      ['98'],
+      ['99'],
+    ]);
+  });
+
+  it('preserves stored deliveries when their reload coalesces with an untracked coordinate', async () => {
+    let releaseFirstSync!: () => void;
+    let signalFirstSyncStarted!: () => void;
+    const firstSyncRelease = new Promise<void>((resolve) => {
+      releaseFirstSync = resolve;
+    });
+    const firstSyncStarted = new Promise<void>((resolve) => {
+      signalFirstSyncStarted = resolve;
+    });
+    const approvalNotifier: ApprovalNotifier = {
+      notifyApprovalRequired: vi.fn(async () => [telegramNotificationResult()]),
+    };
+    const { service, store } = makeHarness({ approvalNotifier });
+    const submitted = await service.submitToolCall({
+      agentId: 'demo',
+      input: { to: 'customer@example.com' },
+      reason: 'Exercise stored and synthetic presentation merge',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+    const approved = await service.approveApproval(submitted.approval!.id, {
+      approvedBy: 'manager@example.com',
+    });
+    const syncApprovalPresentation = vi.fn(async (context: ApprovalPresentationRequest) => {
+      if (syncApprovalPresentation.mock.calls.length === 1) {
+        signalFirstSyncStarted();
+        await firstSyncRelease;
+      }
+      return context.deliveries.map((delivery) => ({
+        deliveryId: delivery.id,
+        status: 'updated' as const,
+      }));
+    });
+    approvalNotifier.syncApprovalPresentation = syncApprovalPresentation;
+    const listDeliveries = vi.spyOn(store, 'listApprovalDeliveries');
+
+    const firstRequest = service.syncApprovalPresentation(submitted.approval!.id);
+    await firstSyncStarted;
+    const internalService = service as unknown as {
+      syncApprovalPresentationBestEffort(
+        approval: typeof approved.approval,
+        toolCall: typeof approved.toolCall,
+      ): Promise<void>;
+    };
+    const storedReload = internalService.syncApprovalPresentationBestEffort(
+      approved.approval,
+      approved.toolCall,
+    );
+    const untrackedRepair = service.syncApprovalPresentation(
+      submitted.approval!.id,
+      undefined,
+      {
+        channelId: 'telegram.default',
+        destination: '222',
+        messageId: '99',
+        provider: 'telegram',
+      },
+      { repair: false, repairUntrackedReference: true },
+    );
+    await vi.waitFor(() => expect(listDeliveries).toHaveBeenCalledTimes(2));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseFirstSync();
+    await Promise.all([firstRequest, storedReload, untrackedRepair]);
+
+    expect(syncApprovalPresentation).toHaveBeenCalledTimes(2);
+    expect(syncApprovalPresentation.mock.calls[1]![0].deliveries.map((delivery) => delivery.messageId)).toEqual([
+      '42',
+      '99',
+    ]);
+  });
+
+  it('synchronizes a superseded prepared approval with its replacement approval id', async () => {
+    const store = new MemoryStore();
+    const syncApprovalPresentation = vi.fn(async (context: ApprovalPresentationRequest) =>
+      context.deliveries.map((delivery) => ({
+        deliveryId: delivery.id,
+        status: 'updated' as const,
+      })),
+    );
+    const approvalNotifier: ApprovalNotifier = {
+      notifyApprovalRequired: vi.fn(async () => [telegramNotificationResult()]),
+      syncApprovalPresentation,
+    };
+    const preparedActionLifecycle = {
+      assertRevisionAllowed: vi.fn(async () => undefined),
+      isPreparedAction: vi.fn((toolName: string) => toolName === 'prepared.test'),
+      prepareSubmission: vi.fn(async (
+        request: { input: Record<string, unknown> },
+        context: { supersedesIntentId?: string; toolCallId: string },
+      ): Promise<PreparedActionSubmission> => {
+        const intentId = context.supersedesIntentId ? 'intent_replacement' : 'intent_original';
+        return {
+          binding: {
+            adapterId: 'native-test',
+            adapterVersion: '1',
+            contractHash: 'contract-hash',
+            contractId: 'contract.test',
+            contractVersion: '1',
+            intentHash: `intent-hash-${intentId}`,
+            intentId,
+            operationHash: `operation-hash-${context.toolCallId}`,
+            serializerVersion: '1',
+            version: 'actionproxy.prepared-action-binding.v1',
+          },
+          connectionId: 'connection.test',
+          effectiveInput: request.input,
+          governance: {
+            customerVisible: true,
+            executionMode: 'external_grant',
+            operationKind: 'external_send',
+            requiredScopes: ['native.write'],
+            risk: 'external_communication',
+          },
+          resources: [],
+        };
+      }),
+      persistSubmission: vi.fn(async (input) => {
+        await store.createToolCall(input.toolCall);
+        if (input.approval) await store.createApproval(input.approval);
+        return {
+          approval: input.approval,
+          outcome: 'created' as const,
+          prepared: input.prepared,
+          toolCall: input.toolCall,
+        };
+      }),
+      persistRevision: vi.fn(async (input) => {
+        const previousApproval = await store.getApproval(input.fromApprovalId);
+        const previousToolCall = await store.getToolCall(input.fromToolCallId);
+        if (!previousApproval || !previousToolCall) return { outcome: 'conflict' as const };
+        const supersededApproval = {
+          ...previousApproval,
+          authorizationConsumedAt: input.supersededAt,
+          authorizationConsumedReason: 'superseded' as const,
+          finalizedAt: input.supersededAt,
+          status: 'superseded' as const,
+          supersededAt: input.supersededAt,
+          supersededByApprovalId: input.approval.id,
+          updatedAt: input.supersededAt,
+        };
+        const supersededToolCall = {
+          ...previousToolCall,
+          error: `Superseded by approval ${input.approval.id}.`,
+          status: 'rejected' as const,
+          updatedAt: input.supersededAt,
+        };
+        await store.updateApproval(supersededApproval);
+        await store.updateToolCall(supersededToolCall);
+        await store.createToolCall(input.toolCall);
+        await store.createApproval(input.approval);
+        return {
+          outcome: 'created' as const,
+          replacementApproval: input.approval,
+          replacementToolCall: input.toolCall,
+          supersededApproval,
+          supersededToolCall,
+        };
+      }),
+      preparedApprovalId: vi.fn((toolCall) =>
+        `approval_${toolCall.actionEnvelope!.preparedAction!.intentId}`,
+      ),
+      revisionContext: vi.fn(async () => ({
+        connectionId: 'connection.test',
+        contractId: 'contract.test',
+        editMode: 'revision_required' as const,
+        intentId: 'intent_original',
+      })),
+    } as unknown as PreparedActionLifecycle;
+    const { service } = makeHarness({ approvalNotifier, store });
+    service.installPreparedActionLifecycle(preparedActionLifecycle);
+
+    const submitted = await service.submitToolCall({
+      agentId: 'prepared-action-agent',
+      input: { target: 'original@example.com' },
+      reason: 'Exercise prepared approval supersession',
+      requestedBy: 'requester@example.com',
+      toolName: 'prepared.test',
+    });
+    const [originalDelivery] = await service.listApprovalDeliveries(submitted.approval!.id);
+
+    const revised = await service.reviseApproval(
+      submitted.approval!.id,
+      { input: { target: 'replacement@example.com' } },
+      { source: 'actionproxy' },
+    );
+
+    expect(revised).toMatchObject({
+      approval: { id: 'approval_intent_replacement', status: 'pending' },
+      supersededApproval: {
+        id: submitted.approval!.id,
+        status: 'superseded',
+        supersededByApprovalId: 'approval_intent_replacement',
+      },
+    });
+    expect(syncApprovalPresentation).toHaveBeenCalledOnce();
+    expect(syncApprovalPresentation).toHaveBeenCalledWith(expect.objectContaining({
+      approval: expect.objectContaining({
+        id: submitted.approval!.id,
+        status: 'superseded',
+        supersededByApprovalId: revised.approval.id,
+      }),
+      deliveries: [expect.objectContaining({ id: originalDelivery!.id })],
+      resolution: expect.objectContaining({
+        actor: 'local-admin',
+        decidedAt: revised.supersededApproval.supersededAt,
+        source: 'actionproxy',
+      }),
+    }));
+    await expect(service.listApprovalDeliveries(submitted.approval!.id)).resolves.toMatchObject([
+      {
+        data: {
+          telegramPresentation: {
+            result: 'updated',
+            targetStatus: 'superseded',
+            version: 1,
+          },
+        },
+        status: 'sent',
+      },
+    ]);
+  });
+
   it('keeps pending approval when Slack notification delivery fails', async () => {
     const approvalNotifier = {
       notifyApprovalRequired: vi.fn(async () => {
@@ -1564,6 +2416,119 @@ describe('ActionProxyService', () => {
     ]);
   });
 
+  it('uses frozen native risk, visibility, and operation fields at approval and final dispatch', async () => {
+    const store = new MemoryStore();
+    const prepared: PreparedActionSubmission = {
+      binding: {
+        adapterId: 'google_workspace',
+        adapterVersion: 'google-v1',
+        contractHash: 'contract_hash',
+        contractId: 'actionproxy.prepared-test.v1',
+        contractVersion: '1',
+        intentHash: 'intent_hash',
+        intentId: 'intent_policy_conditions',
+        operationHash: 'operation_hash',
+        serializerVersion: 'gmail-v1',
+        version: 'actionproxy.prepared-action-binding.v1',
+      },
+      connectionId: 'company_google_connection',
+      effectiveInput: {
+        body: 'Exact approved body',
+        subject: 'Exact subject',
+        to: 'recipient@example.com',
+      },
+      governance: {
+        customerVisible: true,
+        executionMode: 'external_grant',
+        operationKind: 'external_send',
+        requiredScopes: ['gmail.send'],
+        risk: 'external_communication',
+      },
+      resources: [{ id: 'recipient@example.com', type: 'external.recipient' }],
+    };
+    const preparedActionLifecycle = {
+      assertApprovalCurrent: vi.fn(async () => undefined),
+      assertDispatchCurrent: vi.fn(async () => undefined),
+      isPreparedAction: vi.fn(() => true),
+      prepareSubmission: vi.fn(async () => prepared),
+      preparedApprovalId: vi.fn(() => 'approval_policy_conditions'),
+      persistSubmission: vi.fn(async (input) => {
+        await store.createToolCall(input.toolCall);
+        if (input.approval) await store.createApproval(input.approval);
+        return {
+          approval: input.approval,
+          outcome: 'created' as const,
+          prepared: input.prepared,
+          toolCall: input.toolCall,
+        };
+      }),
+    } as unknown as PreparedActionLifecycle;
+    const approvalNotifier = {
+      notifyApprovalRequired: vi.fn(async () => []),
+    };
+    const policy: PolicyFile = {
+      default: {
+        approval: 'deny',
+        notify: { channels: ['email.default-deny'] },
+        risk: 'unknown',
+      },
+      tools: {
+        'notifications.deliver': {
+          approval: 'required',
+          conditions: {
+            customerVisible: true,
+            operationKind: 'external_send',
+            risk: 'external_communication',
+          },
+          notify: { channels: ['email.native-review'] },
+          risk: 'external_communication',
+        },
+      },
+      version: 1,
+    };
+    const { service } = makeHarness({
+      approvalNotifier,
+      policy,
+      store,
+    });
+    service.installPreparedActionLifecycle(preparedActionLifecycle);
+
+    const submitted = await service.submitToolCall({
+      agentId: 'direct_action',
+      input: prepared.effectiveInput,
+      metadata: {
+        customerVisible: false,
+        operationKind: 'read',
+        riskKind: 'safe',
+      },
+      reason: 'Exact email proposal',
+      requestedBy: 'local-admin',
+      toolName: 'notifications.deliver',
+    });
+
+    expect(submitted.toolCall).toMatchObject({
+      decision: 'require_approval',
+      status: 'pending_approval',
+    });
+    expect(approvalNotifier.notifyApprovalRequired).toHaveBeenLastCalledWith(
+      expect.objectContaining({ channels: ['email.native-review'] }),
+    );
+
+    approvalNotifier.notifyApprovalRequired.mockClear();
+    await service.resendApprovalNotifications(submitted.approval!.id);
+    expect(approvalNotifier.notifyApprovalRequired).toHaveBeenLastCalledWith(
+      expect.objectContaining({ channels: ['email.native-review'] }),
+    );
+
+    await expect(
+      service.assertExternalDispatchCurrent(submitted.toolCall, submitted.toolCall.input),
+    ).resolves.toBeUndefined();
+    expect(preparedActionLifecycle.assertDispatchCurrent).toHaveBeenCalledWith(
+      submitted.toolCall,
+      submitted.toolCall.input,
+    );
+  });
+
   it('resolves approver directory recipients for approval authority and delivery audit', async () => {
     const store = new MemoryStore();
     const approverDirectory = new ApproverDirectoryService(store);
@@ -1634,6 +2599,72 @@ describe('ActionProxyService', () => {
     expect(approved.toolCall.status).toBe('executed');
   });
 
+  it('refreshes recipient addresses but never expands the frozen approval principal set on resend', async () => {
+    const store = new MemoryStore();
+    const approverDirectory = new ApproverDirectoryService(store);
+    await approverDirectory.upsertUser('default', 'u_alice', {
+      defaultApprover: true,
+      displayName: 'Alice',
+      email: 'alice@example.com',
+      principalId: 'oidc|alice',
+    });
+    const approvalNotifier = {
+      notifyApprovalRequired: vi.fn(async (context: ApprovalNotificationRequest) =>
+        (context.recipients ?? []).map((recipient) => ({
+          channelId: 'email.default',
+          destination: recipient.email,
+          messageId: `message_${recipient.userId}`,
+          provider: 'email' as const,
+          recipientEmail: recipient.email,
+          recipientUserId: recipient.userId,
+          status: 'sent' as const,
+        })),
+      ),
+    };
+    const { service } = makeHarness({ approvalNotifier, approverDirectory, store });
+
+    const submitted = await service.submitToolCall({
+      agentId: 'demo',
+      input: { to: 'customer@example.com' },
+      reason: 'Send email',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+    expect(submitted.approval?.approverUsers).toEqual(['oidc|alice']);
+
+    await approverDirectory.upsertUser('default', 'u_alice', {
+      email: 'alice-new@example.com',
+      principalId: 'oidc|alice',
+    });
+    approvalNotifier.notifyApprovalRequired.mockClear();
+    await service.resendApprovalNotifications(submitted.approval!.id);
+    expect(approvalNotifier.notifyApprovalRequired).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipients: [
+          expect.objectContaining({
+            email: 'alice-new@example.com',
+            principalId: 'oidc|alice',
+          }),
+        ],
+      }),
+    );
+
+    await approverDirectory.upsertUser('default', 'u_alice', {
+      email: 'mallory@example.com',
+      principalId: 'oidc|mallory',
+    });
+    approvalNotifier.notifyApprovalRequired.mockClear();
+    const deliveries = await service.resendApprovalNotifications(submitted.approval!.id);
+    expect(approvalNotifier.notifyApprovalRequired).not.toHaveBeenCalled();
+    expect(deliveries).toEqual([
+      expect.objectContaining({
+        channelId: 'approval-recipient-resolution',
+        error: 'No enabled recipient remains within this approval\'s frozen authorization.',
+        status: 'failed',
+      }),
+    ]);
+  });
+
   it('records a failed delivery and keeps approval pending when no approver recipients resolve', async () => {
     const store = new MemoryStore();
     const approvalNotifier = { notifyApprovalRequired: vi.fn(async () => []) };
@@ -1656,7 +2687,7 @@ describe('ActionProxyService', () => {
     await expect(service.listApprovalDeliveries(result.approval!.id)).resolves.toMatchObject([
       {
         channelId: 'approval-recipient-resolution',
-        error: 'No enabled approval recipients resolved for this approval.',
+        error: 'No enabled recipient remains within this approval\'s frozen authorization.',
         provider: 'email',
         status: 'failed',
       },
@@ -2661,8 +3692,8 @@ describe('ActionProxyService', () => {
     expect(attempts[0]).not.toHaveProperty('outcome');
   });
 
-  it('executes edited input after approval and audits both payloads', async () => {
-    const { auditStore, service } = makeHarness();
+  it('executes edited Community input and audits both the original and edited payloads', async () => {
+    const { auditStore, service, store } = makeHarness();
     const result = await service.submitToolCall({
       toolName: 'gmail.send_email',
       input: { to: 'customer@example.com', subject: 'Original' },
@@ -2676,18 +3707,391 @@ describe('ActionProxyService', () => {
       approvedBy: 'manager@example.com',
       editedInput,
     });
-    const auditEvents = await auditStore.list(20);
-    const approvalEvent = auditEvents.find((event) => event.type === 'approval.approved');
+    const approvalEvent = (await auditStore.list(20)).find((event) => event.type === 'approval.approved');
+    const receipt = await store.getActionReceiptByToolCallId(result.toolCall.id);
 
-    expect(approved.approval.originalInput).toEqual({ to: 'customer@example.com', subject: 'Original' });
-    expect(approved.approval.editedInput).toEqual(editedInput);
+    expect(approved.approval).toMatchObject({
+      editedInput,
+      originalInput: { to: 'customer@example.com', subject: 'Original' },
+    });
+    expect(approved.approval.decisions).toMatchObject([{
+      editedInput,
+      inputDecision: 'edited',
+    }]);
     expect(approved.toolCall.input).toEqual(editedInput);
     expect(approved.toolCall.result).toEqual({ ok: true, input: editedInput });
+    expect(receipt).toMatchObject({
+      approvedEnvelopeHash: approved.toolCall.actionEnvelopeHash,
+      approvedInputHash: approved.toolCall.inputHash,
+      originalEnvelopeHash: result.approval!.originalEnvelopeHash,
+      originalInputHash: result.approval!.originalInputHash,
+    });
     expect(approvalEvent?.data).toMatchObject({
-      originalInput: { to: 'customer@example.com', subject: 'Original' },
+      approvedInputHash: approved.toolCall.inputHash,
       editedInput,
+      inputDecision: 'edited',
+      originalInput: { to: 'customer@example.com', subject: 'Original' },
     });
   });
+
+  it.each([
+    {
+      input: {
+        approvedBy: 'manager@example.com',
+        editedInput: { subject: 'Legacy edit', to: 'customer@example.com' },
+        inputDecision: { mode: 'original' as const },
+      },
+      label: 'original decision with legacy edited input',
+    },
+    {
+      input: {
+        approvedBy: 'manager@example.com',
+        editedInput: { subject: 'Legacy edit', to: 'customer@example.com' },
+        inputDecision: {
+          input: { subject: 'Modern edit', to: 'customer@example.com' },
+          mode: 'edited' as const,
+        },
+      },
+      label: 'different modern and legacy edits',
+    },
+    {
+      input: {
+        approvedBy: 'manager@example.com',
+        editedInput: null,
+        inputDecision: {
+          input: { subject: 'Modern edit', to: 'customer@example.com' },
+          mode: 'edited' as const,
+        },
+      },
+      label: 'modern edit with legacy original marker',
+    },
+  ])('rejects conflicting $label before decision, audit, receipt, grant, or attempt mutation', async ({ input }) => {
+    const { auditStore, service, store } = makeHarness();
+    const submitted = await service.submitToolCall({
+      agentId: 'demo',
+      input: { subject: 'Original', to: 'customer@example.com' },
+      reason: 'Send email',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+    const recordDecision = vi.spyOn(store, 'recordApprovalDecisionAtomically');
+    const eventsBefore = await auditStore.list(100);
+
+    await expect(service.approveApproval(submitted.approval!.id, input)).rejects.toThrow(
+      'Approval input decision representations conflict.',
+    );
+
+    expect(recordDecision).not.toHaveBeenCalled();
+    await expect(service.getApproval(submitted.approval!.id)).resolves.toMatchObject({
+      decisions: [],
+      status: 'pending',
+    });
+    await expect(service.getToolCall(submitted.toolCall.id)).resolves.toMatchObject({
+      status: 'pending_approval',
+    });
+    await expect(store.getActionReceiptByToolCallId(submitted.toolCall.id)).resolves.toBeUndefined();
+    await expect(store.getExecutionAttemptByToolCallId('default', submitted.toolCall.id)).resolves.toBeUndefined();
+    await expect(store.listExecutionGrants({ workspaceId: 'default' })).resolves.toEqual([]);
+    expect(await auditStore.list(100)).toEqual(eventsBefore);
+  });
+
+  it('requires a new proposal when an original-only approval is edited', async () => {
+    const { service } = makeHarness();
+    const submitted = await service.submitToolCall({
+      agentId: 'mcp-client:chatgpt',
+      input: {
+        body: 'Exact body.',
+        subject: 'Exact subject',
+        to: 'customer@example.com',
+      },
+      metadata: { approvalInputMode: 'original_only' },
+      reason: 'Propose an exact email',
+      requestedBy: 'dev@example.com',
+      toolName: 'gmail.send_email',
+    });
+
+    await expect(
+      service.approveApproval(submitted.approval!.id, {
+        approvedBy: 'manager@example.com',
+        inputDecision: {
+          input: {
+            bcc: 'additional-recipient@example.com',
+            body: 'Changed body.',
+            subject: 'Changed subject',
+            to: 'customer@example.com',
+          },
+          mode: 'edited',
+        },
+      }),
+    ).rejects.toThrow('only permits the original input');
+    await expect(service.getToolCall(submitted.toolCall.id)).resolves.toMatchObject({ status: 'pending_approval' });
+
+    const approved = await service.approveApproval(submitted.approval!.id, {
+      approvedBy: 'manager@example.com',
+      inputDecision: { mode: 'original' },
+    });
+    expect(approved.toolCall.input).toEqual(submitted.toolCall.input);
+    expect(approved.toolCall.status).toBe('executed');
+  });
+
+  it.each([
+    { disposition: 'revision_required' as const, expired: false, timing: 'before expiry' },
+    { disposition: 'original_only' as const, expired: false, timing: 'before expiry' },
+    { disposition: 'revision_required' as const, expired: true, timing: 'after expiry' },
+    { disposition: 'original_only' as const, expired: true, timing: 'after expiry' },
+  ])(
+    'rejects a prepared-action $disposition inline edit $timing before approval state mutates',
+    async ({ disposition, expired }) => {
+      if (expired) {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date('2026-08-14T08:00:00.000Z'));
+      }
+      const store = new MemoryStore();
+      const prepared: PreparedActionSubmission = {
+        binding: {
+          adapterId: 'native-test',
+          adapterVersion: '1',
+          contractHash: 'contract-hash',
+          contractId: 'contract.test',
+          contractVersion: '1',
+          intentHash: `intent-hash-${disposition}`,
+          intentId: `intent-${disposition}`,
+          operationHash: `operation-hash-${disposition}`,
+          serializerVersion: '1',
+          version: 'actionproxy.prepared-action-binding.v1',
+        },
+        connectionId: 'connection.test',
+        effectiveInput: { subject: 'Original', to: 'customer@example.com' },
+        governance: {
+          customerVisible: true,
+          executionMode: 'external_grant',
+          operationKind: 'external_send',
+          requiredScopes: ['native.write'],
+          risk: 'external_communication',
+        },
+        resources: [],
+      };
+      const revisionContext = vi.fn(async () => ({
+        connectionId: prepared.connectionId,
+        contractId: prepared.binding.contractId,
+        editMode: disposition as PreparedActionEditDisposition,
+        intentId: prepared.binding.intentId,
+      }));
+      const lifecycle = {
+        assertApprovalCurrent: vi.fn(async () => undefined),
+        assertDispatchCurrent: vi.fn(async () => undefined),
+        isPreparedAction: vi.fn((toolName: string) => toolName === 'prepared.test'),
+        prepareSubmission: vi.fn(async () => prepared),
+        preparedApprovalId: vi.fn(() => `approval-${disposition}`),
+        persistSubmission: vi.fn(async (input) => {
+          await store.createToolCall(input.toolCall);
+          if (input.approval) await store.createApproval(input.approval);
+          return {
+            approval: input.approval,
+            outcome: 'created' as const,
+            prepared: input.prepared,
+            toolCall: input.toolCall,
+          };
+        }),
+        revisionContext,
+      } as unknown as PreparedActionLifecycle;
+      const { auditStore, service } = makeHarness({
+        approvalAuthorizationTtlMs: expired ? 1_000 : undefined,
+        store,
+      });
+      service.installPreparedActionLifecycle(lifecycle);
+      const submitted = await service.submitToolCall({
+        agentId: 'prepared-action-agent',
+        input: prepared.effectiveInput,
+        metadata: { approvalInputMode: 'caller_claimed_editable' },
+        reason: 'Exercise trusted prepared-action edit disposition',
+        requestedBy: 'requester@example.com',
+        toolName: 'prepared.test',
+      });
+      const expireApproval = vi.spyOn(store, 'expireApprovalAtomically');
+      const publishAuthorization = vi.spyOn(store, 'publishApprovedExternalAuthorizationAtomically');
+      const recordDecision = vi.spyOn(store, 'recordApprovalDecisionAtomically');
+      const eventsBefore = await auditStore.list(100);
+
+      if (expired) vi.setSystemTime(new Date('2026-08-14T08:00:01.001Z'));
+
+      let conflict: unknown;
+      try {
+        await service.approveApproval(submitted.approval!.id, {
+          approvedBy: 'manager@example.com',
+          inputDecision: {
+            input: { subject: 'Edited', to: 'customer@example.com' },
+            mode: 'edited',
+          },
+        });
+      } catch (error) {
+        conflict = error;
+      }
+
+      expect(conflict).toBeInstanceOf(PreparedActionEditConflict);
+      expect(conflict).toMatchObject({ disposition });
+      expect(revisionContext).toHaveBeenCalledTimes(2);
+      expect(expireApproval).not.toHaveBeenCalled();
+      expect(recordDecision).not.toHaveBeenCalled();
+      expect(publishAuthorization).not.toHaveBeenCalled();
+      await expect(store.getApproval(submitted.approval!.id)).resolves.toMatchObject({
+        decisions: [],
+        status: 'pending',
+      });
+      await expect(store.getToolCall(submitted.toolCall.id)).resolves.toMatchObject({
+        status: 'pending_approval',
+      });
+      await expect(store.getActionReceiptByToolCallId(submitted.toolCall.id)).resolves.toBeUndefined();
+      await expect(store.getExecutionAttemptByToolCallId('default', submitted.toolCall.id)).resolves.toBeUndefined();
+      await expect(store.listExecutionGrants({ workspaceId: 'default' })).resolves.toEqual([]);
+      expect(await auditStore.list(100)).toEqual(eventsBefore);
+    },
+  );
+
+  it.each([
+    { disposition: 'revision_required' as const, toolCallStatus: 'pending_approval' as const },
+    { disposition: 'revision_required' as const, toolCallStatus: 'authorized' as const },
+    { disposition: 'original_only' as const, toolCallStatus: 'pending_approval' as const },
+    { disposition: 'original_only' as const, toolCallStatus: 'authorized' as const },
+  ])(
+    'rejects an edited prepared-action $disposition replay before $toolCallStatus recovery mutates authorization evidence',
+    async ({ disposition, toolCallStatus }) => {
+      const store = new MemoryStore();
+      const prepared: PreparedActionSubmission = {
+        binding: {
+          adapterId: 'native-test',
+          adapterVersion: '1',
+          contractHash: 'contract-hash',
+          contractId: 'contract.test',
+          contractVersion: '1',
+          intentHash: `intent-hash-recovery-${disposition}`,
+          intentId: `intent-recovery-${disposition}`,
+          operationHash: `operation-hash-recovery-${disposition}`,
+          serializerVersion: '1',
+          version: 'actionproxy.prepared-action-binding.v1',
+        },
+        connectionId: 'connection.test',
+        effectiveInput: { subject: 'Original', to: 'customer@example.com' },
+        governance: {
+          customerVisible: true,
+          executionMode: 'external_grant',
+          operationKind: 'external_send',
+          requiredScopes: ['native.write'],
+          risk: 'external_communication',
+        },
+        resources: [],
+      };
+      const revisionContext = vi.fn(async () => ({
+        connectionId: prepared.connectionId,
+        contractId: prepared.binding.contractId,
+        editMode: disposition as PreparedActionEditDisposition,
+        intentId: prepared.binding.intentId,
+      }));
+      const lifecycle = {
+        assertApprovalCurrent: vi.fn(async () => undefined),
+        assertDispatchCurrent: vi.fn(async () => undefined),
+        isPreparedAction: vi.fn((toolName: string) => toolName === 'prepared.test'),
+        prepareSubmission: vi.fn(async () => prepared),
+        preparedApprovalId: vi.fn(() => `approval-recovery-${disposition}`),
+        persistSubmission: vi.fn(async (input) => {
+          await store.createToolCall(input.toolCall);
+          if (input.approval) await store.createApproval(input.approval);
+          return {
+            approval: input.approval,
+            outcome: 'created' as const,
+            prepared: input.prepared,
+            toolCall: input.toolCall,
+          };
+        }),
+        revisionContext,
+      } as unknown as PreparedActionLifecycle;
+      let stopPublication = true;
+      const prepareGrant = vi.fn<NonNullable<ExecutionGrantIssuer['prepareGrant']>>((input) => {
+        if (stopPublication) throw new Error('stop after prepared approval finalization');
+        return {
+          actor: input.actor,
+          approvedEnvelopeHash: input.receipt.approvedEnvelopeHash,
+          approvedInputHash: input.receipt.approvedInputHash,
+          auth: input.auth,
+          createdAt: input.issuedAt,
+          expiresAt: new Date(Date.parse(input.issuedAt) + 300_000).toISOString(),
+          id: `grant-recovery-${toolCallStatus}-${disposition}`,
+          inputHash: input.toolCall.inputHash!,
+          nonce: 'recovery-nonce',
+          policyVersionHash: input.toolCall.policyVersionHash,
+          receiptHash: input.receipt.receiptHash,
+          receiptId: input.receipt.id,
+          signature: 'recovery-signature',
+          toolCallId: input.toolCall.id,
+          toolName: input.toolCall.toolName,
+          workspaceId: input.toolCall.workspaceId ?? 'default',
+        };
+      });
+      const recordPreparedGrantCreated = vi.fn(async () => undefined);
+      const executionGrants: ExecutionGrantIssuer = {
+        createGrant: vi.fn(async () => ({ id: 'unused-grant' })),
+        prepareGrant,
+        recordPreparedGrantCreated,
+      };
+      const { auditStore, service } = makeHarness({ executionGrants, store });
+      service.installPreparedActionLifecycle(lifecycle);
+      const submitted = await service.submitToolCall({
+        agentId: 'prepared-action-agent',
+        input: prepared.effectiveInput,
+        metadata: { approvalInputMode: 'caller_claimed_editable' },
+        reason: 'Exercise prepared-action recovery edit preflight',
+        requestedBy: 'requester@example.com',
+        toolName: 'prepared.test',
+      });
+
+      await expect(
+        service.approveApproval(submitted.approval!.id, {
+          approvedBy: 'manager@example.com',
+          inputDecision: { mode: 'original' },
+        }),
+      ).rejects.toThrow('stop after prepared approval finalization');
+      await expect(store.getApproval(submitted.approval!.id)).resolves.toMatchObject({ status: 'approved' });
+      if (toolCallStatus === 'authorized') {
+        const approvedToolCall = await store.getToolCall(submitted.toolCall.id);
+        await store.updateToolCall({ ...approvedToolCall!, status: 'authorized' });
+      }
+
+      stopPublication = false;
+      prepareGrant.mockClear();
+      recordPreparedGrantCreated.mockClear();
+      revisionContext.mockClear();
+      const publishAuthorization = vi.spyOn(store, 'publishApprovedExternalAuthorizationAtomically');
+      const recordDecision = vi.spyOn(store, 'recordApprovalDecisionAtomically');
+      const eventsBefore = await auditStore.list(100);
+
+      let conflict: unknown;
+      try {
+        await service.approveApproval(submitted.approval!.id, {
+          approvedBy: 'manager@example.com',
+          inputDecision: {
+            input: { subject: 'Edited', to: 'customer@example.com' },
+            mode: 'edited',
+          },
+        });
+      } catch (error) {
+        conflict = error;
+      }
+
+      expect(conflict).toBeInstanceOf(PreparedActionEditConflict);
+      expect(conflict).toMatchObject({ disposition });
+      expect(revisionContext).toHaveBeenCalledOnce();
+      expect(prepareGrant).not.toHaveBeenCalled();
+      expect(recordPreparedGrantCreated).not.toHaveBeenCalled();
+      expect(publishAuthorization).not.toHaveBeenCalled();
+      expect(recordDecision).not.toHaveBeenCalled();
+      await expect(store.getApproval(submitted.approval!.id)).resolves.toMatchObject({ status: 'approved' });
+      await expect(store.getToolCall(submitted.toolCall.id)).resolves.toMatchObject({ status: toolCallStatus });
+      await expect(store.getActionReceiptByToolCallId(submitted.toolCall.id)).resolves.toBeUndefined();
+      await expect(store.getExecutionAttemptByToolCallId('default', submitted.toolCall.id)).resolves.toBeUndefined();
+      await expect(store.listExecutionGrants({ workspaceId: 'default' })).resolves.toEqual([]);
+      expect(await auditStore.list(100)).toEqual(eventsBefore);
+    },
+  );
 
   it('binds an external attempt to the approved edited envelope without changing approval hashes', async () => {
     const createGrant = vi.fn(async () => ({ id: 'grant_edited_approval' }));
@@ -2702,10 +4106,9 @@ describe('ActionProxyService', () => {
     });
     const originalAuthorizationHash = submitted.approval!.authorization!.authorizationHash;
     const editedInput = { subject: 'Edited', to: 'customer@example.com' };
-
     const approved = await service.approveApproval(submitted.approval!.id, {
       approvedBy: 'manager@example.com',
-      editedInput,
+      inputDecision: { input: editedInput, mode: 'edited' },
     });
     const attempts = await service.listExecutionAttemptsForToolCall(submitted.toolCall.id);
 
@@ -2722,6 +4125,7 @@ describe('ActionProxyService', () => {
       inputHash: approved.toolCall.inputHash,
       state: 'reserved',
     });
+    expect(approved.toolCall.input).toEqual(editedInput);
   });
 
   it('rejects approval when the stored original payload no longer matches its binding hash', async () => {

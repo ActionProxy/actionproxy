@@ -7,7 +7,7 @@ ActionProxy gateway. Complete the local gateway proof first, then verify and
 install the exact wrapper version:
 
 ```bash
-npm view @actionproxy/mcp-wrapper@0.1.1 version dist.integrity repository.url
+npm view @actionproxy/mcp-wrapper@0.1.1 version dist.integrity repository.url dist.attestations
 npm install --save-exact @actionproxy/mcp-wrapper@0.1.1
 ```
 
@@ -30,6 +30,50 @@ npm exec -- actionproxy-mcp doctor --config actionproxy.mcp.yaml --json
 Static doctor starts no downstream process and does not prove policy or
 execution. After reviewing every configured child command, add `--discover` to
 perform bounded MCP initialization and `tools/list`.
+
+## Register an npm-installed wrapper
+
+Install the exact version in a stable project directory, then point the MCP
+host at the installed executable. Do not register the downstream MCP server
+separately.
+
+```bash
+npm install --save-exact @actionproxy/mcp-wrapper@0.1.1
+node /absolute/path/to/project/node_modules/@actionproxy/mcp-wrapper/dist/index.js doctor --config /absolute/path/to/project/actionproxy.mcp.yaml
+```
+
+Use absolute paths because MCP hosts may start outside the project directory.
+Use forward-slash absolute paths on Windows as well.
+
+Codex CLI:
+
+```bash
+codex mcp add actionproxy -- node /absolute/path/to/project/node_modules/@actionproxy/mcp-wrapper/dist/index.js wrap --config /absolute/path/to/project/actionproxy.mcp.yaml
+```
+
+Claude Code CLI:
+
+```bash
+claude mcp add --transport stdio actionproxy -- node /absolute/path/to/project/node_modules/@actionproxy/mcp-wrapper/dist/index.js wrap --config /absolute/path/to/project/actionproxy.mcp.yaml
+```
+
+Generic stdio configuration:
+
+```json
+{
+  "mcpServers": {
+    "actionproxy": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/project/node_modules/@actionproxy/mcp-wrapper/dist/index.js",
+        "wrap",
+        "--config",
+        "/absolute/path/to/project/actionproxy.mcp.yaml"
+      ]
+    }
+  }
+}
+```
 
 See the [adoption guide](https://github.com/ActionProxy/actionproxy/blob/v0.1.1/docs/ADOPTING.md),
 [wrapper schema](https://actionproxy.com/schemas/actionproxy.mcp-wrapper.v1.schema.json),

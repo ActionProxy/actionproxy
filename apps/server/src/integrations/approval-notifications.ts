@@ -1,7 +1,10 @@
 import type {
+  ApprovalDeliveryRecord,
+  ApprovalDecisionSource,
   ApprovalNotificationProvider,
   ApprovalRecord,
   ApprovalDeliveryStatus,
+  AuthContext,
   JsonObject,
   ToolCallRecord,
 } from '../models';
@@ -32,6 +35,28 @@ export interface ApprovalNotificationResult {
 
 export interface ApprovalNotifier {
   notifyApprovalRequired(context: ApprovalNotificationRequest): Promise<ApprovalNotificationResult[]>;
+  syncApprovalPresentation?(context: ApprovalPresentationRequest): Promise<ApprovalPresentationResult[]>;
+}
+
+export interface ApprovalResolutionContext {
+  actor?: string;
+  auth?: AuthContext;
+  decidedAt: string;
+  reason?: string;
+  source: ApprovalDecisionSource;
+}
+
+export interface ApprovalPresentationRequest {
+  approval: ApprovalRecord;
+  deliveries: ApprovalDeliveryRecord[];
+  resolution: ApprovalResolutionContext;
+  toolCall: ToolCallRecord;
+}
+
+export interface ApprovalPresentationResult {
+  deliveryId: string;
+  error?: string;
+  status: 'failed' | 'updated';
 }
 
 export interface ApprovalNotificationChannel {
@@ -42,6 +67,7 @@ export interface ApprovalNotificationChannel {
   isEnabled(): Promise<boolean> | boolean;
   notifyApprovalRequired(context: ApprovalNotificationRequest): Promise<Array<Omit<ApprovalNotificationResult, 'channelId' | 'provider'>>>;
   provider: ApprovalNotificationProvider;
+  syncApprovalPresentation?(context: ApprovalPresentationRequest): Promise<ApprovalPresentationResult[]>;
 }
 
 export class ApprovalNotificationFanout implements ApprovalNotifier {
@@ -81,6 +107,40 @@ export class ApprovalNotificationFanout implements ApprovalNotifier {
       }
     }
 
+    return results;
+  }
+
+  async syncApprovalPresentation(context: ApprovalPresentationRequest): Promise<ApprovalPresentationResult[]> {
+    const byChannel = new Map<string, ApprovalDeliveryRecord[]>();
+    for (const delivery of context.deliveries) {
+      const deliveries = byChannel.get(delivery.channelId) ?? [];
+      deliveries.push(delivery);
+      byChannel.set(delivery.channelId, deliveries);
+    }
+
+    const results: ApprovalPresentationResult[] = [];
+    await Promise.all(
+      [...byChannel.entries()].map(async ([channelId, deliveries]) => {
+        const channel = this.channels.get(channelId);
+        if (!channel?.syncApprovalPresentation) return;
+
+        try {
+          results.push(
+            ...(await channel.syncApprovalPresentation({
+              ...context,
+              deliveries,
+            })),
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          results.push(...deliveries.filter((delivery) => delivery.status === 'sent').map((delivery) => ({
+            deliveryId: delivery.id,
+            error: message,
+            status: 'failed' as const,
+          })));
+        }
+      }),
+    );
     return results;
   }
 

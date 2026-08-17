@@ -23,6 +23,12 @@ import type { AuditListFilters, AuditListLimit, AuditStore } from './audit-store
 import type {
   AtomicActionReceiptOutcomeInput,
   AtomicActionReceiptOutcomeResult,
+  AtomicApprovedExternalAuthorizationPublicationInput,
+  AtomicApprovedExternalAuthorizationPublicationResult,
+  AtomicKnownExternalExecutionOutcomeAdoptionInput,
+  AtomicKnownExternalExecutionOutcomeAdoptionResult,
+  AtomicKnownExternalExecutionOutcomeRecordingInput,
+  AtomicKnownExternalExecutionOutcomeRecordingResult,
   AtomicExecutionAttemptGrantBindingInput,
   AtomicExecutionAttemptGrantBindingResult,
   AtomicExecutionAttemptReservationResult,
@@ -63,6 +69,25 @@ import {
   ApproverPrincipalConflictError,
   isSqliteApproverPrincipalUniqueViolation,
 } from './approver-principal-constraint';
+import {
+  approvedExternalAuthorizationMatchesCurrent,
+  assertApprovedExternalAuthorizationPublicationCandidate,
+  sameApprovedExternalAuthorizationPublication,
+} from './approved-external-authorization-atomicity';
+import {
+  assertKnownExternalExecutionOutcomeAdoptionCandidate,
+  externalOutcomeAdoptionState,
+  knownExternalOutcomeMatchesCurrent,
+  outcomeProjectionCanBeAdopted,
+  sameKnownExternalOutcomeProjection,
+} from './external-outcome-adoption-atomicity';
+import {
+  assertKnownExternalExecutionOutcomeRecordingCandidate,
+  knownExternalOutcomeRecordingBindingsMatch,
+  knownExternalOutcomeRecordingConflictDisposition,
+  knownExternalOutcomeRecordingMatchesCurrent,
+  sameRecordedKnownExternalOutcomeProjection,
+} from './external-outcome-recording-atomicity';
 
 type SqliteRow = Record<string, unknown>;
 
@@ -975,6 +1000,348 @@ export class SqliteStore implements Store, AuditStore, PolicyVersionStore {
     return { attempt, grant, outcome };
   }
 
+  async publishApprovedExternalAuthorizationAtomically(
+    input: AtomicApprovedExternalAuthorizationPublicationInput,
+  ): Promise<AtomicApprovedExternalAuthorizationPublicationResult> {
+    assertApprovedExternalAuthorizationPublicationCandidate(input);
+    const workspaceId = input.toolCall.workspaceId ?? 'default';
+    const marker = this.query(`
+      CREATE TEMP TABLE actionproxy_approved_external_publication_result (created INTEGER NOT NULL);
+      BEGIN IMMEDIATE;
+      INSERT INTO actionproxy_approved_external_publication_result
+      SELECT 1
+      WHERE EXISTS (
+        SELECT 1 FROM tool_calls
+        WHERE id = ${sqlLiteral(input.toolCall.id)}
+          AND workspace_id = ${sqlLiteral(workspaceId)}
+          AND status = 'pending_approval'
+          AND decision = 'require_approval'
+          AND tool_name = ${sqlLiteral(input.toolCall.toolName)}
+          AND input_hash = ${sqlLiteral(input.receipt.originalInputHash)}
+          AND action_envelope_hash = ${sqlLiteral(input.receipt.originalEnvelopeHash)}
+          AND canonical_action_request_hash IS ${sqlLiteral(input.toolCall.canonicalActionRequestHash)}
+          AND canonical_action_request_version IS ${sqlLiteral(input.toolCall.canonicalActionRequestVersion)}
+          AND canonical_decision_input_hash IS ${sqlLiteral(input.toolCall.canonicalDecisionInputHash)}
+          AND policy_version_hash IS ${sqlLiteral(input.toolCall.policyVersionHash)}
+      )
+        AND EXISTS (
+          SELECT 1 FROM approvals
+          WHERE id = ${sqlLiteral(input.approvalId)}
+            AND workspace_id = ${sqlLiteral(workspaceId)}
+            AND tool_call_id = ${sqlLiteral(input.toolCall.id)}
+            AND status = 'approved'
+            AND authorization_consumed_at IS NOT NULL
+            AND authorization_consumed_reason = 'approved'
+            AND original_input_hash = ${sqlLiteral(input.receipt.originalInputHash)}
+            AND original_envelope_hash = ${sqlLiteral(input.receipt.originalEnvelopeHash)}
+            AND approved_input_hash = ${sqlLiteral(input.receipt.approvedInputHash)}
+            AND approved_envelope_hash = ${sqlLiteral(input.receipt.approvedEnvelopeHash)}
+            AND review_hash IS ${sqlLiteral(input.receipt.reviewHash)}
+            AND json_extract(authorization_json, '$.authorizationHash') = ${sqlLiteral(input.attempt.binding.approvalAuthorizationHash)}
+            AND json_extract(authorization_json, '$.nonce') = ${sqlLiteral(input.attempt.binding.approvalAuthorizationNonce)}
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM action_receipts
+          WHERE id = ${sqlLiteral(input.receipt.id)}
+             OR (workspace_id = ${sqlLiteral(workspaceId)} AND tool_call_id = ${sqlLiteral(input.toolCall.id)})
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM execution_grants
+          WHERE id = ${sqlLiteral(input.grant.id)}
+             OR (workspace_id = ${sqlLiteral(workspaceId)} AND tool_call_id = ${sqlLiteral(input.toolCall.id)})
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM execution_attempts
+          WHERE id = ${sqlLiteral(input.attempt.id)}
+             OR (workspace_id = ${sqlLiteral(workspaceId)} AND tool_call_id = ${sqlLiteral(input.toolCall.id)})
+        );
+      INSERT INTO actionproxy_approved_external_publication_result
+      SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM actionproxy_approved_external_publication_result);
+      ${actionReceiptInsertSql(
+        input.receipt,
+        '(SELECT created FROM actionproxy_approved_external_publication_result LIMIT 1) = 1',
+      )}
+      ${executionGrantInsertSql(
+        input.grant,
+        '(SELECT created FROM actionproxy_approved_external_publication_result LIMIT 1) = 1',
+      )}
+      ${executionAttemptInsertSql(
+        input.attempt,
+        '(SELECT created FROM actionproxy_approved_external_publication_result LIMIT 1) = 1',
+      )};
+      ${toolCallInsertSql(input.toolCall, {
+        condition: '(SELECT created FROM actionproxy_approved_external_publication_result LIMIT 1) = 1',
+        conflict: 'replace',
+      })}
+      COMMIT;
+      SELECT created FROM actionproxy_approved_external_publication_result LIMIT 1;
+    `)[0];
+
+    const approval = await this.getApproval(input.approvalId);
+    const toolCall = await this.getToolCall(input.toolCall.id);
+    const receipt = await this.getActionReceiptByToolCallId(input.toolCall.id);
+    const attempt = await this.getExecutionAttemptByToolCallId(workspaceId, input.toolCall.id);
+    const grant = (await this.listExecutionGrants({ limit: 1000, workspaceId }))
+      .find((candidate) => candidate.toolCallId === input.toolCall.id);
+    if (Number(marker?.created ?? 0) === 1 && approval && toolCall && receipt && attempt && grant) {
+      return { approval, attempt, grant, outcome: 'created', receipt, toolCall };
+    }
+    if (!approval || !toolCall) return { approval, outcome: 'not_found', toolCall };
+    const [receiptById, attemptById, grantById] = await Promise.all([
+      this.getActionReceipt(input.receipt.id),
+      this.getExecutionAttempt(input.attempt.id),
+      this.getExecutionGrant(input.grant.id),
+    ]);
+    const candidateIdCollision = (receiptById !== undefined && receiptById.toolCallId !== toolCall.id)
+      || (attemptById !== undefined && attemptById.toolCallId !== toolCall.id)
+      || (grantById !== undefined && grantById.toolCallId !== toolCall.id);
+    const publicationExists = candidateIdCollision
+      || receipt !== undefined
+      || attempt !== undefined
+      || grant !== undefined
+      || toolCall.status === 'authorized';
+    if (publicationExists) {
+      return !candidateIdCollision && sameApprovedExternalAuthorizationPublication(input, { attempt, grant, receipt, toolCall })
+        ? { approval, attempt, grant, outcome: 'replay', receipt, toolCall }
+        : { approval, attempt, grant, outcome: 'conflict', receipt, toolCall };
+    }
+    if (approval.status !== 'approved' || toolCall.status !== 'pending_approval') {
+      return { approval, outcome: 'state_mismatch', toolCall };
+    }
+    return {
+      approval,
+      outcome: approvedExternalAuthorizationMatchesCurrent(input, approval, toolCall)
+        ? 'conflict'
+        : 'binding_mismatch',
+      toolCall,
+    };
+  }
+
+  async adoptKnownExternalExecutionOutcomeAtomically(
+    input: AtomicKnownExternalExecutionOutcomeAdoptionInput,
+  ): Promise<AtomicKnownExternalExecutionOutcomeAdoptionResult> {
+    assertKnownExternalExecutionOutcomeAdoptionCandidate(input);
+    const attempt = await this.getExecutionAttempt(input.attemptId);
+    const toolCall = await this.getToolCall(input.toolCall.id);
+    const receipt = await this.getActionReceipt(input.receipt.id);
+    const grant = attempt?.grantId ? await this.getExecutionGrant(attempt.grantId) : undefined;
+    if (!attempt || !toolCall || !receipt || !grant) return { attempt, grant, outcome: 'not_found', receipt, toolCall };
+    const state = externalOutcomeAdoptionState(attempt);
+    if (state === 'reconciliation_required') return { attempt, grant, outcome: state, receipt, toolCall };
+    if (state === 'state_mismatch') return { attempt, grant, outcome: state, receipt, toolCall };
+    if (sameKnownExternalOutcomeProjection(input, receipt, toolCall)) {
+      return { attempt, grant, outcome: 'replay', receipt, toolCall };
+    }
+    if (!knownExternalOutcomeMatchesCurrent(input, { attempt, grant, receipt, toolCall })) {
+      return { attempt, grant, outcome: 'binding_mismatch', receipt, toolCall };
+    }
+    if (!outcomeProjectionCanBeAdopted(input, receipt, toolCall)) {
+      return { attempt, grant, outcome: 'conflict', receipt, toolCall };
+    }
+
+    const marker = this.query(`
+      CREATE TEMP TABLE actionproxy_known_outcome_adoption_result (adopted INTEGER NOT NULL);
+      BEGIN IMMEDIATE;
+      INSERT INTO actionproxy_known_outcome_adoption_result
+      SELECT 1
+      WHERE EXISTS (
+        SELECT 1 FROM execution_attempts
+        WHERE id = ${sqlLiteral(attempt.id)}
+          AND workspace_id = ${sqlLiteral(input.workspaceId)}
+          AND tool_call_id = ${sqlLiteral(input.toolCall.id)}
+          AND grant_id = ${sqlLiteral(grant.id)}
+          AND state = ${sqlLiteral(attempt.state)}
+          AND outcome_json = ${sqlJsonLiteral(attempt.outcome!)}
+      )
+        AND EXISTS (
+          SELECT 1 FROM execution_grants
+          WHERE id = ${sqlLiteral(grant.id)}
+            AND workspace_id = ${sqlLiteral(input.workspaceId)}
+            AND tool_call_id = ${sqlLiteral(input.toolCall.id)}
+            AND consumed_at IS NOT NULL
+        )
+        AND EXISTS (
+          SELECT 1 FROM action_receipts
+          WHERE id = ${sqlLiteral(input.receipt.id)}
+            AND workspace_id = ${sqlLiteral(input.workspaceId)}
+            AND tool_call_id = ${sqlLiteral(input.toolCall.id)}
+            AND receipt_hash = ${sqlLiteral(input.receipt.receiptHash)}
+            AND (outcome_json IS NULL OR outcome_json = ${sqlJsonLiteral(input.receipt.outcome!)})
+        )
+        AND EXISTS (
+          SELECT 1 FROM tool_calls
+          WHERE id = ${sqlLiteral(input.toolCall.id)}
+            AND workspace_id = ${sqlLiteral(input.workspaceId)}
+            AND input_hash = ${sqlLiteral(input.toolCall.inputHash)}
+            AND action_envelope_hash = ${sqlLiteral(input.toolCall.actionEnvelopeHash)}
+            AND status IN ('authorized', ${sqlLiteral(input.toolCall.status)})
+        );
+      INSERT INTO actionproxy_known_outcome_adoption_result
+      SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM actionproxy_known_outcome_adoption_result);
+      UPDATE action_receipts
+      SET outcome_json = ${sqlJsonLiteral(input.receipt.outcome!)}
+      WHERE id = ${sqlLiteral(input.receipt.id)}
+        AND workspace_id = ${sqlLiteral(input.workspaceId)}
+        AND outcome_json IS NULL
+        AND (SELECT adopted FROM actionproxy_known_outcome_adoption_result LIMIT 1) = 1;
+      ${toolCallInsertSql(input.toolCall, {
+        condition: '(SELECT adopted FROM actionproxy_known_outcome_adoption_result LIMIT 1) = 1',
+        conflict: 'replace',
+      })}
+      COMMIT;
+      SELECT adopted FROM actionproxy_known_outcome_adoption_result LIMIT 1;
+    `)[0];
+    const adoptedReceipt = await this.getActionReceipt(input.receipt.id);
+    const adoptedToolCall = await this.getToolCall(input.toolCall.id);
+    if (Number(marker?.adopted ?? 0) === 1 && adoptedReceipt && adoptedToolCall) {
+      return { attempt, grant, outcome: 'adopted', receipt: adoptedReceipt, toolCall: adoptedToolCall };
+    }
+    if (!adoptedReceipt || !adoptedToolCall) return { attempt, grant, outcome: 'not_found', receipt: adoptedReceipt, toolCall: adoptedToolCall };
+    if (sameKnownExternalOutcomeProjection(input, adoptedReceipt, adoptedToolCall)) {
+      return { attempt, grant, outcome: 'replay', receipt: adoptedReceipt, toolCall: adoptedToolCall };
+    }
+    return { attempt, grant, outcome: 'conflict', receipt: adoptedReceipt, toolCall: adoptedToolCall };
+  }
+
+  async recordKnownExternalExecutionOutcomeAtomically(
+    input: AtomicKnownExternalExecutionOutcomeRecordingInput,
+  ): Promise<AtomicKnownExternalExecutionOutcomeRecordingResult> {
+    assertKnownExternalExecutionOutcomeRecordingCandidate(input);
+    const currentAttempt = await this.getExecutionAttempt(input.attemptId);
+    if (!currentAttempt || currentAttempt.workspaceId !== input.workspaceId) return { outcome: 'not_found' };
+    const [currentToolCall, currentReceipt, currentGrant] = await Promise.all([
+      this.getToolCall(currentAttempt.toolCallId),
+      currentAttempt.binding.receiptId ? this.getActionReceipt(currentAttempt.binding.receiptId) : undefined,
+      currentAttempt.grantId ? this.getExecutionGrant(currentAttempt.grantId) : undefined,
+    ]);
+    if (!currentToolCall || !currentReceipt || !currentGrant) {
+      return {
+        attempt: currentAttempt,
+        grant: currentGrant,
+        outcome: 'not_found',
+        receipt: currentReceipt,
+        toolCall: currentToolCall,
+      };
+    }
+    if (currentAttempt.reservationOwner !== input.reservationOwner) {
+      return {
+        attempt: currentAttempt,
+        grant: currentGrant,
+        outcome: 'owner_mismatch',
+        receipt: currentReceipt,
+        toolCall: currentToolCall,
+      };
+    }
+    const current = {
+      attempt: currentAttempt,
+      grant: currentGrant,
+      receipt: currentReceipt,
+      toolCall: currentToolCall,
+    };
+    if (!knownExternalOutcomeRecordingBindingsMatch(input, current)) {
+      return { ...current, outcome: 'binding_mismatch' };
+    }
+    if (sameRecordedKnownExternalOutcomeProjection(input, currentAttempt, currentReceipt, currentToolCall)) {
+      return { ...current, outcome: 'replay' };
+    }
+    if (!knownExternalOutcomeRecordingMatchesCurrent(input, current) || currentAttempt.state !== 'dispatched') {
+      return { ...current, outcome: knownExternalOutcomeRecordingConflictDisposition(currentAttempt) };
+    }
+
+    const completedAttempt: ExecutionAttemptRecordV1 = {
+      ...currentAttempt,
+      completedAt: input.attemptOutcome.recordedAt,
+      outcome: input.attemptOutcome,
+      state: input.attemptOutcome.status,
+      updatedAt: input.attemptOutcome.recordedAt,
+    };
+    const marker = this.query(`
+      CREATE TEMP TABLE actionproxy_known_outcome_recording_result (recorded INTEGER NOT NULL);
+      BEGIN IMMEDIATE;
+      INSERT INTO actionproxy_known_outcome_recording_result
+      SELECT 1
+      WHERE EXISTS (
+        SELECT 1 FROM execution_attempts
+        WHERE id = ${sqlLiteral(currentAttempt.id)}
+          AND workspace_id = ${sqlLiteral(input.workspaceId)}
+          AND tool_call_id = ${sqlLiteral(currentToolCall.id)}
+          AND grant_id = ${sqlLiteral(currentGrant.id)}
+          AND reservation_owner = ${sqlLiteral(input.reservationOwner)}
+          AND state = 'dispatched'
+          AND outcome_json IS NULL
+      )
+        AND EXISTS (
+          SELECT 1 FROM execution_grants
+          WHERE id = ${sqlLiteral(currentGrant.id)}
+            AND workspace_id = ${sqlLiteral(input.workspaceId)}
+            AND tool_call_id = ${sqlLiteral(currentToolCall.id)}
+            AND receipt_id = ${sqlLiteral(currentReceipt.id)}
+            AND receipt_hash = ${sqlLiteral(currentReceipt.receiptHash)}
+            AND consumed_at IS NOT NULL
+        )
+        AND EXISTS (
+          SELECT 1 FROM action_receipts
+          WHERE id = ${sqlLiteral(currentReceipt.id)}
+            AND workspace_id = ${sqlLiteral(input.workspaceId)}
+            AND tool_call_id = ${sqlLiteral(currentToolCall.id)}
+            AND receipt_hash = ${sqlLiteral(currentReceipt.receiptHash)}
+            AND outcome_json IS NULL
+        )
+        AND EXISTS (
+          SELECT 1 FROM tool_calls
+          WHERE id = ${sqlLiteral(currentToolCall.id)}
+            AND workspace_id = ${sqlLiteral(input.workspaceId)}
+            AND input_hash = ${sqlLiteral(currentToolCall.inputHash)}
+            AND action_envelope_hash = ${sqlLiteral(currentToolCall.actionEnvelopeHash)}
+            AND status = 'authorized'
+            AND json_extract(action_envelope_json, '$.preparedAction.intentId') = ${sqlLiteral(currentToolCall.actionEnvelope?.preparedAction?.intentId)}
+            AND json_extract(action_envelope_json, '$.preparedAction.intentHash') = ${sqlLiteral(currentToolCall.actionEnvelope?.preparedAction?.intentHash)}
+        );
+      INSERT INTO actionproxy_known_outcome_recording_result
+      SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM actionproxy_known_outcome_recording_result);
+      UPDATE execution_attempts
+      SET state = ${sqlLiteral(completedAttempt.state)},
+          updated_at = ${sqlLiteral(completedAttempt.updatedAt)},
+          completed_at = ${sqlLiteral(completedAttempt.completedAt)},
+          outcome_json = ${sqlJsonLiteral(completedAttempt.outcome!)}
+      WHERE id = ${sqlLiteral(completedAttempt.id)}
+        AND (SELECT recorded FROM actionproxy_known_outcome_recording_result LIMIT 1) = 1;
+      UPDATE action_receipts
+      SET outcome_json = ${sqlJsonLiteral(input.receiptOutcome)}
+      WHERE id = ${sqlLiteral(currentReceipt.id)}
+        AND (SELECT recorded FROM actionproxy_known_outcome_recording_result LIMIT 1) = 1;
+      ${toolCallInsertSql(input.toolCall, {
+        condition: '(SELECT recorded FROM actionproxy_known_outcome_recording_result LIMIT 1) = 1',
+        conflict: 'replace',
+      })}
+      COMMIT;
+      SELECT recorded FROM actionproxy_known_outcome_recording_result LIMIT 1;
+    `)[0];
+    const [attempt, receipt, toolCall, grant] = await Promise.all([
+      this.getExecutionAttempt(input.attemptId),
+      this.getActionReceipt(currentReceipt.id),
+      this.getToolCall(currentToolCall.id),
+      this.getExecutionGrant(currentGrant.id),
+    ]);
+    if (!attempt || !receipt || !toolCall || !grant) {
+      return { attempt, grant, outcome: 'not_found', receipt, toolCall };
+    }
+    if (Number(marker?.recorded ?? 0) === 1) {
+      return { attempt, grant, outcome: 'recorded', receipt, toolCall };
+    }
+    if (attempt.reservationOwner !== input.reservationOwner) {
+      return { attempt, grant, outcome: 'owner_mismatch', receipt, toolCall };
+    }
+    const refreshed = { attempt, grant, receipt, toolCall };
+    if (!knownExternalOutcomeRecordingBindingsMatch(input, refreshed)) {
+      return { ...refreshed, outcome: 'binding_mismatch' };
+    }
+    if (sameRecordedKnownExternalOutcomeProjection(input, attempt, receipt, toolCall)) {
+      return { ...refreshed, outcome: 'replay' };
+    }
+    return { ...refreshed, outcome: knownExternalOutcomeRecordingConflictDisposition(attempt) };
+  }
+
   async createActionReceipt(record: ActionReceiptRecord): Promise<ActionReceiptRecord> {
     return this.writeActionReceipt(record);
   }
@@ -1486,6 +1853,79 @@ function executionAttemptInsertSql(record: ExecutionAttemptRecordV1, condition: 
       ${sqlLiteral(record.updatedAt)}
     WHERE ${condition}
     ON CONFLICT DO NOTHING
+  `;
+}
+
+function executionGrantInsertSql(record: ExecutionGrantRecord, condition: string): string {
+  return `
+    INSERT INTO execution_grants (
+      id, workspace_id, tool_call_id, tool_name, input_hash, approved_input_hash,
+      approved_envelope_hash, policy_version_hash, receipt_id, receipt_hash, actor,
+      auth_json, expires_at, nonce, signature, consumed_at, created_at
+    )
+    SELECT
+      ${sqlLiteral(record.id)},
+      ${sqlLiteral(record.workspaceId)},
+      ${sqlLiteral(record.toolCallId)},
+      ${sqlLiteral(record.toolName)},
+      ${sqlLiteral(record.inputHash)},
+      ${sqlLiteral(record.approvedInputHash)},
+      ${sqlLiteral(record.approvedEnvelopeHash)},
+      ${sqlLiteral(record.policyVersionHash)},
+      ${sqlLiteral(record.receiptId)},
+      ${sqlLiteral(record.receiptHash)},
+      ${sqlLiteral(record.actor)},
+      ${record.auth === undefined ? 'NULL' : sqlJsonLiteral(record.auth)},
+      ${sqlLiteral(record.expiresAt)},
+      ${sqlLiteral(record.nonce)},
+      ${sqlLiteral(record.signature)},
+      ${sqlLiteral(record.consumedAt)},
+      ${sqlLiteral(record.createdAt)}
+    WHERE ${condition};
+  `;
+}
+
+function actionReceiptInsertSql(record: ActionReceiptRecord, condition: string): string {
+  return `
+    INSERT INTO action_receipts (
+      id, workspace_id, tool_call_id, approval_id, decision_kind, decision_actor, decision_auth_json,
+      tool_name, source_json, protocol, operation_json, original_input_hash, approved_input_hash,
+      original_envelope_hash, approved_envelope_hash, review_hash, policy_version_id, policy_version_hash,
+      policy_decision, policy_reason, policy_risk, execution_mode, issued_at, expires_at, receipt_hash,
+      key_id, signature_alg, signature, outcome_json, created_at
+    )
+    SELECT
+      ${sqlLiteral(record.id)},
+      ${sqlLiteral(record.workspaceId)},
+      ${sqlLiteral(record.toolCallId)},
+      ${sqlLiteral(record.approvalId)},
+      ${sqlLiteral(record.decisionKind)},
+      ${sqlLiteral(record.decisionActor)},
+      ${record.decisionAuth === undefined ? 'NULL' : sqlJsonLiteral(record.decisionAuth)},
+      ${sqlLiteral(record.toolName)},
+      ${sqlJsonLiteral(record.source)},
+      ${sqlLiteral(record.protocol)},
+      ${sqlJsonLiteral(record.operation)},
+      ${sqlLiteral(record.originalInputHash)},
+      ${sqlLiteral(record.approvedInputHash)},
+      ${sqlLiteral(record.originalEnvelopeHash)},
+      ${sqlLiteral(record.approvedEnvelopeHash)},
+      ${sqlLiteral(record.reviewHash)},
+      ${sqlLiteral(record.policyVersionId)},
+      ${sqlLiteral(record.policyVersionHash)},
+      ${sqlLiteral(record.policyDecision)},
+      ${sqlLiteral(record.policyReason)},
+      ${sqlLiteral(record.policyRisk)},
+      ${sqlLiteral(record.executionMode)},
+      ${sqlLiteral(record.issuedAt)},
+      ${sqlLiteral(record.expiresAt)},
+      ${sqlLiteral(record.receiptHash)},
+      ${sqlLiteral(record.keyId)},
+      ${sqlLiteral(record.signatureAlg)},
+      ${sqlLiteral(record.signature)},
+      ${record.outcome === undefined ? 'NULL' : sqlJsonLiteral(record.outcome)},
+      ${sqlLiteral(record.createdAt)}
+    WHERE ${condition};
   `;
 }
 
