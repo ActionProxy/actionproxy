@@ -523,12 +523,12 @@
     {
       "mode": "100644",
       "path": "apps/server/src/routes/mcp.test.ts",
-      "sha256": "e1d555b2e191487246758608851ff7611a62ec458840a5d5ae64a9a273126e65"
+      "sha256": "0dd2c95e5757b4a0c1b602d0f3e686b102ccc6104c336ef856d9d2c6901bff57"
     },
     {
       "mode": "100644",
       "path": "apps/server/src/routes/mcp.ts",
-      "sha256": "2e176d616c6934b73e45ace608cbc4c2521371db77b4173bb8c6f8b07a2cb15d"
+      "sha256": "7e687dc799a5fe32781bc3f9fc997fa84ee87ea5148d01dc6345e2659b46a142"
     },
     {
       "mode": "100644",

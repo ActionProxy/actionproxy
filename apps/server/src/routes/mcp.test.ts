@@ -3,7 +3,7 @@ import path from 'node:path';
 import Fastify, { type FastifyInstance, type InjectOptions, type LightMyRequestResponse } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { withConfigDefaults, type ResolvedAppConfig } from '../config';
-import { ConflictError, ForbiddenError, McpInsufficientScopeError, UnauthorizedError } from '../errors';
+import { ConflictError, ForbiddenError } from '../errors';
 import type { ApprovalRecord, AuthContext, JsonObject, ToolCallRecord } from '../models';
 import type { ExecutionAttemptRecordV1 } from '../contracts/execution-attempt';
 import type { AuthService } from '../security/auth-service';
@@ -171,6 +171,19 @@ describe('Streamable HTTP MCP route', () => {
 
     expect((await harness.app.inject({ headers: authHeaders(), method: 'GET', url: '/mcp' })).statusCode).toBe(405);
     expect((await harness.app.inject({ headers: authHeaders(), method: 'DELETE', url: '/mcp' })).statusCode).toBe(405);
+  });
+
+  it('rate-limits both public protected-resource metadata routes', async () => {
+    const harness = await makeHarness({ rateLimitMax: 1 });
+
+    for (const url of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp']) {
+      const first = await harness.app.inject({ method: 'GET', url });
+      const limited = await harness.app.inject({ method: 'GET', url });
+
+      expect(first.statusCode, url).toBe(200);
+      expect(limited.statusCode, url).toBe(429);
+      expect(limited.json(), url).toMatchObject({ error: 'rate_limited' });
+    }
   });
 
   it('derives a stable catalog revision from names, schemas, scopes, descriptions, and annotations', () => {
@@ -751,6 +764,7 @@ interface HarnessOptions {
   maxResponseBytes?: number;
   providerFailure?: boolean;
   projectAdditionalToolError?: (error: unknown) => McpExtensionErrorProjection | undefined;
+  rateLimitMax?: number;
   requestAuthentication?: McpRequestAuthentication;
   requestTimeoutMs?: number;
   submitError?: unknown;
@@ -760,28 +774,19 @@ async function makeHarness(options: HarnessOptions = {}) {
   const config = testConfig(options);
   const service = new FakeActionProxy(options);
   const app = Fastify({ bodyLimit: 1024 * 1024, logger: false });
-  if (options.requestAuthentication) {
-    registerSecurityHooks(app, config, {} as AuthService, {
-      mcpRequestAuthentication: options.requestAuthentication,
-    });
-  } else {
-    app.addHook('onRequest', async (request) => {
+  const securityAuthentication = options.requestAuthentication ?? {
+    oauthPresentation: 'protected-resource',
+    resolvePrincipal: (request) => {
       const clientId = header(request, 'x-test-client-id') ?? 'client_a';
       const principalId = header(request, 'x-test-principal-id') ?? 'user_a';
       const tenantId = header(request, 'x-test-tenant-id') ?? 'tenant_a';
       const scopes = (header(request, 'x-test-scopes') ?? 'tool_call:read tool_call:submit').split(' ').filter(Boolean);
-      request.authContext = auth({ clientId, principalId, scopes, tenantId });
-    });
-    app.setErrorHandler((error, _request, reply) => {
-      if (error instanceof McpInsufficientScopeError) {
-        return reply.status(403).send({ error: 'insufficient_scope', scope: error.requiredScope });
-      }
-      if (error instanceof UnauthorizedError) return reply.status(401).send({ error: 'unauthorized' });
-      if (error instanceof ForbiddenError) return reply.status(403).send({ error: 'forbidden' });
-      const normalized = error as Error & { statusCode?: number };
-      return reply.status(normalized.statusCode ?? 500).send({ error: normalized.message });
-    });
-  }
+      return auth({ clientId, principalId, scopes, tenantId }) as AuthContext & { clientId: string };
+    },
+  } satisfies McpRequestAuthentication;
+  registerSecurityHooks(app, config, {} as AuthService, {
+    mcpRequestAuthentication: securityAuthentication,
+  });
   await registerMcpRoutes(app, {
     actionProxy: service as unknown as Pick<ActionProxyService, 'getToolCall' | 'submitToolCall'>,
     additionalTools: options.additionalTools,
@@ -990,7 +995,7 @@ function testConfig(options: HarnessOptions): ResolvedAppConfig {
         audience: 'https://proxy.example/mcp', emailClaim: 'email', groupsClaim: 'groups', issuer: 'https://issuer.example/',
         jwksJson: '{"keys":[]}', nameClaim: 'name', scopesClaim: 'scope',
       },
-      rateLimit: { max: 1000, windowMs: 60_000 },
+      rateLimit: { max: options.rateLimitMax ?? 1000, windowMs: 60_000 },
       slackUserMap: {},
       workspaceId: 'tenant_a',
     },

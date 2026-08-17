@@ -189,7 +189,9 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
   const catalogRevision = mcpCatalogRevision(options.includeBuiltinTools !== false, [...additionalTools.values()]);
   const retiredTools = validateRetiredTools(options.retiredTools ?? {}, additionalTools, options.includeBuiltinTools !== false);
 
-  app.get('/.well-known/oauth-protected-resource', async (_request, reply) => {
+  // registerSecurityHooks enforces this exact limit globally. Repeat it in the
+  // route metadata so Fastify security tooling can verify these public routes.
+  app.get('/.well-known/oauth-protected-resource', { config: { rateLimit: options.config.auth.rateLimit } }, async (_request, reply) => {
     if (!transport.enabled) return disabled(reply);
     if (!presentsMcpOAuth(options.requestAuthentication)) return oauthMetadataDisabled(reply);
     return reply
@@ -197,7 +199,7 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
       .send(protectedResourceMetadata(options.config, options, additionalTools));
   });
 
-  app.get('/.well-known/oauth-protected-resource/mcp', async (_request, reply) => {
+  app.get('/.well-known/oauth-protected-resource/mcp', { config: { rateLimit: options.config.auth.rateLimit } }, async (_request, reply) => {
     if (!transport.enabled) return disabled(reply);
     if (!presentsMcpOAuth(options.requestAuthentication)) return oauthMetadataDisabled(reply);
     return reply
