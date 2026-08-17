@@ -1,13 +1,17 @@
 {
   "name": "@actionproxy/sdk-js",
-  "version": "0.1.0",
-  "description": "JavaScript client and external-runner helper for ActionProxy",
+  "version": "0.1.1",
+  "description": "TypeScript SDK for governing AI agent tool calls with ActionProxy policy, human approval, one-time grants, and audit",
   "keywords": [
+    "actionproxy",
     "ai-agents",
+    "agent-security",
+    "ai-governance",
     "approval-gateway",
     "audit",
     "human-in-the-loop",
-    "tool-calls"
+    "tool-calling",
+    "tool-governance"
   ],
   "license": "Apache-2.0",
   "repository": {
@@ -15,7 +19,7 @@
     "url": "git+https://github.com/ActionProxy/actionproxy.git",
     "directory": "packages/sdk-js"
   },
-  "homepage": "https://github.com/ActionProxy/actionproxy#readme",
+  "homepage": "https://actionproxy.com/quickstart/",
   "bugs": {
     "url": "https://github.com/ActionProxy/actionproxy/issues"
   },

@@ -75,7 +75,11 @@ export type DashboardSnapshotState =
 type CommunityRoute =
   | { name: "overview" }
   | { name: "approvals" }
-  | { name: "approvalDetail"; id: string; returnTo?: string }
+  | {
+      name: "approvalDetail";
+      id: string;
+      returnTarget?: QuickstartReturnTarget;
+    }
   | { name: "authorized" }
   | { name: "audit" }
   | { name: "policy" }
@@ -88,6 +92,12 @@ type CommunityRoute =
     }
   | { name: "toolCallDetail"; id: string }
   | { name: "notFound"; requestedPath: string };
+
+type QuickstartReturnTarget = {
+  guided?: true;
+  journey?: QuickstartJourney;
+  sessionId?: string;
+};
 
 const navigation = [
   {
@@ -316,7 +326,7 @@ export function Dashboard({
           data={data}
           id={route.id}
           onAction={runAction}
-          returnTo={route.returnTo}
+          returnTarget={route.returnTarget}
         />
       )}
       {route.name === "authorized" && <RunnerQueue data={data} />}
@@ -649,12 +659,12 @@ function ApprovalDetail({
   data,
   id,
   onAction,
-  returnTo,
+  returnTarget,
 }: {
   data: DashboardData;
   id: string;
   onAction: (action: () => Promise<void>) => Promise<void>;
-  returnTo?: string;
+  returnTarget?: QuickstartReturnTarget;
 }) {
   const listed = data.pendingApprovals.find((approval) => approval.id === id);
   const [record, setRecord] = useState<{
@@ -850,12 +860,14 @@ function ApprovalDetail({
 
   useEffect(() => {
     if (!completedDecision || !toolCall || !isQuickstartCall(toolCall)) return;
-    const target = returnTo ?? quickstartHref(toolCall);
+    const target = returnTarget
+      ? quickstartReturnHref(returnTarget)
+      : quickstartHref(toolCall);
     const timeout = window.setTimeout(() => {
       window.location.hash = target;
     }, 3_500);
     return () => window.clearTimeout(timeout);
-  }, [completedDecision, returnTo, toolCall]);
+  }, [completedDecision, returnTarget, toolCall]);
 
   if (loadError && !approval) return <ErrorState message={loadError} />;
   if (!approval || !toolCall) return <p role="status">Loading approval…</p>;
@@ -1047,7 +1059,11 @@ function ApprovalDetail({
             <>
               <a
                 className="button-link"
-                href={returnTo ?? quickstartHref(toolCall)}
+                href={
+                  returnTarget
+                    ? quickstartReturnHref(returnTarget)
+                    : quickstartHref(toolCall)
+                }
               >
                 Return now
               </a>
@@ -1084,7 +1100,11 @@ function ApprovalDetail({
           {demoOrigin && (
             <a
               className="button-link"
-              href={returnTo ?? quickstartHref(toolCall)}
+              href={
+                returnTarget
+                  ? quickstartReturnHref(returnTarget)
+                  : quickstartHref(toolCall)
+              }
             >
               Return now
             </a>
@@ -3227,6 +3247,64 @@ function quickstartHref(call: ToolCallRecord): string {
         ? "#/demo?journey=local"
         : "#/approvals";
 }
+function parseQuickstartReturnTarget(
+  value: string | null,
+): QuickstartReturnTarget | undefined {
+  if (value === "#/demo") return {};
+  if (!value?.startsWith("#/demo?")) return undefined;
+
+  const rawQuery = value.slice("#/demo?".length);
+  if (!rawQuery || rawQuery.includes("#")) return undefined;
+  const query = new URLSearchParams(rawQuery);
+  const allowedNames = new Set(["guided", "journey", "session"]);
+  const names = [...query.keys()];
+  if (
+    names.some(
+      (name) => !allowedNames.has(name) || query.getAll(name).length !== 1,
+    )
+  ) {
+    return undefined;
+  }
+
+  const requestedJourney = query.get("journey");
+  const journey: QuickstartJourney | undefined =
+    requestedJourney === "local"
+      ? "local"
+      : requestedJourney === "chatgpt"
+        ? "chatgpt"
+        : undefined;
+  if (!journey) return undefined;
+
+  const sessionId = query.get("session")?.trim();
+  if (sessionId && !quickstartSessionIdPattern.test(sessionId))
+    return undefined;
+
+  const guided = query.get("guided");
+  if (guided !== null && (guided !== "1" || journey !== "local")) {
+    return undefined;
+  }
+
+  return {
+    ...(guided === "1" ? { guided: true as const } : {}),
+    journey,
+    ...(sessionId ? { sessionId } : {}),
+  };
+}
+function quickstartReturnHref(target: QuickstartReturnTarget): string {
+  const journey =
+    target.journey === "local"
+      ? "local"
+      : target.journey === "chatgpt"
+        ? "chatgpt"
+        : undefined;
+  if (!journey) return "#/demo";
+  const query = [`journey=${journey}`];
+  if (target.sessionId) {
+    query.push(`session=${encodeURIComponent(target.sessionId)}`);
+  }
+  if (target.guided) query.push("guided=1");
+  return `#/demo?${query.join("&")}`;
+}
 function readChatGptProofStart(sessionId?: string): string | null {
   if (!sessionId || typeof window === "undefined") return null;
   const value = window.localStorage.getItem(
@@ -3452,14 +3530,10 @@ function parseRoute(hash: string): CommunityRoute {
   const parts = path ? path.split("/").map(decodeURIComponent) : [];
   if (!parts.length) return { name: "overview" };
   if (parts[0] === "approvals" && parts[1] && parts.length === 2) {
-    const returnTo = query.get("returnTo") ?? undefined;
     return {
       id: parts[1],
       name: "approvalDetail",
-      returnTo:
-        returnTo?.startsWith("#/demo?") || returnTo === "#/demo"
-          ? returnTo
-          : undefined,
+      returnTarget: parseQuickstartReturnTarget(query.get("returnTo")),
     };
   }
   if (parts[0] === "approvals" && parts.length === 1)

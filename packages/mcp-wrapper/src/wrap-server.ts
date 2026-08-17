@@ -143,7 +143,7 @@ export class HttpActionProxyGateway implements ActionProxyGateway {
     private readonly fetchFn = fetch,
     private readonly options: HttpActionProxyGatewayOptions = {},
   ) {
-    this.baseUrl = baseUrl.replace(/\/+$/, '');
+    this.baseUrl = stripTrailingSlashes(baseUrl);
     this.sessionId = options.sessionId ?? randomUUID();
     if (!isUuid(this.sessionId)) {
       throw new Error('ActionProxy MCP session id must be a UUID.');
@@ -293,6 +293,14 @@ export class HttpActionProxyGateway implements ActionProxyGateway {
 
     return body as T;
   }
+}
+
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '/') {
+    end -= 1;
+  }
+  return end === value.length ? value : value.slice(0, end);
 }
 
 export class ActionProxyMcpWrapper {
@@ -582,7 +590,7 @@ export class StdioMcpClient implements DownstreamMcpClient {
     try {
       await peer.request('initialize', {
         capabilities: {},
-        clientInfo: { name: 'actionproxy-mcp-wrapper', version: '0.1.0' },
+        clientInfo: { name: 'actionproxy-mcp-wrapper', version: '0.1.1' },
         protocolVersion: '2025-06-18',
       }, { timeoutMs: config.requestTimeoutMs ?? DEFAULT_DOWNSTREAM_REQUEST_TIMEOUT_MS });
       peer.notify('notifications/initialized', {});
@@ -655,7 +663,7 @@ export class McpJsonRpcServer {
         return response(message.id, {
           capabilities: { tools: {} },
           protocolVersion: '2025-06-18',
-          serverInfo: { name: 'actionproxy-mcp-wrapper', version: '0.1.0' },
+          serverInfo: { name: 'actionproxy-mcp-wrapper', version: '0.1.1' },
         });
       }
 

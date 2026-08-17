@@ -44,7 +44,7 @@ class StdioDiscoveryClient {
     peer.start();
     await peer.request('initialize', {
       capabilities: {},
-      clientInfo: { name: 'actionproxy-mcp-discovery', version: '0.1.0' },
+      clientInfo: { name: 'actionproxy-mcp-discovery', version: '0.1.1' },
       protocolVersion: '2025-06-18',
     });
     peer.notify('notifications/initialized', {});

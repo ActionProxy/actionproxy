@@ -37,9 +37,12 @@ Choose exactly one execution boundary: the MCP wrapper for an existing MCP
 server, `runExternalAction` for a JavaScript or TypeScript runner, or the
 documented HTTP grant lifecycle for another runtime. Begin with a simulated
 effect and prove zero dispatch before approval, exactly one after approval,
-zero after denial, and a valid audit chain. ActionProxy v0.1 packages are not
-published to npm; use the guide's explicit local-tarball workflow rather than
-inventing a registry dependency or importing across repository boundaries.
+zero after denial, and a valid audit chain. The coordinated package candidates
+are exactly `@actionproxy/sdk-js@0.1.1` and
+`@actionproxy/mcp-wrapper@0.1.1`. Use them from npm only after both exact
+records resolve with reviewed repository metadata, integrity values, and
+provenance; otherwise use the guide's explicit local-tarball workflow. Never
+invent a registry dependency, dist-tag, or cross-repository import.
 
 ## Repository map
 

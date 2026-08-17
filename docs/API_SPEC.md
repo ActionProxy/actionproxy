@@ -8,7 +8,7 @@ a developer preview and may receive additive changes before a stable release.
 The versioned machine-readable contract is
 [`openapi/actionproxy.openapi.json`](../openapi/actionproxy.openapi.json). It is
 OpenAPI 3.1, uses the JSON Schema draft 2020-12 dialect, and identifies the API
-as `0.1.0`. Its Community operation inventory is checked against the actual
+as `0.1.1`. Its Community operation inventory is checked against the actual
 Fastify route modules; static web routes and routes outside the Community
 boundary are excluded deliberately. Routes that exist only in an explicitly
 enabled mode carry an availability note instead of being presented as
@@ -372,7 +372,11 @@ Telegram identity linking uses:
 - `DELETE /v1/approvers/users/:id/telegram-connection`
 
 Directory delivery identifiers do not grant approval authority. Authenticated
-principal/group checks remain authoritative.
+principal/group checks remain authoritative. To bind a pre-existing directory
+record, an authenticated caller with `admin:approvers` sends its exact OIDC
+subject as `principalId` to `PUT /v1/approvers/users/:id`; the workspace comes
+from authentication, the route never creates a missing id, and duplicate
+authorization identities return `409`.
 
 ## Approval channels and MCP profiles
 

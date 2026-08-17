@@ -587,6 +587,20 @@ export class ActionProxyService {
     return toolCall ? this.expireApprovalIfNeeded(approval, toolCall, auth) : approval;
   }
 
+  async getApprovalForPrincipal(id: string, auth: AuthContext): Promise<ApprovalRecord> {
+    const approval = await this.getApproval(id, auth);
+    const isRequester = approval.requestedByAuth?.principalId === auth.principalId;
+    const isNamedApprover = approval.approverUsers?.includes(auth.principalId) === true;
+    const approverGroups = approval.approverGroups ?? [];
+    const isGroupApprover = approval.approverUsers === undefined
+      && approverGroups.length > 0
+      && hasAnyGroup(auth, approverGroups);
+    if (!isRequester && !isNamedApprover && !isGroupApprover) {
+      throw new NotFoundError(`Approval not found: ${id}`);
+    }
+    return approval;
+  }
+
   async listApprovalDeliveries(approvalId: string, auth?: AuthContext): Promise<ApprovalDeliveryRecord[]> {
     const approval = await this.deps.store.getApproval(approvalId);
     if (!approval) throw new NotFoundError(`Approval not found: ${approvalId}`);

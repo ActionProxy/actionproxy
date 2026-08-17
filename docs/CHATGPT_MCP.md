@@ -87,18 +87,40 @@ bootstrap secrets; never reuse one secret for multiple purposes.
 
 ## Bind an approver privately
 
-Before inviting ChatGPT, create an enabled approver whose `principalId` is the
-same authenticated subject that will review approvals. Run this from the
-ActionProxy host against loopback with the temporary bootstrap credential:
+Before inviting ChatGPT, bind an enabled approver's stable directory id to the
+exact OIDC `sub` of the person who will review approvals. Do not infer the
+subject from an email address or display name. Obtain it from the authorization
+server's verified identity record or a locally verified token, then run this
+from the ActionProxy host against loopback with the temporary bootstrap
+credential.
+
+First list the directory and choose the intended existing record explicitly:
 
 ```bash
+# Use the same temporary value supplied to the server as
+# ACTIONPROXY_BOOTSTRAP_ADMIN_API_KEY.
 export ACTIONPROXY_BOOTSTRAP_TOKEN='replace-with-temporary-bootstrap-secret'
-export ACTIONPROXY_OPERATOR_PRINCIPAL_ID='replace-with-operator-oidc-sub'
 
-curl -fsS http://127.0.0.1:8787/v1/approvers/users \
+curl -fsS http://127.0.0.1:8787/v1/approvers \
   -H "authorization: Bearer $ACTIONPROXY_BOOTSTRAP_TOKEN" \
-  -H 'content-type: application/json' \
-  --data "{\"displayName\":\"ChatGPT demo reviewer\",\"principalId\":\"$ACTIONPROXY_OPERATOR_PRINCIPAL_ID\",\"defaultApprover\":true,\"enabled\":true}" | jq
+  | jq '.users[] | {id, displayName, enabled, principalId}'
+```
+
+Set both values deliberately and update only that existing record. `PUT` will
+return `404` for an unknown directory id and `409` if another approver already
+uses the same authorization identity.
+
+```bash
+export ACTIONPROXY_APPROVER_USER_ID='replace-with-reviewed-directory-id'
+export ACTIONPROXY_OPERATOR_PRINCIPAL_ID='replace-with-exact-operator-oidc-sub'
+
+jq -nc --arg principalId "$ACTIONPROXY_OPERATOR_PRINCIPAL_ID" '{principalId: $principalId}' \
+  | curl -fsS -X PUT \
+      "http://127.0.0.1:8787/v1/approvers/users/$ACTIONPROXY_APPROVER_USER_ID" \
+      -H "authorization: Bearer $ACTIONPROXY_BOOTSTRAP_TOKEN" \
+      -H 'content-type: application/json' \
+      --data-binary @- \
+  | jq '.user | {id, displayName, enabled, principalId}'
 ```
 
 Then remove `ACTIONPROXY_BOOTSTRAP_ADMIN_API_KEY` and restart. Use a short-lived

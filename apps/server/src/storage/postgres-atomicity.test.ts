@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type {
   ActionReceiptRecord,
+  ApproverUserRecord,
   ApprovalDecisionRecord,
   ApprovalRecord,
   ExecutionGrantRecord,
@@ -19,6 +20,7 @@ import type { ApprovalAuthorizationGuard, Store } from './store';
 import { ActionProxyService } from '../services/action-gate';
 import { ToolRegistry } from '../services/tool-registry';
 import type { AuditStore } from './audit-store';
+import { ApproverPrincipalConflictError } from './approver-principal-constraint';
 
 const databaseUrl = process.env.ACTIONPROXY_TEST_POSTGRES_URL;
 const describeIfPostgres = databaseUrl ? describe : describe.skip;
@@ -59,6 +61,42 @@ describeIfPostgres('PostgresStore atomicity contract', () => {
       id,
       principalId: `oidc|alice|${suffix}`,
     });
+  });
+
+  it('atomically accepts only one approver principal binding across Postgres pools', async () => {
+    const suffix = randomUUID();
+    const workspaceId = `workspace_principal_race_${suffix}`;
+    const principalId = `oidc|shared|${suffix}`;
+    const results = await Promise.allSettled([
+      stores[0]!.upsertApproverUser(approverUser('u_alice', workspaceId, principalId)),
+      stores[1]!.upsertApproverUser(approverUser('u_bob', workspaceId, principalId)),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(ApproverPrincipalConflictError);
+    await expect(stores[0]!.listApproverUsers(workspaceId)).resolves.toEqual([
+      expect.objectContaining({ principalId }),
+    ]);
+  });
+
+  it('atomically rejects a principal colliding with another user id fallback', async () => {
+    const suffix = randomUUID();
+    const workspaceId = `workspace_effective_identity_race_${suffix}`;
+    const effectiveIdentity = `oidc|operator|${suffix}`;
+    const results = await Promise.allSettled([
+      stores[0]!.upsertApproverUser(
+        approverUser(`u_mapped_${suffix}`, workspaceId, effectiveIdentity),
+      ),
+      stores[1]!.upsertApproverUser(
+        approverUser(effectiveIdentity, workspaceId),
+      ),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(ApproverPrincipalConflictError);
+    await expect(stores[0]!.listApproverUsers(workspaceId)).resolves.toHaveLength(1);
   });
 
   it('produces one approval finalization and one grant consumption across store instances', async () => {
@@ -785,6 +823,20 @@ function decision(actor: string, authorization: ApprovalAuthorizationV1): Approv
     decidedAt: '2026-07-10T10:00:00.000Z',
     inputDecision: 'original',
     reviewHash: 'review_hash',
+  };
+}
+
+function approverUser(id: string, workspaceId: string, principalId?: string): ApproverUserRecord {
+  return {
+    createdAt: '2026-08-09T10:00:00.000Z',
+    defaultApprover: false,
+    displayName: id,
+    enabled: true,
+    groups: [],
+    id,
+    principalId,
+    updatedAt: '2026-08-09T10:00:00.000Z',
+    workspaceId,
   };
 }
 

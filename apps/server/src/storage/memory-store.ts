@@ -53,6 +53,7 @@ import {
 } from '../contracts/approval-authorization';
 import { validContentInfluenceBindingHash } from '../contracts/content-influence';
 import { hashJson } from '../security/crypto';
+import { assertApproverPrincipalAvailable } from './approver-principal-constraint';
 
 export class MemoryStore implements Store {
   private toolCalls = new Map<string, ToolCallRecord>();
@@ -359,6 +360,7 @@ export class MemoryStore implements Store {
   }
 
   async upsertApproverUser(record: ApproverUserRecord): Promise<ApproverUserRecord> {
+    assertApproverPrincipalAvailable(this.approverUsers.values(), record);
     this.approverUsers.set(workspaceKey(record.workspaceId, record.id), record);
     return record;
   }

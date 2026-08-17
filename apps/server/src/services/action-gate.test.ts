@@ -1326,6 +1326,48 @@ describe('ActionProxyService', () => {
     expect(result.approval?.status).toBe('pending');
   });
 
+  it('limits principal-scoped approval reads to the requester or an eligible approver', async () => {
+    const { service, store } = makeHarness();
+    const requester: AuthContext = {
+      authProvider: 'oidc_jwt',
+      displayName: 'Requester',
+      groups: [],
+      principalId: 'oidc|requester',
+      principalType: 'user',
+      scopes: ['approval:read'],
+      workspaceId: 'default',
+    };
+    const result = await service.submitToolCall(
+      {
+        agentId: 'chatgpt-agent',
+        input: { to: 'customer@example.com' },
+        reason: 'Verify principal-bound approval reads',
+        requestedBy: 'requester@example.com',
+        toolName: 'gmail.send_email',
+      },
+      { auth: requester },
+    );
+
+    await expect(service.getApprovalForPrincipal(result.approval!.id, requester)).resolves.toMatchObject({
+      id: result.approval!.id,
+    });
+    await expect(
+      service.getApprovalForPrincipal(result.approval!.id, {
+        ...requester,
+        displayName: 'Other user',
+        principalId: 'oidc|other',
+      }),
+    ).rejects.toThrow(`Approval not found: ${result.approval!.id}`);
+    await store.updateApproval({ ...result.approval!, approverUsers: ['oidc|approver'] });
+    await expect(
+      service.getApprovalForPrincipal(result.approval!.id, {
+        ...requester,
+        displayName: 'Eligible approver',
+        principalId: 'oidc|approver',
+      }),
+    ).resolves.toMatchObject({ id: result.approval!.id });
+  });
+
   it('binds approval authorization to the stored request, policy, action, review, and decision identities', async () => {
     const { service } = makeHarness();
     const result = await service.submitToolCall(

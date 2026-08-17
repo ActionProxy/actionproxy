@@ -10,7 +10,7 @@ import { ReadStream as TtyReadStream } from "node:tty";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 
-export const FIRST_RUN_VERSION = "0.1.0";
+export const FIRST_RUN_VERSION = "0.1.1";
 export const STATE_VERSION = "actionproxy.first-run-state.v1";
 export const PROFILE_MARKER_VERSION = "actionproxy.chatgpt-tunnel-profile.v3";
 export const STATUS_SCHEMA_VERSION = "actionproxy.quickstart.v1";
@@ -951,7 +951,7 @@ function mcpDemoServerSource() {
     "  const request = JSON.parse(line);",
     "  if (request.method?.startsWith('notifications/')) continue;",
     "  if (request.method === 'initialize') {",
-    "    send({ id: request.id, jsonrpc: '2.0', result: { capabilities: { tools: {} }, protocolVersion: '2025-06-18', serverInfo: { name: 'actionproxy-safe-starter', version: '0.1.0' } } });",
+    "    send({ id: request.id, jsonrpc: '2.0', result: { capabilities: { tools: {} }, protocolVersion: '2025-06-18', serverInfo: { name: 'actionproxy-safe-starter', version: '0.1.1' } } });",
     "  } else if (request.method === 'tools/list') {",
     "    send({ id: request.id, jsonrpc: '2.0', result: { tools } });",
     "  } else if (request.method === 'tools/call') {",

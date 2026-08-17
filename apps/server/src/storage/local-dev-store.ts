@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ApproverGroupRecord, ApproverUserRecord } from '../models';
+import { assertApproverPrincipalAvailable } from './approver-principal-constraint';
 import { MemoryStore } from './memory-store';
 
 interface ApproverDirectoryFile {
@@ -22,6 +23,7 @@ export class LocalDevStore extends MemoryStore {
   }
 
   override async upsertApproverUser(record: ApproverUserRecord): Promise<ApproverUserRecord> {
+    assertApproverPrincipalAvailable(this.persistedApproverUsers.values(), record);
     this.persistedApproverUsers.set(workspaceKey(record.workspaceId, record.id), record);
     this.persistApproverDirectory();
     return record;
@@ -71,6 +73,7 @@ export class LocalDevStore extends MemoryStore {
     const parsed = JSON.parse(fs.readFileSync(this.approverDirectoryPath, 'utf8')) as unknown;
     const directory = parseApproverDirectoryFile(parsed, this.approverDirectoryPath);
     for (const user of directory.users) {
+      assertApproverPrincipalAvailable(this.persistedApproverUsers.values(), user);
       this.persistedApproverUsers.set(workspaceKey(user.workspaceId, user.id), user);
     }
     for (const group of directory.groups) {

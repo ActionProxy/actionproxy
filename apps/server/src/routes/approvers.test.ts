@@ -130,6 +130,64 @@ describe('approver routes', () => {
     expect(listResponse.json()).toEqual({ groups: [], users: [] });
   });
 
+  it('rejects a duplicate principal binding without changing either approver', async () => {
+    const auditStore = new JsonlAuditStore(tempDir());
+    const directory = new ApproverDirectoryService(new MemoryStore());
+    app = await makeApp(auditStore, { directory });
+    await directory.upsertUser('default', 'u_alice', {
+      displayName: 'Alice',
+      principalId: 'oidc|alice',
+    });
+    await directory.upsertUser('default', 'u_recovered', {
+      defaultApprover: true,
+      displayName: 'Recovered approver',
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      payload: { principalId: 'oidc|alice' },
+      url: '/v1/approvers/users/u_recovered',
+    });
+    const directoryAfterConflict = await directory.list('default');
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: 'conflict',
+      message: expect.stringContaining('authorization identity conflicts'),
+    });
+    expect(directoryAfterConflict.users).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'u_alice', principalId: 'oidc|alice' })]),
+    );
+    expect(directoryAfterConflict.users.find((user) => user.id === 'u_recovered')?.principalId).toBeUndefined();
+  });
+
+  it('returns one conflict for concurrent principal bindings', async () => {
+    const directory = new ApproverDirectoryService(new MemoryStore());
+    app = await makeApp(new JsonlAuditStore(tempDir()), { directory });
+    await directory.upsertUser('default', 'u_alice', { displayName: 'Alice' });
+    await directory.upsertUser('default', 'u_bob', { displayName: 'Bob' });
+
+    const responses = await Promise.all([
+      app.inject({
+        method: 'PUT',
+        payload: { principalId: 'oidc|shared' },
+        url: '/v1/approvers/users/u_alice',
+      }),
+      app.inject({
+        method: 'PUT',
+        payload: { principalId: 'oidc|shared' },
+        url: '/v1/approvers/users/u_bob',
+      }),
+    ]);
+
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+    expect(responses.find((response) => response.statusCode === 409)?.json()).toMatchObject({
+      error: 'conflict',
+      message: expect.stringContaining('Approver authorization identity conflicts'),
+    });
+    expect((await directory.list('default')).users.filter((user) => user.principalId === 'oidc|shared')).toHaveLength(1);
+  });
+
   it('disconnects Telegram while keeping the approver user and saved username', async () => {
     const auditStore = new JsonlAuditStore(tempDir());
     const directory = new ApproverDirectoryService(new MemoryStore());

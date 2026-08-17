@@ -30,6 +30,7 @@ import { registerApproverRoutes } from './routes/approvers';
 import { registerDashboardRoutes } from './routes/dashboard';
 import { registerWebAppRoutes } from './routes/web';
 import { registerMcpRoutes } from './routes/mcp';
+import type { McpRouteExtensionOptions } from './routes/mcp';
 import { registerQuickstartStatusRoutes } from './routes/quickstart-status';
 import { IntegrationConfigService } from './integrations/integration-config';
 import { ApprovalNotificationFanout } from './integrations/approval-notifications';
@@ -56,8 +57,21 @@ export interface BuildAppOverrides {
   registerTools?: (tools: ToolRegistry) => void;
 }
 
+export interface AppStores {
+  auditStore: AuditStore;
+  store: Store;
+}
+
 export interface AppExtension<Modules> {
+  /** Edition-owned scopes accepted by authentication and exposed by `/v1/me`. */
+  additionalScopes?: readonly string[];
   createIntegrationConfig?: (config: ReturnType<typeof withConfigDefaults>) => IntegrationConfigService;
+  createMcpRouteOptions?: (
+    context: ActionProxyAppContext,
+    modules: Modules,
+  ) => McpRouteExtensionOptions | Promise<McpRouteExtensionOptions>;
+  /** Private-edition seam for storage implementations that extend the Community store contract. */
+  createStores?: (config: ReturnType<typeof withConfigDefaults>) => Promise<AppStores>;
   createModules: (context: ActionProxyAppContext) => Modules | Promise<Modules>;
   registerIntegrationRoutes?: (context: ActionProxyAppContext, modules: Modules) => void | Promise<void>;
   registerRoutes?: (context: ActionProxyAppContext, modules: Modules) => void | Promise<void>;
@@ -90,11 +104,13 @@ async function buildComposedApp<Modules>(
 
   const policy = loadPolicy(resolvedConfig.policyPath);
   const policyManager = new PolicyManager(resolvedConfig.policyPath, policy);
-  const stores = await createStores(resolvedConfig);
+  const stores = extension?.createStores
+    ? await extension.createStores(resolvedConfig)
+    : await createStores(resolvedConfig);
   const store = stores.store;
   const auditStore = new ChainedAuditStore(stores.auditStore);
   const telemetry = createTelemetryRecorder(resolvedConfig.telemetry);
-  const authService = new AuthService(resolvedConfig.auth, store);
+  const authService = new AuthService(resolvedConfig.auth, store, undefined, extension?.additionalScopes);
   await authService.ensureWorkspace();
   if (hasCloseHook(store)) {
     app.addHook('onClose', async () => {
@@ -170,6 +186,9 @@ async function buildComposedApp<Modules>(
   const extensionModules = extension
     ? await extension.createModules(context)
     : undefined;
+  const mcpExtensionOptions = extension?.createMcpRouteOptions && extensionModules !== undefined
+    ? await extension.createMcpRouteOptions(context, extensionModules)
+    : undefined;
   registerSecurityHooks(app, resolvedConfig, authService);
   await registerHealthRoutes(app);
   if (resolvedConfig.quickstart.enabled) {
@@ -222,6 +241,7 @@ async function buildComposedApp<Modules>(
     config: resolvedConfig,
     redaction,
     store,
+    ...mcpExtensionOptions,
   });
   await registerApproverRoutes(app, approverDirectory, auditStore, {
     telegram: {
@@ -246,7 +266,7 @@ async function buildComposedApp<Modules>(
   return app;
 }
 
-async function createStores(config: AppConfig): Promise<{ auditStore: AuditStore; store: Store }> {
+async function createStores(config: AppConfig): Promise<AppStores> {
   if (config.storage?.mode === 'sqlite') {
     const sqliteStore = new SqliteStore(config.storage.sqlitePath);
     return { auditStore: sqliteStore, store: sqliteStore };

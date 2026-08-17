@@ -233,6 +233,26 @@ describe('strict MCP OAuth bearer validation', () => {
     });
   });
 
+  it('uses the bounded remote JWKS cache and rotation path for generic OIDC API authentication', async () => {
+    const fetchJwks = vi
+      .fn<JwksFetch>()
+      .mockResolvedValueOnce(jwksResponse(jwks(firstKey)))
+      .mockResolvedValueOnce(jwksResponse(jwks(secondKey)));
+    const service = authService(
+      { audience: RESOURCE, jwksUri: 'https://issuer.example.com/jwks', mode: 'oidc_jwt' },
+      fetchJwks,
+    );
+
+    await expect(service.authenticateAuthorizationHeader(`Bearer ${validToken(firstKey)}`)).resolves.toMatchObject({
+      principalId: 'user-123',
+    });
+    await expect(service.authenticateAuthorizationHeader(`Bearer ${validToken(firstKey)}`)).resolves.toBeDefined();
+    await expect(service.authenticateAuthorizationHeader(`Bearer ${validToken(secondKey)}`)).resolves.toMatchObject({
+      principalId: 'user-123',
+    });
+    expect(fetchJwks).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ['missing expiry', { exp: undefined }, /expiry is missing or invalid/u],
     ['string expiry', { exp: String(now() + 300) }, /expiry is missing or invalid/u],

@@ -118,6 +118,8 @@ The v0.1 migration sequence is:
 1  0001_initial
 2  0002_legacy_schema_reconciliation
 3  0003_approver_principal_identity
+4  0004_unique_approver_principal
+5  0005_unique_approver_effective_identity
 ```
 
 Each entry is an immutable SQL artifact under
@@ -125,6 +127,14 @@ Each entry is an immutable SQL artifact under
 The reconciliation file declares only recognized missing Community columns; the
 migrator applies those declarations with backend-appropriate metadata checks.
 Migration SQL is never generated or rewritten during public export.
+
+Approver authorization uses the authenticated principal when present and the
+directory user ID as the legacy fallback. Migration 0005 enforces that
+effective identity atomically per workspace with
+`COALESCE(NULLIF(principal_id, ''), id)`, including the cross-shape case where
+one user's principal equals another legacy user's ID. An upgrade fails closed
+if prior data already contains such a collision; resolve it from a backup and
+an explicit identity review rather than deleting or guessing a binding.
 
 Applied entries are stored in `actionproxy_schema_migrations` with their immutable ID, numeric position, SHA-256 checksum, and application timestamp. Startup fails closed if the database contains an unknown entry, a gap or reordering, or a checksum that no longer matches the released migration source. Do not edit a released migration or its compatibility manifest; add the next ordered migration instead.
 

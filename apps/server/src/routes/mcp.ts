@@ -3,8 +3,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ResolvedAppConfig } from '../config';
 import { assertNoDuplicateJsonKeys, DuplicateJsonKeyError, type McpActionIngress } from '../contracts/action-request';
-import { ConflictError, ForbiddenError, McpInsufficientScopeError, UnauthorizedError } from '../errors';
+import { ConflictError, ForbiddenError, McpInsufficientScopeError, NotFoundError, UnauthorizedError } from '../errors';
 import type { ApprovalRecord, AuthContext, JsonObject, ToolCallRecord } from '../models';
+import type { ActionProxyScope } from '../security/scopes';
 import { redactJsonObject, type RedactionOptions } from '../security/redaction';
 import {
   McpSessionAuthority,
@@ -20,7 +21,7 @@ import type { Store } from '../storage/store';
 export const MCP_PROTOCOL_VERSION = '2025-06-18' as const;
 
 const MCP_MAX_REQUEST_BYTES = 256 * 1024;
-const MCP_SCOPES = ['tool_call:read', 'tool_call:submit'] as const;
+const CORE_MCP_SCOPES = ['tool_call:read', 'tool_call:submit'] as const;
 const FORBIDDEN_RESULT_KEY_FRAGMENTS = [
   'authorization',
   'bearer',
@@ -38,7 +39,43 @@ const FORBIDDEN_RESULT_KEY_FRAGMENTS = [
 type McpActionProxy = Pick<ActionProxyService, 'getToolCall' | 'submitToolCall'>;
 type McpStore = Pick<Store, 'getApprovalByToolCallId' | 'getExecutionAttemptByToolCallId'>;
 
-export interface McpRouteOptions {
+export interface McpAdditionalToolContext {
+  auth: AuthContext & { clientId: string };
+  /** Stable for one signed MCP session + JSON-RPC id; safe for durable replay protection. */
+  idempotencyKey: string;
+}
+
+export interface McpAdditionalToolResult {
+  /** Keep this static and non-sensitive; structuredContent is redacted again by the transport. */
+  contentText: string;
+  isError?: boolean;
+  structuredContent: JsonObject;
+}
+
+export interface McpAdditionalTool {
+  annotations: {
+    destructiveHint: boolean;
+    idempotentHint: boolean;
+    openWorldHint: boolean;
+    readOnlyHint: boolean;
+  };
+  description: string;
+  inputSchema: JsonObject;
+  invoke: (input: JsonObject, context: McpAdditionalToolContext) => Promise<McpAdditionalToolResult>;
+  name: string;
+  requiredScope: ActionProxyScope;
+  title: string;
+}
+
+export interface McpRouteExtensionOptions {
+  additionalTools?: readonly McpAdditionalTool[];
+  /** Platform mode disables Community mock tools and supplies a reviewed catalog instead. */
+  includeBuiltinTools?: boolean;
+  /** Scope required to enumerate the selected catalog after OAuth authentication. */
+  listToolsScope?: ActionProxyScope;
+}
+
+export interface McpRouteOptions extends McpRouteExtensionOptions {
   actionProxy: McpActionProxy;
   config: ResolvedAppConfig;
   redaction?: RedactionOptions;
@@ -108,19 +145,20 @@ const statusInputSchema = z.object({ toolCallId: z.string().min(1).max(512) }).s
 export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteOptions): Promise<void> {
   const transport = options.config.mcp.streamableHttp;
   const sessionAuthority = options.sessionAuthority ?? createSessionAuthority(options.config);
+  const additionalTools = validateAdditionalTools(options.additionalTools ?? [], options.includeBuiltinTools !== false);
 
   app.get('/.well-known/oauth-protected-resource', async (_request, reply) => {
     if (!transport.enabled) return disabled(reply);
     return reply
       .header('cache-control', 'public, max-age=300')
-      .send(protectedResourceMetadata(options.config));
+      .send(protectedResourceMetadata(options.config, options, additionalTools));
   });
 
   app.get('/.well-known/oauth-protected-resource/mcp', async (_request, reply) => {
     if (!transport.enabled) return disabled(reply);
     return reply
       .header('cache-control', 'public, max-age=300')
-      .send(protectedResourceMetadata(options.config));
+      .send(protectedResourceMetadata(options.config, options, additionalTools));
   });
 
   app.get('/mcp', async (request, reply) => {
@@ -190,7 +228,7 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
           rpcResult(message.id, {
             capabilities: { tools: { listChanged: false } },
             protocolVersion: MCP_PROTOCOL_VERSION,
-            serverInfo: { name: 'actionproxy', version: '0.1.0' },
+            serverInfo: { name: 'actionproxy', version: '0.1.1' },
           }),
           transport.maxResponseBytes,
         );
@@ -221,7 +259,7 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
 
       try {
         const result = await withTimeout(
-          handleRequest({ ...message, id: message.id }, auth, session, options, sessionAuthority),
+          handleRequest({ ...message, id: message.id }, auth, session, options, sessionAuthority, additionalTools),
           transport.requestTimeoutMs,
         );
         return sendRpc(reply, result, transport.maxResponseBytes);
@@ -241,6 +279,13 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
           return sendRpc(
             reply,
             rpcResult(message.id, mcpError('The request conflicts with an existing MCP action.', 'idempotency_conflict')),
+            transport.maxResponseBytes,
+          );
+        }
+        if (error instanceof NotFoundError) {
+          return sendRpc(
+            reply,
+            rpcResult(message.id, mcpError('The requested ActionProxy resource was not found.', 'not_found')),
             transport.maxResponseBytes,
           );
         }
@@ -268,14 +313,17 @@ async function handleRequest(
   session: McpSessionBinding,
   options: McpRouteOptions,
   sessions: McpSessionAuthority,
+  additionalTools: ReadonlyMap<string, McpAdditionalTool>,
 ): Promise<JsonRpcResponse> {
   if (message.method === 'ping') return rpcResult(message.id, {});
 
   if (message.method === 'tools/list') {
-    requireMcpScope(auth, 'tool_call:read');
+    requireMcpScope(auth, options.listToolsScope ?? 'tool_call:read');
     const parsed = listToolsParamsSchema.safeParse(message.params ?? {});
     if (!parsed.success) return rpcError(message.id, -32602, 'Invalid tools/list params.');
-    return rpcResult(message.id, { tools: toolDescriptors() });
+    return rpcResult(message.id, {
+      tools: toolDescriptors(options.includeBuiltinTools !== false, [...additionalTools.values()]),
+    });
   }
 
   if (message.method !== 'tools/call') {
@@ -286,6 +334,26 @@ async function handleRequest(
 
   const name = parsed.data.name;
   const rawArguments = parsed.data.arguments ?? {};
+  const additionalTool = additionalTools.get(name);
+  if (additionalTool) {
+    requireMcpScope(auth, additionalTool.requiredScope);
+    try {
+      const result = await additionalTool.invoke(rawArguments, {
+        auth,
+        idempotencyKey: sessions.idempotencyKey(session, message.id),
+      });
+      return rpcResult(message.id, projectAdditionalToolResult(result, options.redaction));
+    } catch (error) {
+      if (error instanceof McpInvalidToolInputError) {
+        return rpcError(message.id, -32602, `Invalid ${name} input.`);
+      }
+      throw error;
+    }
+  }
+
+  if (options.includeBuiltinTools === false) {
+    return rpcError(message.id, -32602, `Unknown platform tool: ${name}`);
+  }
   if (name === 'actionproxy.get_action_status' || name === 'actionproxy.resume_approved_action') {
     requireMcpScope(auth, 'tool_call:read');
     const status = statusInputSchema.safeParse(rawArguments);
@@ -477,14 +545,18 @@ function verifyRequestSession(
   });
 }
 
-function protectedResourceMetadata(config: ResolvedAppConfig): JsonObject {
+function protectedResourceMetadata(
+  config: ResolvedAppConfig,
+  options: McpRouteExtensionOptions,
+  additionalTools: ReadonlyMap<string, McpAdditionalTool>,
+): JsonObject {
   const transport = config.mcp.streamableHttp;
   const authorizationServer = transport.authorizationServer ?? config.auth.oidc.issuer;
   return {
     authorization_servers: authorizationServer ? [authorizationServer] : [],
     bearer_methods_supported: ['header'],
     resource: requiredResourceUrl(config),
-    scopes_supported: [...MCP_SCOPES],
+    scopes_supported: supportedScopes(options, additionalTools),
   };
 }
 
@@ -507,7 +579,7 @@ function requireMcpPrincipal(request: FastifyRequest): AuthContext & { clientId:
   return auth as AuthContext & { clientId: string };
 }
 
-function requireMcpScope(auth: AuthContext, scope: (typeof MCP_SCOPES)[number]): void {
+function requireMcpScope(auth: AuthContext, scope: string): void {
   if (!auth.scopes.includes('*') && !auth.scopes.includes(scope)) throw new McpInsufficientScopeError(scope);
 }
 
@@ -544,10 +616,10 @@ function mcpError(message: string, code: string): McpToolResult {
   };
 }
 
-function toolDescriptors(): JsonObject[] {
+function toolDescriptors(includeBuiltinTools: boolean, additionalTools: readonly McpAdditionalTool[]): JsonObject[] {
   const submitSecurity = [{ scopes: ['tool_call:submit'], type: 'oauth2' }];
   const readSecurity = [{ scopes: ['tool_call:read'], type: 'oauth2' }];
-  return [
+  const builtins = includeBuiltinTools ? [
     {
       _meta: { securitySchemes: submitSecurity },
       annotations: {
@@ -640,7 +712,77 @@ function toolDescriptors(): JsonObject[] {
       securitySchemes: readSecurity,
       title: 'Resume Approved Action',
     },
+  ] : [];
+  return [
+    ...builtins,
+    ...additionalTools.map(additionalToolDescriptor),
   ];
+}
+
+function additionalToolDescriptor(tool: McpAdditionalTool): JsonObject {
+  const securitySchemes = [{ scopes: [tool.requiredScope], type: 'oauth2' }];
+  return {
+    _meta: { securitySchemes },
+    annotations: tool.annotations,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    name: tool.name,
+    securitySchemes,
+    title: tool.title,
+  };
+}
+
+function validateAdditionalTools(
+  tools: readonly McpAdditionalTool[],
+  includeBuiltinTools: boolean,
+): ReadonlyMap<string, McpAdditionalTool> {
+  const registrations = new Map<string, McpAdditionalTool>();
+  const reserved = new Set(
+    includeBuiltinTools
+      ? toolDescriptors(true, []).map((descriptor) => String(descriptor.name))
+      : [],
+  );
+  for (const tool of tools) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,255}$/u.test(tool.name)) {
+      throw new Error(`Invalid additional MCP tool name: ${tool.name}`);
+    }
+    if (reserved.has(tool.name) || registrations.has(tool.name)) {
+      throw new Error(`Duplicate MCP tool registration: ${tool.name}`);
+    }
+    registrations.set(tool.name, tool);
+  }
+  return registrations;
+}
+
+function supportedScopes(
+  options: McpRouteExtensionOptions,
+  additionalTools: ReadonlyMap<string, McpAdditionalTool>,
+): string[] {
+  const scopes = new Set<string>();
+  if (options.includeBuiltinTools !== false) {
+    CORE_MCP_SCOPES.forEach((scope) => scopes.add(scope));
+  }
+  scopes.add(options.listToolsScope ?? 'tool_call:read');
+  additionalTools.forEach((tool) => scopes.add(tool.requiredScope));
+  return [...scopes];
+}
+
+function projectAdditionalToolResult(
+  result: McpAdditionalToolResult,
+  redaction: RedactionOptions = {},
+): McpToolResult {
+  return {
+    content: [{ text: result.contentText.slice(0, 4096), type: 'text' }],
+    isError: result.isError || undefined,
+    structuredContent: safeResult(result.structuredContent, redaction) ?? {},
+  };
+}
+
+export class McpInvalidToolInputError extends Error {
+  constructor() {
+    super('Invalid additional MCP tool input.');
+    this.name = 'McpInvalidToolInputError';
+  }
 }
 
 function toolCallIdSchema(): JsonObject {

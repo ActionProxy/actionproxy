@@ -2,18 +2,51 @@
 
 Wrap downstream MCP servers with ActionProxy approval, one-time execution grants, and audit.
 
-The wrapper is independently packable from a reviewed ActionProxy source
-checkout. Before installing by package name, verify the exact `0.1.0` registry
-record and its repository metadata. To evaluate from source or pin the reviewed
-artifact, create and install a local tarball:
+This package is the local stdio proxy; it does not install or start the
+ActionProxy gateway. Complete the local gateway proof first, then verify and
+install the exact wrapper version:
+
+```bash
+npm view @actionproxy/mcp-wrapper@0.1.1 version dist.integrity repository.url
+npm install --save-exact @actionproxy/mcp-wrapper@0.1.1
+```
+
+If the exact registry lookup does not succeed, the release is not available
+yet. Do not substitute an unscoped or similarly named package. Use the reviewed
+source-tarball fallback below.
+
+Register only `actionproxy-mcp` in the MCP host. Do not also register the
+downstream server directly; that would create an ungoverned bypass around
+ActionProxy policy, approval, grants, and audit.
+
+Start the separate ActionProxy gateway, create `actionproxy.mcp.yaml`, and run
+a static configuration check:
+
+```bash
+npm exec -- actionproxy-mcp doctor --config actionproxy.mcp.yaml
+npm exec -- actionproxy-mcp doctor --config actionproxy.mcp.yaml --json
+```
+
+Static doctor starts no downstream process and does not prove policy or
+execution. After reviewing every configured child command, add `--discover` to
+perform bounded MCP initialization and `tools/list`.
+
+See the [adoption guide](https://github.com/ActionProxy/actionproxy/blob/v0.1.1/docs/ADOPTING.md),
+[wrapper schema](https://actionproxy.com/schemas/actionproxy.mcp-wrapper.v1.schema.json),
+and [host configurations](https://github.com/ActionProxy/actionproxy/tree/v0.1.1/examples/mcp-hosts).
+
+## Source-tarball fallback
+
+To evaluate from a reviewed ActionProxy checkout or pin its exact local
+artifact, create and install a tarball:
 
 ```bash
 corepack pnpm install --frozen-lockfile
 mkdir -p /absolute/path/to/your-app/vendor
 corepack pnpm --filter @actionproxy/mcp-wrapper pack \
-  --out /absolute/path/to/your-app/vendor/actionproxy-mcp-wrapper-0.1.0.tgz
+  --out /absolute/path/to/your-app/vendor/actionproxy-mcp-wrapper-0.1.1.tgz
 cd /absolute/path/to/your-app
-corepack pnpm add ./vendor/actionproxy-mcp-wrapper-0.1.0.tgz
+corepack pnpm add ./vendor/actionproxy-mcp-wrapper-0.1.1.tgz
 corepack pnpm exec actionproxy-mcp wrap --config actionproxy.mcp.yaml
 ```
 

@@ -101,6 +101,53 @@ describe('ActionProxyClient', () => {
     });
   });
 
+  it('removes only a long trailing-slash suffix from the request base', async () => {
+    const fetchMock = vi.fn<ActionProxyFetch>(async () => jsonResponse(submitResponse()));
+    const client = new ActionProxyClient({
+      baseUrl: `http://127.0.0.1:8787/proxy//gateway${'/'.repeat(100_000)}`,
+      fetch: fetchMock,
+    });
+
+    await client.submitToolCall({
+      agentId: 'demo-agent',
+      input: { query: 'refund' },
+      reason: 'Search docs',
+      requestedBy: 'dev@example.com',
+      toolName: 'docs.search',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8787/proxy//gateway/v1/tool-calls',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it(
+    'handles a long trailing-slash near miss without pathological backtracking',
+    async () => {
+      const fetchMock = vi.fn<ActionProxyFetch>(async () => jsonResponse(submitResponse()));
+      const slashNearMiss = `${'/'.repeat(200_000)}x`;
+      const client = new ActionProxyClient({
+        baseUrl: `http://127.0.0.1:8787/proxy${slashNearMiss}`,
+        fetch: fetchMock,
+      });
+
+      await client.submitToolCall({
+        agentId: 'demo-agent',
+        input: { query: 'refund' },
+        reason: 'Search docs',
+        requestedBy: 'dev@example.com',
+        toolName: 'docs.search',
+      });
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `http://127.0.0.1:8787/proxy${slashNearMiss}/v1/tool-calls`,
+        expect.objectContaining({ method: 'POST' }),
+      );
+    },
+    1_000,
+  );
+
   it('sends a caller-supplied Idempotency-Key without changing the request body', async () => {
     const fetchMock = vi.fn<ActionProxyFetch>(async () => jsonResponse(submitResponse()));
     const client = new ActionProxyClient({

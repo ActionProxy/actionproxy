@@ -49,6 +49,9 @@ const SQLITE_MALFORMED_LOCK_STALE_MS = SQLITE_MIGRATION_LOCK_TIMEOUT_MS;
 const MIGRATION_LEDGER_TABLE = 'actionproxy_schema_migrations';
 const LEGACY_SCHEMA_MIGRATION_ID = '0002_legacy_schema_reconciliation';
 const APPROVER_PRINCIPAL_MIGRATION_ID = '0003_approver_principal_identity';
+const UNIQUE_APPROVER_PRINCIPAL_MIGRATION_ID = '0004_unique_approver_principal';
+const UNIQUE_APPROVER_EFFECTIVE_IDENTITY_MIGRATION_ID =
+  '0005_unique_approver_effective_identity';
 const CORE_SCHEMA_TABLES = ['approvals', 'audit_events', 'tool_calls'] as const;
 
 export function loadInitialMigrationSql(): string {
@@ -73,6 +76,10 @@ export function storageMigrations(): readonly StorageMigration[] {
   const initialSql = loadInitialMigrationSql();
   const reconciliationSql = loadMigrationSql('0002_legacy_schema_reconciliation.sql');
   const approverPrincipalSql = loadMigrationSql('0003_approver_principal_identity.sql');
+  const uniqueApproverPrincipalSql = loadMigrationSql('0004_unique_approver_principal.sql');
+  const uniqueApproverEffectiveIdentitySql = loadMigrationSql(
+    '0005_unique_approver_effective_identity.sql',
+  );
   return [
     {
       checksum: migrationChecksum(initialSql),
@@ -97,6 +104,18 @@ export function storageMigrations(): readonly StorageMigration[] {
       position: 3,
       recognizedChecksums: ['95e369c548f2c3eabfb399a9b9b076cc3f61c1f107ee2e791734e7d733e91983'],
       sql: approverPrincipalSql,
+    },
+    {
+      checksum: migrationChecksum(uniqueApproverPrincipalSql),
+      id: UNIQUE_APPROVER_PRINCIPAL_MIGRATION_ID,
+      position: 4,
+      sql: uniqueApproverPrincipalSql,
+    },
+    {
+      checksum: migrationChecksum(uniqueApproverEffectiveIdentitySql),
+      id: UNIQUE_APPROVER_EFFECTIVE_IDENTITY_MIGRATION_ID,
+      position: 5,
+      sql: uniqueApproverEffectiveIdentitySql,
     },
   ];
 }

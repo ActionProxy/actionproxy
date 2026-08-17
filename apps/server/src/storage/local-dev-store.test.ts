@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { ToolCallRecord } from '../models';
+import type { ApproverUserRecord, ToolCallRecord } from '../models';
 import { LocalDevStore } from './local-dev-store';
+import { ApproverPrincipalConflictError } from './approver-principal-constraint';
 
 describe('LocalDevStore', () => {
   it('persists approver users and groups to a private local file', async () => {
@@ -60,7 +61,38 @@ describe('LocalDevStore', () => {
       expect(fs.statSync(directoryPath).mode & 0o777).toBe(0o600);
     }
   });
+
+  it('atomically rejects a mapped principal colliding with a fallback id', async () => {
+    const directoryPath = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'actionproxy-local-dev-effective-identity-test-')),
+      'approvers.json',
+    );
+    const store = new LocalDevStore(directoryPath);
+    const results = await Promise.allSettled([
+      store.upsertApproverUser(approverUser('u_mapped', 'oidc|operator')),
+      store.upsertApproverUser(approverUser('oidc|operator')),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(ApproverPrincipalConflictError);
+    await expect(store.listApproverUsers('default')).resolves.toHaveLength(1);
+  });
 });
+
+function approverUser(id: string, principalId?: string): ApproverUserRecord {
+  return {
+    createdAt: '2026-08-09T10:00:00.000Z',
+    defaultApprover: false,
+    displayName: id,
+    enabled: true,
+    groups: [],
+    id,
+    principalId,
+    updatedAt: '2026-08-09T10:00:00.000Z',
+    workspaceId: 'default',
+  };
+}
 
 function toolCall(overrides: Partial<ToolCallRecord>): ToolCallRecord {
   return {

@@ -44,7 +44,7 @@ For MCP, keep your existing downstream MCP server as the owner of real tool cred
 ```
 
 That command creates a new, non-overwriting, credential-free starter with a
-three-tool downstream fixture. Its exact `@actionproxy/mcp-wrapper@0.1.0`
+three-tool downstream fixture. Its exact `@actionproxy/mcp-wrapper@0.1.1`
 dependency points to a local tarball that the generated preparer builds from
 the reviewed ActionProxy checkout; it neither assumes nor probes npm registry
 availability. The generated policy is a sample and is not loaded by

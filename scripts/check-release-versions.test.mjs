@@ -16,8 +16,8 @@ const scriptPath = path.join(repositoryRoot, "scripts/check-release-versions.mjs
 
 test("all versioned release artifacts and intended tags stay aligned", () => {
   const report = checkReleaseVersions(repositoryRoot);
-  assert.equal(report.version, "0.1.0");
-  assert.equal(report.releaseTag, "v0.1.0");
+  assert.equal(report.version, "0.1.1");
+  assert.equal(report.releaseTag, "v0.1.1");
   assert.ok(report.versionSources.includes("packages/sdk-js/package.json#version"));
   assert.ok(
     report.versionSources.includes("packages/mcp-wrapper/package.json#version"),
@@ -77,7 +77,7 @@ test("CLI has stable success and invalid-usage exit codes", () => {
     encoding: "utf8",
   });
   assert.equal(success.status, 0, success.stderr);
-  assert.match(success.stdout, /Release versions are consistent: 0\.1\.0/u);
+  assert.match(success.stdout, /Release versions are consistent: 0\.1\.1/u);
 
   const invalid = spawnSync(process.execPath, [scriptPath, "--unknown"], {
     cwd: repositoryRoot,

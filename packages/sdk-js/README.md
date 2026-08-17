@@ -7,21 +7,69 @@ ActionProxy is proxy-first for production-shaped integrations. The SDK submits p
 
 ## Install
 
-The SDK is independently packable from a reviewed ActionProxy source checkout.
-Before installing by package name, verify the exact `0.1.0` registry record and
-its repository metadata. To evaluate from source or pin the reviewed artifact,
-create a local tarball:
+This package is the integration client; it does not install or start the
+ActionProxy gateway. Complete the local gateway proof first, then verify and
+install the exact package version:
+
+```sh
+npm view @actionproxy/sdk-js@0.1.1 version dist.integrity repository.url
+npm install --save-exact @actionproxy/sdk-js@0.1.1
+```
+
+If the exact registry lookup does not succeed, the release is not available
+yet. Do not substitute an unscoped or similarly named package. Use the reviewed
+source-tarball fallback below.
+
+Start ActionProxy from its separate checkout before running the example. For
+external runner development, use `corepack pnpm dev:proxy`; see the
+[adoption guide](https://github.com/ActionProxy/actionproxy/blob/v0.1.1/docs/ADOPTING.md)
+for the Docker, source, policy, and proof steps.
+
+## Govern one downstream effect
+
+`runExternalAction` waits for ActionProxy authorization, consumes the exact
+one-time grant, calls the supplied function at most once, and reports the
+outcome. Keep the first callback simulated:
+
+```ts
+import { ActionProxyClient, runExternalAction } from '@actionproxy/sdk-js';
+
+const client = new ActionProxyClient({ baseUrl: 'http://127.0.0.1:8787' });
+
+const governed = await runExternalAction({
+  client,
+  toolName: 'customer.send_update',
+  input: { customerId: 'cus_123', message: 'Your request is ready.' },
+  requestedBy: 'local-developer',
+  agentId: 'consumer-app',
+  idempotencyKey: 'consumer-app:customer-update:1',
+  reason: 'Send the human-reviewed customer update.',
+  execute: async (approvedInput) => ({ simulated: true, approvedInput }),
+});
+
+console.log(governed.toolCall.status, governed.result);
+```
+
+The gateway policy must configure this tool for external execution and exact
+grant consumption. Blocked, rejected, cancelled, expired, replayed, or
+mismatched actions never call `execute`; ambiguous outcomes are never retried
+automatically.
+
+## Source-tarball fallback
+
+To evaluate from a reviewed ActionProxy source checkout or pin its exact local
+artifact, create a tarball:
 
 ```sh
 corepack pnpm install --frozen-lockfile
 corepack pnpm --filter @actionproxy/sdk-js pack \
-  --out /absolute/path/to/your-app/vendor/actionproxy-sdk-js-0.1.0.tgz
+  --out /absolute/path/to/your-app/vendor/actionproxy-sdk-js-0.1.1.tgz
 ```
 
 Then install that exact tarball from the consumer repository:
 
 ```sh
-corepack pnpm add ./vendor/actionproxy-sdk-js-0.1.0.tgz
+corepack pnpm add ./vendor/actionproxy-sdk-js-0.1.1.tgz
 ```
 
 For local workspace development, run the gateway first:
@@ -29,6 +77,9 @@ For local workspace development, run the gateway first:
 ```sh
 corepack pnpm dev
 ```
+
+Machine-readable contracts: [OpenAPI 3.1](https://actionproxy.com/openapi/actionproxy.openapi.json)
+and [policy JSON Schema](https://actionproxy.com/schemas/actionproxy.policy.v1.schema.json).
 
 ## Basic Usage
 

@@ -59,6 +59,10 @@ import { validContentInfluenceBindingHash } from '../contracts/content-influence
 import { hashJson } from '../security/crypto';
 import type { PolicyVersionRecord, PolicyVersionStore } from './migrate';
 import { runSqlite, runSqliteMigrations, sqlJsonLiteral, sqlLiteral } from './migrate';
+import {
+  ApproverPrincipalConflictError,
+  isSqliteApproverPrincipalUniqueViolation,
+} from './approver-principal-constraint';
 
 type SqliteRow = Record<string, unknown>;
 
@@ -497,8 +501,9 @@ export class SqliteStore implements Store, AuditStore, PolicyVersionStore {
   }
 
   async upsertApproverUser(record: ApproverUserRecord): Promise<ApproverUserRecord> {
-    this.exec(`
-      INSERT OR REPLACE INTO approver_users (
+    try {
+      this.exec(`
+      INSERT INTO approver_users (
         id, workspace_id, display_name, email, principal_id, slack_user_id, telegram_chat_id, telegram_username, telegram_user_id, groups_json,
         default_approver, enabled, created_at, updated_at
       ) VALUES (
@@ -516,8 +521,26 @@ export class SqliteStore implements Store, AuditStore, PolicyVersionStore {
         ${record.enabled ? 1 : 0},
         ${sqlLiteral(record.createdAt)},
         ${sqlLiteral(record.updatedAt)}
-      );
-    `);
+      )
+      ON CONFLICT (workspace_id, id) DO UPDATE SET
+        display_name = excluded.display_name,
+        email = excluded.email,
+        principal_id = excluded.principal_id,
+        slack_user_id = excluded.slack_user_id,
+        telegram_chat_id = excluded.telegram_chat_id,
+        telegram_username = excluded.telegram_username,
+        telegram_user_id = excluded.telegram_user_id,
+        groups_json = excluded.groups_json,
+        default_approver = excluded.default_approver,
+        enabled = excluded.enabled,
+        updated_at = excluded.updated_at;
+      `);
+    } catch (error) {
+      if (isSqliteApproverPrincipalUniqueViolation(error)) {
+        throw new ApproverPrincipalConflictError();
+      }
+      throw error;
+    }
     return record;
   }
 

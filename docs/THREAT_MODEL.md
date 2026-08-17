@@ -1,7 +1,7 @@
 # ActionProxy Community threat model
 
 This threat model defines the controls and limitations of ActionProxy Community
-v0.1.0.
+v0.1.1.
 
 ## Local ChatGPT Secure MCP Tunnel demo
 

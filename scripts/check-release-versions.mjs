@@ -73,6 +73,54 @@ const textVersionFiles = [
     required: true,
   },
   {
+    label: "server MCP discovery client identity",
+    minimumMatches: 1,
+    pattern:
+      /clientInfo: \{ name: 'actionproxy-mcp-discovery', version: '([^']+)' \}/gu,
+    relativePath: "apps/server/src/integrations/mcp-discovery.ts",
+    required: true,
+  },
+  {
+    label: "server MCP endpoint identity",
+    minimumMatches: 1,
+    pattern:
+      /serverInfo: \{ name: 'actionproxy', version: '([^']+)' \}/gu,
+    relativePath: "apps/server/src/routes/mcp.ts",
+    required: true,
+  },
+  {
+    label: "ChatGPT MCP preflight identity",
+    minimumMatches: 1,
+    pattern:
+      /clientInfo: \{ name: 'actionproxy-chatgpt-preflight', version: '([^']+)' \}/gu,
+    relativePath: "examples/chatgpt-app/check-endpoint.mjs",
+    required: true,
+  },
+  {
+    label: "ChatGPT local MCP smoke identity",
+    minimumMatches: 1,
+    pattern:
+      /clientInfo: \{ name: 'actionproxy-chatgpt-local-smoke', version: '([^']+)' \}/gu,
+    relativePath: "examples/chatgpt-app/run-local-protocol-smoke.mjs",
+    required: true,
+  },
+  {
+    label: "Google Workspace MCP demo identity",
+    minimumMatches: 1,
+    pattern:
+      /clientInfo: \{ name: 'actionproxy-google-workspace-mcp-demo', version: '([^']+)' \}/gu,
+    relativePath: "examples/google-workspace-mcp-demo/run-gmail-draft-test.mjs",
+    required: true,
+  },
+  {
+    label: "MCP demo server identity",
+    minimumMatches: 1,
+    pattern:
+      /serverInfo: \{ name: 'actionproxy-mcp-demo', version: '([^']+)' \}/gu,
+    relativePath: "examples/mcp-demo/server.mjs",
+    required: true,
+  },
+  {
     firstMatchOnly: true,
     label: "current changelog release",
     minimumMatches: 1,

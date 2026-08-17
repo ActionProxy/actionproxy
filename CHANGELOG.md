@@ -2,6 +2,38 @@
 
 All notable public changes to ActionProxy are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.1
+
+### Added
+
+- Prepared `@actionproxy/sdk-js` and `@actionproxy/mcp-wrapper` for their first
+  public npm release with exact-install guidance, focused registry metadata,
+  protected publication gates, and anonymous consumer verification.
+
+### Changed
+
+- Closed the generated Community source import graph and added verification
+  that rejects unresolved relative imports.
+
+### Security
+
+- Replaced SDK and MCP-wrapper trailing-slash regular expressions with
+  linear-time normalization and added long-input regressions.
+- Fully redacted public secret-scan diagnostics and made approval return
+  navigation reconstruct typed Quickstart URLs instead of replaying an
+  untrusted query string.
+- Enforced one effective approver authorization identity per workspace across
+  Memory, LocalDev, SQLite, and Postgres storage, including collisions between
+  an authenticated principal and another approver's legacy ID fallback.
+- Pinned the transitive `nanoid` 3.x dependency to `3.3.18`, the patched floor
+  for the zero-size custom-generator denial-of-service advisory.
+
+### Distribution
+
+- Exact registry availability is authoritative only after both `0.1.1` records,
+  their integrity, and their provenance verify independently. The reviewed
+  source-tarball path remains the fallback when either registry record is absent.
+
 ## 0.1.0
 
 ### Added

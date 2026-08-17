@@ -59,6 +59,10 @@ import { validContentInfluenceBindingHash } from '../contracts/content-influence
 import { hashJson } from '../security/crypto';
 import type { PolicyVersionRecord, PolicyVersionStore } from './migrate';
 import { createPgPool, runPostgresMigrationsWithPool } from './migrate';
+import {
+  ApproverPrincipalConflictError,
+  isPostgresApproverPrincipalUniqueViolation,
+} from './approver-principal-constraint';
 
 interface PgQueryable {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
@@ -623,8 +627,9 @@ export class PostgresStore implements Store, AuditStore, PolicyVersionStore {
   }
 
   async upsertApproverUser(record: ApproverUserRecord): Promise<ApproverUserRecord> {
-    await this.pool.query(
-      `
+    try {
+      await this.pool.query(
+        `
         INSERT INTO approver_users (
           id, workspace_id, display_name, email, principal_id, slack_user_id, telegram_chat_id, telegram_username,
           telegram_user_id, groups_json, default_approver, enabled, created_at, updated_at
@@ -657,8 +662,14 @@ export class PostgresStore implements Store, AuditStore, PolicyVersionStore {
         record.enabled ? 1 : 0,
         record.createdAt,
         record.updatedAt,
-      ],
-    );
+        ],
+      );
+    } catch (error) {
+      if (isPostgresApproverPrincipalUniqueViolation(error)) {
+        throw new ApproverPrincipalConflictError();
+      }
+      throw error;
+    }
     return record;
   }
 

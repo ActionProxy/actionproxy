@@ -51,7 +51,7 @@ export class ActionProxyClient {
       throw new Error('ActionProxy baseUrl is required.');
     }
 
-    this.baseUrl = options.baseUrl.replace(/\/+$/, '');
+    this.baseUrl = stripTrailingSlashes(options.baseUrl);
     this.fetchFn = options.fetch ?? getGlobalFetch();
   }
 
@@ -255,6 +255,14 @@ function idempotencyHeaders(idempotencyKey: string | undefined): Record<string, 
     throw new Error('ActionProxy idempotencyKey must be a non-empty, header-safe string.');
   }
   return { 'idempotency-key': idempotencyKey };
+}
+
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '/') {
+    end -= 1;
+  }
+  return end === value.length ? value : value.slice(0, end);
 }
 
 function getGlobalFetch(): ActionProxyFetch {

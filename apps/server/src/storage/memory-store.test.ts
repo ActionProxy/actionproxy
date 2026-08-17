@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { ApprovalDecisionRecord, ApprovalRecord, ExecutionGrantRecord, ObservedToolRecord, ToolCallRecord } from '../models';
+import type { ApproverUserRecord, ApprovalDecisionRecord, ApprovalRecord, ExecutionGrantRecord, ObservedToolRecord, ToolCallRecord } from '../models';
 import { buildApprovalAuthorization, type ApprovalAuthorizationV1 } from '../contracts/approval-authorization';
 import { hashJson } from '../security/crypto';
 import { MemoryStore } from './memory-store';
 import type { ApprovalAuthorizationGuard } from './store';
+import { ApproverPrincipalConflictError } from './approver-principal-constraint';
 
 function toolCall(overrides: Partial<ToolCallRecord>): ToolCallRecord {
   return {
@@ -18,6 +19,20 @@ function toolCall(overrides: Partial<ToolCallRecord>): ToolCallRecord {
     toolName: 'docs.search',
     updatedAt: '2026-06-17T10:00:00.000Z',
     ...overrides,
+  };
+}
+
+function approverUser(id: string, principalId?: string): ApproverUserRecord {
+  return {
+    createdAt: '2026-08-09T10:00:00.000Z',
+    defaultApprover: false,
+    displayName: id,
+    enabled: true,
+    groups: [],
+    id,
+    principalId,
+    updatedAt: '2026-08-09T10:00:00.000Z',
+    workspaceId: 'workspace-a',
   };
 }
 
@@ -40,6 +55,34 @@ describe('MemoryStore', () => {
       id: 'u_alice',
       principalId: 'oidc|alice',
     });
+  });
+
+  it('atomically accepts only one concurrent approver principal binding', async () => {
+    const store = new MemoryStore();
+    const results = await Promise.allSettled([
+      store.upsertApproverUser(approverUser('u_alice', 'oidc|shared')),
+      store.upsertApproverUser(approverUser('u_bob', 'oidc|shared')),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(ApproverPrincipalConflictError);
+    await expect(store.listApproverUsers('workspace-a')).resolves.toEqual([
+      expect.objectContaining({ principalId: 'oidc|shared' }),
+    ]);
+  });
+
+  it('atomically rejects a principal colliding with another user id fallback', async () => {
+    const store = new MemoryStore();
+    const results = await Promise.allSettled([
+      store.upsertApproverUser(approverUser('u_mapped', 'oidc|operator')),
+      store.upsertApproverUser(approverUser('oidc|operator')),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(ApproverPrincipalConflictError);
+    await expect(store.listApproverUsers('workspace-a')).resolves.toHaveLength(1);
   });
 
   it('lists recent tool calls with filters and limits', async () => {

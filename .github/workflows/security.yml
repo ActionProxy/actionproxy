@@ -2,6 +2,21 @@ name: security
 
 on:
   workflow_dispatch:
+    inputs:
+      npm_operation:
+        description: Owner-controlled npm release operation
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - bootstrap-next
+          - resume-bootstrap-next
+          - promote-latest
+      npm_confirmation:
+        description: Exact confirmation printed by the release runbook
+        required: false
+        type: string
   pull_request:
   push:
     branches:
@@ -46,8 +61,11 @@ jobs:
           node-version: ${{ matrix.node-version }}
       - run: corepack enable
       - run: corepack pnpm verify:tracked-checkout
-      - run: corepack pnpm verify:oss-boundary
+      - name: Bootstrap-verify the Community boundary before installing dependencies
+        run: node scripts/verify-public-export.mjs . --checkout --strict --bootstrap
       - run: corepack pnpm install --frozen-lockfile
+      - name: Fully verify the Community boundary and source import closure
+        run: corepack pnpm verify:oss-boundary
       - name: Check generated OpenAPI contract
         run: corepack pnpm openapi:check
       - name: Check generated configuration schemas
@@ -192,3 +210,159 @@ jobs:
           -w /repo
           rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
           -color
+
+  npm-release-prepare:
+    name: npm release prepare (owner dispatch only)
+    needs:
+      - first-run-macos
+      - verify
+      - postgres-atomicity
+      - docker-community
+      - codeql
+      - secret-scan
+      - workflow-lint
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' &&
+        inputs.npm_operation != 'none' &&
+        needs['first-run-macos'].result == 'success' &&
+        needs.verify.result == 'success' &&
+        needs['postgres-atomicity'].result == 'success' &&
+        needs['docker-community'].result == 'success' &&
+        needs.codeql.result == 'success' &&
+        needs['secret-scan'].result == 'success' &&
+        needs['workflow-lint'].result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: corepack enable
+      - run: corepack pnpm verify:tracked-checkout
+      - name: Bootstrap-verify the Community boundary before installing dependencies
+        run: node scripts/verify-public-export.mjs . --checkout --strict --bootstrap
+      - run: corepack pnpm release:versions:check
+      - run: corepack pnpm install --frozen-lockfile
+      - name: Fully verify the Community boundary and source import closure
+        run: corepack pnpm verify:oss-boundary
+      - name: Re-run isolated source-package conformance
+        run: corepack pnpm test:consumer-conformance
+      - name: Verify the annotated tag and build the two exact npm tarballs once
+        run: node packages/mcp-wrapper/src/npm-release-artifacts.mjs prepare npm-release-bundle
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Consume the exact tarballs with Node 22
+        run: node packages/mcp-wrapper/src/npm-release-artifacts.mjs consume npm-release-bundle
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Consume the exact tarballs with Node 24
+        run: node packages/mcp-wrapper/src/npm-release-artifacts.mjs consume npm-release-bundle
+      - name: Reverify the unchanged bundle immediately before upload
+        run: node packages/mcp-wrapper/src/npm-release-artifacts.mjs verify npm-release-bundle
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: actionproxy-npm-${{ github.ref_name }}-${{ github.sha }}
+          path: npm-release-bundle
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  npm-release-verify:
+    name: npm artifact verification (owner dispatch only)
+    needs:
+      - npm-release-prepare
+    if: ${{ needs['npm-release-prepare'].result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.11.0
+          package-manager-cache: false
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+      - name: Rebuild the reviewed SDK output for byte comparison only
+        run: corepack pnpm --filter @actionproxy/sdk-js build
+      - name: Rebuild the reviewed MCP output for byte comparison only
+        run: corepack pnpm --filter @actionproxy/mcp-wrapper build
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: actionproxy-npm-${{ github.ref_name }}-${{ github.sha }}
+          path: npm-release-bundle
+      - name: Byte-compare the exact artifact with the fresh reviewed build
+        run: node packages/mcp-wrapper/src/npm-release-artifacts.mjs verify npm-release-bundle
+
+  npm-release:
+    name: npm registry write (owner dispatch only)
+    needs:
+      - npm-release-prepare
+      - npm-release-verify
+    if: >-
+      ${{
+        needs['npm-release-prepare'].result == 'success' &&
+        needs['npm-release-verify'].result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm-production
+    concurrency:
+      group: actionproxy-npm-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.11.0
+          package-manager-cache: false
+      - name: Verify the provenance-capable npm CLI bundled with exact Node
+        run: test "$(npm --version)" = 11.6.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: actionproxy-npm-${{ github.ref_name }}-${{ github.sha }}
+          path: npm-release-bundle
+      - name: Bootstrap both new packages under next
+        if: inputs.npm_operation == 'bootstrap-next' || inputs.npm_operation == 'resume-bootstrap-next'
+        run: node packages/mcp-wrapper/src/npm-release-artifacts.mjs write npm-release-bundle
+        env:
+          ACTIONPROXY_NPM_CONFIRMATION: ${{ inputs.npm_confirmation }}
+          ACTIONPROXY_NPM_OPERATION: ${{ inputs.npm_operation }}
+          ACTIONPROXY_NPM_TARGET_TAG: next
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+      - name: Promote both verified packages to latest
+        if: inputs.npm_operation == 'promote-latest'
+        run: node packages/mcp-wrapper/src/npm-release-artifacts.mjs write npm-release-bundle
+        env:
+          ACTIONPROXY_NPM_CONFIRMATION: ${{ inputs.npm_confirmation }}
+          ACTIONPROXY_NPM_OPERATION: promote-latest
+          ACTIONPROXY_NPM_TARGET_TAG: latest
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+      - name: Verify direct publication anonymously
+        run: node packages/mcp-wrapper/src/npm-release-artifacts.mjs registry-verify npm-release-bundle
+        env:
+          ACTIONPROXY_NPM_OPERATION: ${{ inputs.npm_operation }}
+          NODE_AUTH_TOKEN: ""

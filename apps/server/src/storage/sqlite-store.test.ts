@@ -3,12 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { ActionReceiptRecord, ApprovalDecisionRecord, ApprovalRecord, AuditEvent, ExecutionGrantRecord, ObservedToolRecord, ToolCallRecord } from '../models';
+import type { ActionReceiptRecord, ApproverUserRecord, ApprovalDecisionRecord, ApprovalRecord, AuditEvent, ExecutionGrantRecord, ObservedToolRecord, ToolCallRecord } from '../models';
 import { SqliteStore } from './sqlite-store';
 import { deriveCanonicalPolicyContext } from '../contracts/action-request';
 import { buildApprovalAuthorization, type ApprovalAuthorizationV1 } from '../contracts/approval-authorization';
 import { hashJson } from '../security/crypto';
 import type { ApprovalAuthorizationGuard } from './store';
+import { ApproverPrincipalConflictError } from './approver-principal-constraint';
 
 const describeIfSqlite = hasSqliteCli() ? describe : describe.skip;
 
@@ -59,6 +60,20 @@ function auditEvent(overrides: Partial<AuditEvent> = {}): AuditEvent {
   };
 }
 
+function approverUser(id: string, principalId?: string): ApproverUserRecord {
+  return {
+    createdAt: '2026-08-09T10:00:00.000Z',
+    defaultApprover: false,
+    displayName: id,
+    enabled: true,
+    groups: [],
+    id,
+    principalId,
+    updatedAt: '2026-08-09T10:00:00.000Z',
+    workspaceId: 'workspace-a',
+  };
+}
+
 describeIfSqlite('SqliteStore', () => {
   it('persists authenticated approver principal mappings across restart', async () => {
     const databasePath = dbPath();
@@ -80,6 +95,36 @@ describeIfSqlite('SqliteStore', () => {
       id: 'u_alice',
       principalId: 'oidc|alice',
     });
+  });
+
+  it('atomically accepts only one approver principal binding across store instances', async () => {
+    const databasePath = dbPath();
+    const stores = [new SqliteStore(databasePath), new SqliteStore(databasePath)];
+    const results = await Promise.allSettled([
+      stores[0]!.upsertApproverUser(approverUser('u_alice', 'oidc|shared')),
+      stores[1]!.upsertApproverUser(approverUser('u_bob', 'oidc|shared')),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(ApproverPrincipalConflictError);
+    await expect(stores[0]!.listApproverUsers('workspace-a')).resolves.toEqual([
+      expect.objectContaining({ principalId: 'oidc|shared' }),
+    ]);
+  });
+
+  it('atomically rejects a principal colliding with another user id fallback', async () => {
+    const databasePath = dbPath();
+    const stores = [new SqliteStore(databasePath), new SqliteStore(databasePath)];
+    const results = await Promise.allSettled([
+      stores[0]!.upsertApproverUser(approverUser('u_mapped', 'oidc|operator')),
+      stores[1]!.upsertApproverUser(approverUser('oidc|operator')),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(ApproverPrincipalConflictError);
+    await expect(stores[0]!.listApproverUsers('workspace-a')).resolves.toHaveLength(1);
   });
 
   it('persists tool calls, approvals, and audit events across store instances', async () => {
