@@ -1,5 +1,6 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -13,6 +14,7 @@ import {
   expectedConfirmation,
   hasExactRegistryManifestMetadata,
   parseNpmTarball,
+  resolveWorkspaceYamlDependency,
   sanitizeChildEnvironment,
 } from "./npm-release-artifacts.mjs";
 
@@ -198,6 +200,44 @@ describe("npm release artifacts", () => {
     expect(() =>
       assertReleaseRef({ ...valid, ref: "refs/tags/v0.1.2" }, "0.1.1"),
     ).toThrow(/exact version tag/u);
+  });
+
+  it("resolves yaml from the MCP workspace when no root link exists", () => {
+    const repositoryPath = fs.mkdtempSync(
+      path.join(os.tmpdir(), "actionproxy-npm-yaml-layout-"),
+    );
+    const storeYaml = path.join(
+      repositoryPath,
+      "node_modules",
+      ".pnpm",
+      "yaml@2.9.0",
+      "node_modules",
+      "yaml",
+    );
+    const workspaceNodeModules = path.join(
+      repositoryPath,
+      "packages",
+      "mcp-wrapper",
+      "node_modules",
+    );
+    try {
+      fs.mkdirSync(storeYaml, { recursive: true });
+      fs.mkdirSync(workspaceNodeModules, { recursive: true });
+      fs.symlinkSync(
+        storeYaml,
+        path.join(workspaceNodeModules, "yaml"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+
+      expect(fs.existsSync(path.join(repositoryPath, "node_modules", "yaml"))).toBe(
+        false,
+      );
+      expect(resolveWorkspaceYamlDependency(repositoryPath)).toBe(
+        fs.realpathSync(storeYaml),
+      );
+    } finally {
+      fs.rmSync(repositoryPath, { force: true, recursive: true });
+    }
   });
 
   it("promotes only forward-moving semantic versions", () => {
