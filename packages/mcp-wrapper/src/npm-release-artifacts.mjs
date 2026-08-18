@@ -971,17 +971,7 @@ export function consumeReleaseBundle(bundle, directory) {
         path.join(consumerNodeModules, ...record.name.split("/")),
       );
     }
-    const repositoryNodeModules = fs.realpathSync(
-      path.join(repositoryRoot, "node_modules"),
-    );
-    const workspaceYaml = fs.realpathSync(
-      path.join(repositoryRoot, "node_modules", "yaml"),
-    );
-    if (!workspaceYaml.startsWith(`${repositoryNodeModules}${path.sep}`)) {
-      throw new Error(
-        "The frozen workspace yaml dependency is outside node_modules.",
-      );
-    }
+    const workspaceYaml = resolveWorkspaceYamlDependency(repositoryRoot);
     fs.cpSync(workspaceYaml, path.join(consumerNodeModules, "yaml"), {
       dereference: true,
       errorOnExist: true,
@@ -1035,6 +1025,21 @@ export function consumeReleaseBundle(bundle, directory) {
   } finally {
     fs.rmSync(temporaryRoot, { force: true, recursive: true });
   }
+}
+
+export function resolveWorkspaceYamlDependency(root = repositoryRoot) {
+  const repositoryNodeModules = fs.realpathSync(
+    path.join(root, "node_modules"),
+  );
+  const workspaceYaml = fs.realpathSync(
+    path.join(root, "packages", "mcp-wrapper", "node_modules", "yaml"),
+  );
+  if (!workspaceYaml.startsWith(`${repositoryNodeModules}${path.sep}`)) {
+    throw new Error(
+      "The frozen workspace yaml dependency is outside node_modules.",
+    );
+  }
+  return workspaceYaml;
 }
 
 function installPackageTarball(tarball, destination) {

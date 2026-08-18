@@ -1503,12 +1503,12 @@
     {
       "mode": "100644",
       "path": "packages/mcp-wrapper/src/npm-release-artifacts.mjs",
-      "sha256": "ed238647a949ed76eba4a85a5ee53e8dad4e3396034b6590e895c1d9488c17bc"
+      "sha256": "e5c0f2556d5cdc536ff7b15e25cf61f009c6bd2b59f9e0feb764cf66d2de8fb5"
     },
     {
       "mode": "100644",
       "path": "packages/mcp-wrapper/src/npm-release-artifacts.test.mjs",
-      "sha256": "5b4feead2c9f4d15f64fbe82cbaeeef7a2d43f15804ef655f6d0717ff8950f35"
+      "sha256": "8af8bae1f618fc31ca19d7b8b326359279b613a3a05bf2e1830b69eac38f8bbb"
     },
     {
       "mode": "100644",
