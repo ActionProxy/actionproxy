@@ -14,7 +14,8 @@ export type ApprovalStatus =
   | "approved"
   | "cancelled"
   | "expired"
-  | "rejected";
+  | "rejected"
+  | "superseded";
 export type ApprovalMode = "never" | "required" | "deny";
 export type ContentIntegrity =
   | "organization_managed"

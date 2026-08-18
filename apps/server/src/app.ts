@@ -16,8 +16,10 @@ import { ActionProxyService } from './services/action-gate';
 import { registerHealthRoutes } from './routes/health';
 import { registerToolCallRoutes } from './routes/tool-calls';
 import { registerApprovalRoutes } from './routes/approvals';
+import type { ApprovalRouteOptions } from './routes/approvals';
 import { registerAuditRoutes } from './routes/audit';
 import { registerAuthorizedActionRoutes } from './routes/authorized-actions';
+import type { AuthorizedActionRouteOptions } from './routes/authorized-actions';
 import { registerPolicyRoutes } from './routes/policy';
 import { registerPolicyDetectorRoutes } from './routes/policy-detector';
 import { registerSlackRoutes } from './routes/slack';
@@ -44,9 +46,11 @@ import { ChainedAuditStore } from './security/audit-chain';
 import { hashJson } from './security/crypto';
 import { ExecutionGrantService } from './security/execution-grants';
 import { registerSecurityHooks } from './security/http-security';
+import type { HttpErrorProjector, McpRequestAuthentication } from './security/http-security';
 import { redactionOptionsFromPolicy } from './security/redaction';
 import { createTelemetryRecorder } from './telemetry/telemetry';
 import { createExecutionAuthorizationAuthority } from './contracts/execution-authorization';
+import { createNativeExecutionAuthorizationAuthority } from './contracts/native-execution-authorization';
 import type { ActionProxyAppContext } from './app-context';
 import { QuickstartStatusService } from './services/quickstart-status';
 
@@ -65,6 +69,14 @@ export interface AppStores {
 export interface AppExtension<Modules> {
   /** Edition-owned scopes accepted by authentication and exposed by `/v1/me`. */
   additionalScopes?: readonly string[];
+  createApprovalRouteOptions?: (
+    context: ActionProxyAppContext,
+    modules: Modules,
+  ) => ApprovalRouteOptions | Promise<ApprovalRouteOptions>;
+  createAuthorizedActionRouteOptions?: (
+    context: ActionProxyAppContext,
+    modules: Modules,
+  ) => AuthorizedActionRouteOptions | Promise<AuthorizedActionRouteOptions>;
   createIntegrationConfig?: (config: ReturnType<typeof withConfigDefaults>) => IntegrationConfigService;
   createMcpRouteOptions?: (
     context: ActionProxyAppContext,
@@ -73,6 +85,13 @@ export interface AppExtension<Modules> {
   /** Private-edition seam for storage implementations that extend the Community store contract. */
   createStores?: (config: ReturnType<typeof withConfigDefaults>) => Promise<AppStores>;
   createModules: (context: ActionProxyAppContext) => Modules | Promise<Modules>;
+  /**
+   * Declared before startup validation so a composed edition can replace MCP
+   * OAuth with a server-trusted transport principal resolver.
+   */
+  mcpRequestAuthentication?: McpRequestAuthentication;
+  /** Private-edition static HTTP projection for errors absent from Community. */
+  projectHttpError?: HttpErrorProjector;
   registerIntegrationRoutes?: (context: ActionProxyAppContext, modules: Modules) => void | Promise<void>;
   registerRoutes?: (context: ActionProxyAppContext, modules: Modules) => void | Promise<void>;
 }
@@ -95,7 +114,10 @@ async function buildComposedApp<Modules>(
   extension?: AppExtension<Modules>,
 ) {
   const resolvedConfig = withConfigDefaults(config);
-  assertSafeStartupConfig(resolvedConfig);
+  const extensionMcpRequestAuthentication = extension?.mcpRequestAuthentication;
+  assertSafeStartupConfig(resolvedConfig, {
+    injectedMcpAuthentication: extensionMcpRequestAuthentication !== undefined,
+  });
   const app = Fastify({ bodyLimit: 1024 * 1024, logger: { level: resolvedConfig.logLevel } });
   const startupWarning = unsafeLocalBindWarning(resolvedConfig);
   if (startupWarning) {
@@ -120,6 +142,7 @@ async function buildComposedApp<Modules>(
   await recordPolicyVersion(store, policy);
   const localExecutionMode = resolvedConfig.localExecution?.mode ?? 'disabled';
   const executionAuthorizations = createExecutionAuthorizationAuthority();
+  const nativeExecutionAuthorizations = createNativeExecutionAuthorizationAuthority();
   const tools = new ToolRegistry(executionAuthorizations);
   if (localExecutionMode === 'mock') {
     registerMockTools(tools);
@@ -146,6 +169,7 @@ async function buildComposedApp<Modules>(
       await actionProxy.assertExternalDispatchCurrent(toolCall, input);
       return undefined;
     },
+    nativeExecutionAuthorizations.verifier,
   );
   const redaction = redactionOptionsFromPolicy(policy);
 
@@ -176,6 +200,7 @@ async function buildComposedApp<Modules>(
     config: resolvedConfig,
     executionGrants,
     integrationConfig,
+    nativeExecutionAuthorizationIssuer: nativeExecutionAuthorizations.issuer,
     policyDetector,
     policyManager,
     rawAuditStore: stores.auditStore,
@@ -189,7 +214,29 @@ async function buildComposedApp<Modules>(
   const mcpExtensionOptions = extension?.createMcpRouteOptions && extensionModules !== undefined
     ? await extension.createMcpRouteOptions(context, extensionModules)
     : undefined;
-  registerSecurityHooks(app, resolvedConfig, authService);
+  const authorizedActionRouteOptions =
+    extension?.createAuthorizedActionRouteOptions && extensionModules !== undefined
+      ? await extension.createAuthorizedActionRouteOptions(context, extensionModules)
+      : undefined;
+  const approvalRouteOptions =
+    extension?.createApprovalRouteOptions && extensionModules !== undefined
+      ? await extension.createApprovalRouteOptions(context, extensionModules)
+      : undefined;
+  if (
+    extensionMcpRequestAuthentication &&
+    mcpExtensionOptions?.requestAuthentication &&
+    mcpExtensionOptions.requestAuthentication !== extensionMcpRequestAuthentication
+  ) {
+    throw new Error(
+      'The composed MCP request authentication resolver must be declared once on AppExtension.',
+    );
+  }
+  const mcpRequestAuthentication =
+    extensionMcpRequestAuthentication ?? mcpExtensionOptions?.requestAuthentication;
+  registerSecurityHooks(app, resolvedConfig, authService, {
+    mcpRequestAuthentication,
+    projectHttpError: extension?.projectHttpError,
+  });
   await registerHealthRoutes(app);
   if (resolvedConfig.quickstart.enabled) {
     const quickstartStatus = new QuickstartStatusService({
@@ -208,9 +255,9 @@ async function buildComposedApp<Modules>(
         }
       : undefined,
   });
-  await registerApprovalRoutes(app, actionProxy, redaction);
+  await registerApprovalRoutes(app, actionProxy, redaction, approvalRouteOptions);
   await registerAuditRoutes(app, auditStore, redaction, telemetry);
-  await registerAuthorizedActionRoutes(app, store);
+  await registerAuthorizedActionRoutes(app, store, authorizedActionRouteOptions);
   await registerPolicyRoutes(app, policyManager, auditStore, {
     approverDirectory,
     environment: resolvedConfig.deployment?.mode ?? 'local',
@@ -242,6 +289,7 @@ async function buildComposedApp<Modules>(
     redaction,
     store,
     ...mcpExtensionOptions,
+    requestAuthentication: mcpRequestAuthentication,
   });
   await registerApproverRoutes(app, approverDirectory, auditStore, {
     telegram: {

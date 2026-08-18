@@ -174,6 +174,62 @@ describe('ActionProxyClient', () => {
     });
   });
 
+  it('serializes both supported edited-approval API forms without rewriting input', async () => {
+    const editedInput = {
+      body: 'Your refund has been approved.',
+      subject: 'Refund approved',
+      to: 'customer@example.com',
+    };
+    const pendingApproval = approval({ originalInput: { ...editedInput, body: 'Original draft.' } });
+    const response = {
+      approval: { ...pendingApproval, editedInput, status: 'approved' as const },
+      toolCall: toolCall({ input: editedInput, status: 'executed' }),
+    };
+    const fetchMock = vi
+      .fn<ActionProxyFetch>()
+      .mockResolvedValueOnce(jsonResponse(response))
+      .mockResolvedValueOnce(jsonResponse(response));
+    const client = new ActionProxyClient({ baseUrl: 'http://127.0.0.1:8787', fetch: fetchMock });
+
+    await client.approveApproval('approval/edited', {
+      approvedBy: 'manager@example.com',
+      inputDecision: { input: editedInput, mode: 'edited' },
+      reviewHash: 'review_hash',
+    });
+    await client.approveApproval('approval/legacy-edited', {
+      approvedBy: 'manager@example.com',
+      editedInput,
+      reviewHash: 'legacy_review_hash',
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'http://127.0.0.1:8787/v1/approvals/approval%2Fedited/approve',
+      {
+        body: JSON.stringify({
+          approvedBy: 'manager@example.com',
+          inputDecision: { input: editedInput, mode: 'edited' },
+          reviewHash: 'review_hash',
+        }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      },
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:8787/v1/approvals/approval%2Flegacy-edited/approve',
+      {
+        body: JSON.stringify({
+          approvedBy: 'manager@example.com',
+          editedInput,
+          reviewHash: 'legacy_review_hash',
+        }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      },
+    );
+  });
+
   it.each(['', '   ', ' leading', 'trailing ', 'line\nbreak', 'carriage\rreturn', 'nul\0byte'])(
     'rejects the non-header-safe idempotency key %j before fetch',
     async (idempotencyKey) => {

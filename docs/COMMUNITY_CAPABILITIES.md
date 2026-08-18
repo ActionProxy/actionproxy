@@ -9,7 +9,7 @@ authority, and records the outcome.
 
 | Area                 | Included                                                                                                                                                                                                  |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gateway              | HTTP tool-call lifecycle, policy decisions, approvals, receipts, execution grants, and audit                                                                                                              |
+| Gateway              | HTTP tool-call lifecycle, policy decisions, original or single-reviewer edited approvals, receipts, execution grants, and audit                                                                            |
 | Operator experience  | Local web console, guided mock demo, policy simulation, approval review, runner queue, and audit verification                                                                                             |
 | Adapters             | JavaScript SDK, external-runner helper, stdio MCP wrapper, and experimental OAuth-protected `/mcp`                                                                                                        |
 | Real-tool reference  | Opt-in Google Workspace downstream-MCP example for a real Gmail search and an approval-gated draft; the third-party MCP process owns OAuth and no native Google connector ships                         |
@@ -63,6 +63,9 @@ before making a provider-support claim.
 - Stored action and audit payloads can contain raw sensitive data.
 - Local unauthenticated mode is safe only on loopback.
 - Audit chains are not anchored to an independent transparency service.
+- One-time grants prevent replay of the same authorization; semantic
+  deduplication across separately proposed and approved provider operations
+  remains the operator-owned executor's responsibility.
 - Operators own availability, backups, retention, key management, identity
   configuration, and prevention of bypass paths.
 - Standard `/mcp` is experimental and requires an external OAuth 2.1

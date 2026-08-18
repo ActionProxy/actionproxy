@@ -22,7 +22,9 @@ if (endpoint.pathname !== '/mcp' || endpoint.search || endpoint.hash || rawEndpo
 
 const metadataUrl = new URL('/.well-known/oauth-protected-resource/mcp', endpoint);
 const metadataResponse = await fetch(metadataUrl, { headers: { accept: 'application/json' } });
-if (!metadataResponse.ok) fail(`Protected-resource metadata failed: HTTP ${metadataResponse.status}.`);
+if (!metadataResponse.ok) {
+  fail(`Protected-resource metadata failed: HTTP ${metadataResponse.status}.`);
+}
 const metadata = await metadataResponse.json();
 
 if (metadata.resource !== endpoint.toString()) fail('Protected-resource metadata does not name the exact MCP URL.');
@@ -35,25 +37,7 @@ for (const scope of ['tool_call:read', 'tool_call:submit']) {
   }
 }
 
-const challengeResponse = await fetch(endpoint, {
-  body: JSON.stringify({
-    id: 'actionproxy-preflight',
-    jsonrpc: '2.0',
-    method: 'initialize',
-    params: {
-      capabilities: {},
-      clientInfo: { name: 'actionproxy-chatgpt-preflight', version: '0.1.1' },
-      protocolVersion: '2025-11-25',
-    },
-  }),
-  headers: {
-    accept: 'application/json, text/event-stream',
-    'content-type': 'application/json',
-    origin: 'https://chatgpt.com',
-  },
-  method: 'POST',
-});
-
+const challengeResponse = await fetch(endpoint, mcpRequest(initializePayload('actionproxy-preflight')));
 if (challengeResponse.status !== 401) {
   fail(`Unauthenticated MCP initialization should return HTTP 401; received ${challengeResponse.status}.`);
 }
@@ -66,6 +50,31 @@ console.log(`Protected resource: ${metadata.resource}`);
 console.log(`Authorization server: ${metadata.authorization_servers[0]}`);
 console.log(`Scopes: ${metadata.scopes_supported.join(', ')}`);
 console.log('OAuth discovery preflight passed. No access token or tool call was used.');
+
+function initializePayload(id) {
+  return {
+    id,
+    jsonrpc: '2.0',
+    method: 'initialize',
+    params: {
+      capabilities: {},
+      clientInfo: { name: 'actionproxy-chatgpt-preflight', version: '0.1.1' },
+      protocolVersion: '2025-06-18',
+    },
+  };
+}
+
+function mcpRequest(payload) {
+  return {
+    body: JSON.stringify(payload),
+    headers: {
+      accept: 'application/json, text/event-stream',
+      'content-type': 'application/json',
+      origin: 'https://chatgpt.com',
+    },
+    method: 'POST',
+  };
+}
 
 function fail(message) {
   console.error(message);

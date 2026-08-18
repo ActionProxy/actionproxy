@@ -8,25 +8,44 @@ import {
   redactToolCallResult,
   type RedactionOptions,
 } from '../security/redaction';
+import { hashJson } from '../security/crypto';
 import { requireScope } from '../security/scopes';
 import { isModelVisibleResultWithheld, WITHHELD_MODEL_RESULT_MESSAGE } from '../security/result-visibility';
 import { authContext, mapKnownError } from './route-utils';
 
 const approvalSlaMs = 4 * 60 * 60 * 1000;
 
-const approveSchema = z.object({
-  approvalNonce: z.string().min(1).optional(),
-  approvedBy: z.string().min(1).optional(),
-  note: z.string().optional(),
-  reviewHash: z.string().min(1).optional(),
-  inputDecision: z
-    .discriminatedUnion('mode', [
-      z.object({ mode: z.literal('original') }),
-      z.object({ mode: z.literal('edited'), input: z.record(z.unknown()) }),
-    ])
-    .optional(),
-  editedInput: z.record(z.unknown()).nullable().optional(),
-});
+const approveSchema = z
+  .object({
+    approvalNonce: z.string().min(1).optional(),
+    approvedBy: z.string().min(1).optional(),
+    note: z.string().optional(),
+    reviewHash: z.string().min(1).optional(),
+    inputDecision: z
+      .discriminatedUnion('mode', [
+        z.object({ mode: z.literal('original') }).strict(),
+        z.object({ mode: z.literal('edited'), input: z.record(z.unknown()) }).strict(),
+      ])
+      .optional(),
+    editedInput: z.record(z.unknown()).nullable().optional(),
+  })
+  .superRefine((input, context) => {
+    if (!approvalInputRepresentationsConflict(input)) return;
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'inputDecision and editedInput must describe the same approval input choice.',
+      path: ['inputDecision'],
+    });
+  });
+
+function approvalInputRepresentationsConflict(input: {
+  editedInput?: Record<string, unknown> | null;
+  inputDecision?: { mode: 'edited'; input: Record<string, unknown> } | { mode: 'original' };
+}): boolean {
+  if (!input.inputDecision || input.editedInput === undefined) return false;
+  if (input.inputDecision.mode === 'original') return input.editedInput !== null;
+  return input.editedInput === null || hashJson(input.inputDecision.input) !== hashJson(input.editedInput);
+}
 
 const rejectSchema = z.object({
   approvalNonce: z.string().min(1).optional(),
@@ -40,10 +59,20 @@ const cancelSchema = z.object({
   reason: z.string().optional(),
 });
 
+export interface ApprovalRouteOptions {
+  /** Private-edition capability. Community deliberately does not register this route. */
+  registerRevisionRoute?: (
+    app: FastifyInstance,
+    actionProxy: ActionProxyService,
+    redaction: RedactionOptions,
+  ) => void | Promise<void>;
+}
+
 export async function registerApprovalRoutes(
   app: FastifyInstance,
   actionProxy: ActionProxyService,
   redaction: RedactionOptions = {},
+  options: ApprovalRouteOptions = {},
 ): Promise<void> {
   app.get('/v1/approvals/pending', async (request) => {
     const auth = requireScope(authContext(request), 'approval:read');
@@ -99,6 +128,21 @@ export async function registerApprovalRoutes(
           input: redactJsonObjectAtPath(review.actionEnvelope.input, 'input', redaction),
         },
         approval: redactApproval(review.approval, redaction),
+        preparedAction: review.preparedAction
+          ? {
+              ...review.preparedAction,
+              effectiveInput: redactJsonObjectAtPath(
+                review.preparedAction.effectiveInput,
+                'input',
+                redaction,
+              ),
+              proposalInput: redactJsonObjectAtPath(
+                review.preparedAction.proposalInput,
+                'input',
+                redaction,
+              ),
+            }
+          : undefined,
         toolCall: redactToolCall(review.toolCall, redaction),
       };
     } catch (error) {
@@ -115,12 +159,14 @@ export async function registerApprovalRoutes(
     }
 
     try {
-      const result = await actionProxy.approveApproval(params.id, parsed.data, auth);
+      const result = await actionProxy.approveApproval(params.id, parsed.data, auth, { source: 'actionproxy' });
       return { approval: redactApproval(result.approval, redaction), toolCall: redactToolCall(result.toolCall, redaction) };
     } catch (error) {
       return mapKnownError(reply, error);
     }
   });
+
+  await options.registerRevisionRoute?.(app, actionProxy, redaction);
 
   app.post('/v1/approvals/:id/reject', async (request, reply) => {
     const auth = requireScope(authContext(request), 'approval:reject');
@@ -131,7 +177,7 @@ export async function registerApprovalRoutes(
     }
 
     try {
-      const result = await actionProxy.rejectApproval(params.id, parsed.data, auth);
+      const result = await actionProxy.rejectApproval(params.id, parsed.data, auth, { source: 'actionproxy' });
       return { approval: redactApproval(result.approval, redaction), toolCall: redactToolCall(result.toolCall, redaction) };
     } catch (error) {
       return mapKnownError(reply, error);
@@ -147,7 +193,7 @@ export async function registerApprovalRoutes(
     }
 
     try {
-      const result = await actionProxy.cancelApproval(params.id, parsed.data, auth);
+      const result = await actionProxy.cancelApproval(params.id, parsed.data, auth, { source: 'actionproxy' });
       return { approval: redactApproval(result.approval, redaction), toolCall: redactToolCall(result.toolCall, redaction) };
     } catch (error) {
       return mapKnownError(reply, error);
@@ -167,7 +213,7 @@ export async function registerApprovalRoutes(
   });
 }
 
-function redactApproval<T extends {
+export function redactApproval<T extends {
   decisions?: ApprovalDecisionRecord[];
   editedInput?: Record<string, unknown>;
   originalInput: Record<string, unknown>;
@@ -192,7 +238,7 @@ function redactApproval<T extends {
   };
 }
 
-function redactToolCall<T extends ToolCallRecord>(
+export function redactToolCall<T extends ToolCallRecord>(
   toolCall: T,
   redaction: RedactionOptions,
 ): T {

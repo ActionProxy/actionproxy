@@ -178,6 +178,22 @@ describe('ActionProxy config', () => {
     );
   });
 
+  it('uses the configured product origin for Telegram links and lets its override take precedence', () => {
+    process.env.ACTIONPROXY_PUBLIC_BASE_URL =
+      'http://127.0.0.1:9417/actionproxy///';
+
+    expect(loadConfig().telegram?.publicBaseUrl).toBe(
+      'http://127.0.0.1:9417/actionproxy',
+    );
+
+    process.env.TELEGRAM_PUBLIC_BASE_URL =
+      'https://telegram-console.example/review/';
+
+    expect(loadConfig().telegram?.publicBaseUrl).toBe(
+      'https://telegram-console.example/review',
+    );
+  });
+
   it('rejects invalid email review URLs', () => {
     process.env.ACTIONPROXY_PUBLIC_BASE_URL = 'https://console.example.com?workspace=demo';
     expect(() => loadConfig()).toThrow('must not contain a query string or fragment');
@@ -349,6 +365,60 @@ describe('ActionProxy config', () => {
         },
       },
     })).toThrow('must not contain a query string or fragment');
+  });
+
+  it('keeps resource and signed-session bounds when an edition injects MCP authentication', () => {
+    const base = withConfigDefaults(loadConfig());
+    const injected = {
+      ...base,
+      auth: { ...base.auth, mode: 'none' as const },
+      mcp: {
+        ...base.mcp,
+        streamableHttp: {
+          ...base.mcp.streamableHttp,
+          enabled: true,
+          resourceUrl: 'http://127.0.0.1:8787/mcp',
+          sessionSecret: ['single-user-tunnel-session', 'secret-32-bytes'].join('-'),
+        },
+      },
+    };
+
+    expect(() =>
+      assertSafeStartupConfig(injected, { injectedMcpAuthentication: true }),
+    ).not.toThrow();
+    expect(() => assertSafeStartupConfig(injected)).toThrow(
+      'ACTIONPROXY_MCP_AUTHORIZATION_SERVER is required',
+    );
+    expect(() =>
+      assertSafeStartupConfig(
+        {
+          ...injected,
+          mcp: {
+            ...injected.mcp,
+            streamableHttp: {
+              ...injected.mcp.streamableHttp,
+              resourceUrl: 'http://127.0.0.1:8787/mcp/',
+            },
+          },
+        },
+        { injectedMcpAuthentication: true },
+      ),
+    ).toThrow('exact standard /mcp endpoint without a trailing slash');
+    expect(() =>
+      assertSafeStartupConfig(
+        {
+          ...injected,
+          mcp: {
+            ...injected.mcp,
+            streamableHttp: {
+              ...injected.mcp.streamableHttp,
+              sessionSecret: 'too-short',
+            },
+          },
+        },
+        { injectedMcpAuthentication: true },
+      ),
+    ).toThrow('MCP_SESSION_SECRET');
   });
 
   it('blocks unauthenticated startup on 0.0.0.0 by default', () => {

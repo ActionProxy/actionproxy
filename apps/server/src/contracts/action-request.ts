@@ -120,6 +120,24 @@ export interface NormalizeActionRequestInput {
   receivedAt: string;
   request: SubmitToolCallRequest;
   requestId: string;
+  /** Server-selected stable connected-account identity; never a token. */
+  trustedCredentialReference?: { source: string; value: string };
+  /** Server-owned execution lane for a registered prepared action. */
+  trustedExecutionMode?: { source: string; value: ActionExecutionMode };
+  /** Server-owned operation identity for a registered prepared action. */
+  trustedOperation?: {
+    source: string;
+    value: { kind: ActionOperationKind; name: string };
+  };
+  /** Server-owned policy fields supplied by a registered action contract. */
+  trustedPolicy?: {
+    customerVisible: boolean;
+    operationKind: ActionOperationKind;
+    risk: string;
+    source: string;
+  };
+  /** Server-derived resource set from a registered action contract. */
+  trustedResources?: { source: string; value: ActionResourceHint[] };
   workspaceId: string;
 }
 
@@ -144,7 +162,22 @@ export function normalizeActionRequest(input: NormalizeActionRequestInput): Cano
   const request = input.request;
   const metadata = request.metadata ?? {};
   const actor = actorField(request, input.auth);
-  const policy = deriveCanonicalPolicyContext(request.toolName, request.input, input.auth);
+  const policy = input.trustedPolicy
+    ? {
+        ...deriveCanonicalPolicyContext(request.toolName, request.input, input.auth),
+        customerVisible: sourced(
+          input.trustedPolicy.customerVisible,
+          'trusted',
+          input.trustedPolicy.source,
+        ),
+        operationKind: sourced(
+          input.trustedPolicy.operationKind,
+          'trusted',
+          input.trustedPolicy.source,
+        ),
+        risk: sourced(input.trustedPolicy.risk, 'trusted', input.trustedPolicy.source),
+      }
+    : deriveCanonicalPolicyContext(request.toolName, request.input, input.auth);
   const base = {
     actor,
     agent: input.ingress.source === 'mcp'
@@ -175,13 +208,25 @@ export function normalizeActionRequest(input: NormalizeActionRequestInput): Cano
       policy,
       rationale: sourced(request.reason, 'asserted', 'body.reason'),
     },
-    credentialReference: absent<string>('trusted', 'server.credential-resolver.not-resolved'),
+    credentialReference: input.trustedCredentialReference
+      ? sourced(
+          input.trustedCredentialReference.value,
+          'trusted',
+          input.trustedCredentialReference.source,
+        )
+      : absent<string>('trusted', 'server.credential-resolver.not-resolved'),
     environment: sourced(input.ingress.environment, 'trusted', 'server.deployment.mode'),
-    executionMode: sourced(
-      request.action?.executionMode ?? executionModeFromMetadata(metadata),
-      'asserted',
-      request.action?.executionMode ? 'body.action.executionMode' : 'body.metadata.executionMode',
-    ),
+    executionMode: input.trustedExecutionMode
+      ? sourced(
+          input.trustedExecutionMode.value,
+          'trusted',
+          input.trustedExecutionMode.source,
+        )
+      : sourced(
+          request.action?.executionMode ?? executionModeFromMetadata(metadata),
+          'asserted',
+          request.action?.executionMode ? 'body.action.executionMode' : 'body.metadata.executionMode',
+        ),
     idempotencyKey: input.idempotencyKey
       ? sourced(
           input.idempotencyKey,
@@ -192,16 +237,20 @@ export function normalizeActionRequest(input: NormalizeActionRequestInput): Cano
           input.ingress.source === 'mcp' ? input.ingress.idempotency.trust : 'asserted',
           input.ingress.source === 'mcp' ? input.ingress.idempotency.source : 'header.idempotency-key',
         ),
-    operation: sourced(
-      { name: request.toolName },
-      'derived',
-      'normalizer.tool-name-to-operation',
-    ),
+    operation: input.trustedOperation
+      ? sourced(input.trustedOperation.value, 'trusted', input.trustedOperation.source)
+      : sourced(
+          { name: request.toolName },
+          'derived',
+          'normalizer.tool-name-to-operation',
+        ),
     receivedAt: sourced(input.receivedAt, 'derived', 'server.clock'),
     requestId: sourced(input.requestId, 'derived', 'server.request-id'),
-    resources: request.action?.resources?.length
-      ? sourced(request.action.resources, 'asserted', 'body.action.resources')
-      : absent<ActionResourceHint[]>('asserted', 'body.action.resources'),
+    resources: input.trustedResources
+      ? sourced(input.trustedResources.value, 'derived', input.trustedResources.source)
+      : request.action?.resources?.length
+        ? sourced(request.action.resources, 'asserted', 'body.action.resources')
+        : absent<ActionResourceHint[]>('asserted', 'body.action.resources'),
     session: input.ingress.source === 'mcp' && input.ingress.session
       ? sourced(
           { runId: input.ingress.session.runId, sessionId: input.ingress.session.sessionId },
@@ -223,8 +272,12 @@ export function normalizeActionRequest(input: NormalizeActionRequestInput): Cano
     ),
     tenant: sourced(
       { id: input.workspaceId },
-      input.auth && input.auth.authProvider !== 'none' ? 'externally_verified' : 'trusted',
-      input.auth && input.auth.authProvider !== 'none' ? 'auth.workspaceId' : 'server.workspaceId',
+      externallyVerifiedAuth(input.auth) ? 'externally_verified' : 'trusted',
+      externallyVerifiedAuth(input.auth)
+        ? 'auth.workspaceId'
+        : input.auth?.authProvider === 'tunnel_single_user'
+          ? 'server.tunnel-single-user.workspaceId'
+          : 'server.workspaceId',
     ),
     tool: sourced({ name: request.toolName }, 'asserted', 'body.toolName'),
     version: CANONICAL_ACTION_REQUEST_VERSION,
@@ -262,8 +315,12 @@ export function deriveCanonicalPolicyContext(
       ? absent<number>('derived', 'arguments.amount|amountCents')
       : sourced(amount, 'derived', 'arguments.amount|amountCents'),
     approverGroup: absent<string>(
-      auth && auth.authProvider !== 'none' ? 'externally_verified' : 'trusted',
-      auth && auth.authProvider !== 'none' ? 'auth.groups.no-single-group-selected' : 'server.no-verified-approver-group',
+      externallyVerifiedAuth(auth) ? 'externally_verified' : 'trusted',
+      externallyVerifiedAuth(auth)
+        ? 'auth.groups.no-single-group-selected'
+        : auth?.authProvider === 'tunnel_single_user'
+          ? 'server.tunnel-single-user.no-approver-group'
+          : 'server.no-verified-approver-group',
     ),
     currency: currency
       ? sourced(currency, 'derived', 'arguments.currency')
@@ -416,11 +473,23 @@ function actorField(request: SubmitToolCallRequest, auth?: AuthContext): Sourced
         id: auth.principalId,
         type: auth.principalType,
       },
-      auth.authProvider === 'none' ? 'trusted' : 'externally_verified',
-      auth.authProvider === 'none' ? 'server.local-auth.principal' : 'auth.principal',
+      externallyVerifiedAuth(auth) ? 'externally_verified' : 'trusted',
+      externallyVerifiedAuth(auth)
+        ? 'auth.principal'
+        : auth.authProvider === 'tunnel_single_user'
+          ? 'server.tunnel-single-user.principal'
+          : 'server.local-auth.principal',
     );
   }
   return sourced({ id: request.requestedBy, type: 'local' }, 'asserted', 'body.requestedBy');
+}
+
+function externallyVerifiedAuth(auth: AuthContext | undefined): boolean {
+  return Boolean(
+    auth &&
+    auth.authProvider !== 'none' &&
+    auth.authProvider !== 'tunnel_single_user',
+  );
 }
 
 function sessionField(metadata: JsonObject): SourcedField<{ runId?: string; sessionId?: string }> {

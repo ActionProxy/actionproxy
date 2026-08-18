@@ -1415,7 +1415,14 @@ function PolicySimulator({
           <pre>
             {prettyJson({
               approverResolution: trace.approverResolution,
-              ruleEvaluations: trace.ruleEvaluations,
+              ruleEvaluations: trace.ruleEvaluations.map((evaluation) => ({
+                ...evaluation,
+                conditions: evaluation.conditions.map((condition) => ({
+                  ...condition,
+                  actual: "[REDACTED]",
+                  expected: "[REDACTED]",
+                })),
+              })),
             })}
           </pre>
         </div>

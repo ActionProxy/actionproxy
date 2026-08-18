@@ -12,7 +12,7 @@ ActionProxy gateway. Complete the local gateway proof first, then verify and
 install the exact package version:
 
 ```sh
-npm view @actionproxy/sdk-js@0.1.1 version dist.integrity repository.url
+npm view @actionproxy/sdk-js@0.1.1 version dist.integrity repository.url dist.attestations
 npm install --save-exact @actionproxy/sdk-js@0.1.1
 ```
 

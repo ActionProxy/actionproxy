@@ -12,6 +12,14 @@ export class ConflictError extends Error {
   }
 }
 
+/** A terminal approval conflict whose provider presentation was already reconciled in this request. */
+export class ApprovalPresentationSynchronizedConflictError extends ConflictError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ApprovalPresentationSynchronizedConflictError';
+  }
+}
+
 export class UnauthorizedError extends Error {
   constructor(message: string) {
     super(message);

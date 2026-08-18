@@ -7,6 +7,7 @@ import {
 } from '../contracts/execution-authorization';
 import { buildExecutionAttempt, executionAttemptOutcome } from '../contracts/execution-attempt';
 import { buildContentInfluenceEvidence } from '../contracts/content-influence';
+import { createNativeExecutionAuthorizationAuthority } from '../contracts/native-execution-authorization';
 import type { ActionReceiptRecord, ApprovalRecord, AuditEvent, AuthContext, JsonObject, ToolCallRecord } from '../models';
 import { hashJson } from '../security/crypto';
 import { deriveInfluenceScopeId } from '../security/influence-scope';
@@ -83,6 +84,175 @@ describe('execution grant attempt HTTP compatibility', () => {
         }),
       ]),
     );
+  });
+
+  it('rejects generic consume and outcome routes for prepared native actions without the opaque capability', async () => {
+    const fixture = await makeFixture(undefined, undefined, { preparedAction: true });
+    app = fixture.app;
+    const dispatch = vi.spyOn(fixture.store, 'consumeExecutionGrantAndDispatchAttemptAtomically');
+
+    const genericConsume = await fixture.consume();
+
+    expect(genericConsume.statusCode).toBe(403);
+    expect(genericConsume.json().message).toContain('server-owned native execution authorization');
+    expect(dispatch).not.toHaveBeenCalled();
+    await expect(fixture.store.getExecutionAttempt(fixture.attempt.id)).resolves.toMatchObject({ state: 'reserved' });
+
+    const consumeInput = {
+      input: fixture.toolCall.input,
+      policyVersionHash: fixture.grant.policyVersionHash,
+      toolCallId: fixture.toolCall.id,
+      toolName: fixture.toolCall.toolName,
+    };
+    const intentHash = fixture.toolCall.actionEnvelope!.preparedAction!.intentHash;
+    const dispatchBinding = {
+      attemptId: fixture.attempt.id,
+      grantId: fixture.grant.id,
+      intentHash,
+      phase: 'dispatch' as const,
+      toolCallId: fixture.toolCall.id,
+      version: 'actionproxy.native-execution-binding.v1' as const,
+      workspaceId,
+    };
+    await fixture.service.consumeGrant(
+      fixture.grant.id,
+      consumeInput,
+      runnerAuth(),
+      { nativeExecutionAuthorization: fixture.nativeAuthority.issuer.issue(dispatchBinding) },
+    );
+
+    const genericOutcome = await fixture.outcome({ result: { ok: true }, status: 'succeeded' });
+
+    expect(genericOutcome.statusCode).toBe(403);
+    expect(genericOutcome.json().message).toContain('server-owned native execution authorization');
+    await expect(fixture.store.getExecutionAttempt(fixture.attempt.id)).resolves.toMatchObject({ state: 'dispatched' });
+  });
+
+  it('fails closed before consuming native authority when a prepared dispatch coordinator is absent', async () => {
+    const fixture = await makeFixture(undefined, undefined, {
+      installGrantDispatchCoordinator: false,
+      preparedAction: true,
+    });
+    app = fixture.app;
+    const genericDispatch = vi.spyOn(fixture.store, 'consumeExecutionGrantAndDispatchAttemptAtomically');
+    const consumeInput = {
+      input: fixture.toolCall.input,
+      policyVersionHash: fixture.grant.policyVersionHash,
+      toolCallId: fixture.toolCall.id,
+      toolName: fixture.toolCall.toolName,
+    };
+    const nativeExecutionAuthorization = fixture.nativeAuthority.issuer.issue({
+      attemptId: fixture.attempt.id,
+      grantId: fixture.grant.id,
+      intentHash: fixture.toolCall.actionEnvelope!.preparedAction!.intentHash,
+      phase: 'dispatch',
+      toolCallId: fixture.toolCall.id,
+      version: 'actionproxy.native-execution-binding.v1',
+      workspaceId,
+    });
+
+    await expect(fixture.service.consumeGrant(
+      fixture.grant.id,
+      consumeInput,
+      runnerAuth(),
+      { nativeExecutionAuthorization },
+    )).rejects.toThrow('server dispatch coordinator is not installed');
+    expect(genericDispatch).not.toHaveBeenCalled();
+    expect((await fixture.store.getExecutionGrant(fixture.grant.id))?.consumedAt).toBeUndefined();
+    await expect(fixture.store.getExecutionAttempt(fixture.attempt.id)).resolves.toMatchObject({ state: 'reserved' });
+
+    fixture.service.installGrantDispatchCoordinator({
+      dispatch: ({ atomicInput }) => fixture.store.consumeExecutionGrantAndDispatchAttemptAtomically(atomicInput),
+    });
+    await expect(fixture.service.consumeGrant(
+      fixture.grant.id,
+      consumeInput,
+      runnerAuth(),
+      { nativeExecutionAuthorization },
+    )).resolves.toMatchObject({ consumedAt: expect.any(String) });
+    expect(genericDispatch).toHaveBeenCalledOnce();
+  });
+
+  it('atomically records and replays a known prepared-native outcome', async () => {
+    const fixture = await makeFixture(undefined, undefined, { preparedAction: true });
+    app = fixture.app;
+    const atomicOutcome = vi.spyOn(fixture.store, 'recordKnownExternalExecutionOutcomeAtomically');
+    const atomicAdoption = vi.spyOn(fixture.store, 'adoptKnownExternalExecutionOutcomeAtomically');
+    const legacyAttemptTransition = vi.spyOn(fixture.store, 'transitionExecutionAttemptAtomically');
+    const legacyReceiptProjection = vi.spyOn(fixture.store, 'recordActionReceiptOutcomeAtomically');
+    const intentHash = fixture.toolCall.actionEnvelope!.preparedAction!.intentHash;
+    const binding = (phase: 'dispatch' | 'outcome') => ({
+      attemptId: fixture.attempt.id,
+      grantId: fixture.grant.id,
+      intentHash,
+      phase,
+      toolCallId: fixture.toolCall.id,
+      version: 'actionproxy.native-execution-binding.v1' as const,
+      workspaceId,
+    });
+    await fixture.service.consumeGrant(
+      fixture.grant.id,
+      {
+        input: fixture.toolCall.input,
+        policyVersionHash: fixture.grant.policyVersionHash,
+        toolCallId: fixture.toolCall.id,
+        toolName: fixture.toolCall.toolName,
+      },
+      runnerAuth(),
+      { nativeExecutionAuthorization: fixture.nativeAuthority.issuer.issue(binding('dispatch')) },
+    );
+    const report = () => fixture.service.reportOutcome(
+      fixture.grant.id,
+      { result: { providerId: 'provider_result_1' }, status: 'succeeded' },
+      runnerAuth(),
+      { nativeExecutionAuthorization: fixture.nativeAuthority.issuer.issue(binding('outcome')) },
+    );
+
+    await expect(report()).resolves.toMatchObject({
+      attempt: { state: 'succeeded' },
+      receipt: { outcome: { result: { providerId: 'provider_result_1' }, status: 'succeeded' } },
+      toolCall: { status: 'executed' },
+    });
+    await expect(report()).resolves.toMatchObject({
+      attempt: { state: 'succeeded' },
+      toolCall: { status: 'executed' },
+    });
+    expect(atomicOutcome).toHaveBeenCalledOnce();
+    expect(atomicAdoption).toHaveBeenCalledOnce();
+    expect(legacyAttemptTransition).not.toHaveBeenCalled();
+    expect(legacyReceiptProjection).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for legacy native-write grants after prepared-action mode is installed', async () => {
+    const consumeFixture = await makeFixture();
+    app = consumeFixture.app;
+    consumeFixture.service.installPreparedNativeWriteRequirement(
+      (toolName) => toolName === consumeFixture.toolCall.toolName,
+    );
+
+    const consume = await consumeFixture.consume();
+
+    expect(consume.statusCode).toBe(403);
+    expect(consume.json().message).toContain('Legacy native-write grants cannot execute');
+    await expect(consumeFixture.store.getExecutionAttempt(consumeFixture.attempt.id)).resolves.toMatchObject({
+      state: 'reserved',
+    });
+    await app.close();
+
+    const outcomeFixture = await makeFixture();
+    app = outcomeFixture.app;
+    expect((await outcomeFixture.consume()).statusCode).toBe(200);
+    outcomeFixture.service.installPreparedNativeWriteRequirement(
+      (toolName) => toolName === outcomeFixture.toolCall.toolName,
+    );
+
+    const outcome = await outcomeFixture.outcome({ result: { ok: true }, status: 'succeeded' });
+
+    expect(outcome.statusCode).toBe(403);
+    expect(outcome.json().message).toContain('Legacy native-write grants cannot record an outcome');
+    await expect(outcomeFixture.store.getExecutionAttempt(outcomeFixture.attempt.id)).resolves.toMatchObject({
+      state: 'dispatched',
+    });
   });
 
   it.each([
@@ -1098,7 +1268,9 @@ async function makeFixture(
   options: {
     approval?: boolean;
     executionAuthorizations?: ExecutionAuthorizationAuthority | null;
+    installGrantDispatchCoordinator?: boolean;
     mcpClientId?: string;
+    preparedAction?: boolean;
   } = {},
 ) {
   const store = new MemoryStore();
@@ -1114,6 +1286,22 @@ async function makeFixture(
     input,
     inputHash,
     operation: { name: 'docs.search' },
+    ...(options.preparedAction
+      ? {
+          preparedAction: {
+            adapterId: 'google_workspace',
+            adapterVersion: 'test-adapter-v1',
+            contractHash: 'contract_hash_test',
+            contractId: 'actionproxy.prepared-test.v1',
+            contractVersion: '1',
+            intentHash: 'intent_hash_test',
+            intentId: 'intent_test',
+            operationHash: 'operation_hash_test',
+            serializerVersion: 'test-serializer-v1',
+            version: 'actionproxy.prepared-action-binding.v1' as const,
+          },
+        }
+      : {}),
     protocol: 'mcp' as const,
     resources: [{ name: 'docs.search', type: 'mcp.tool' }],
     source: { id: adapterId, type: 'mcp' as const },
@@ -1190,6 +1378,7 @@ async function makeFixture(
     toolCall,
   });
   expect((await store.reserveExecutionAttemptAtomically(attempt, approval?.authorization)).outcome).toBe('reserved');
+  const nativeAuthority = createNativeExecutionAuthorizationAuthority();
   const service = new ExecutionGrantService(
     { secret, ttlSeconds: 300 },
     store,
@@ -1199,7 +1388,14 @@ async function makeFixture(
     options.executionAuthorizations === null
       ? (undefined as unknown as ExecutionAuthorizationAuthority)
       : options.executionAuthorizations ?? createExecutionAuthorizationAuthority(),
+    undefined,
+    nativeAuthority.verifier,
   );
+  if (options.preparedAction && options.installGrantDispatchCoordinator !== false) {
+    service.installGrantDispatchCoordinator({
+      dispatch: ({ atomicInput }) => store.consumeExecutionGrantAndDispatchAttemptAtomically(atomicInput),
+    });
+  }
   const grant = await service.createGrant({ actor: toolCall.requestedBy, receipt, toolCall });
   const server = Fastify({ logger: false });
   server.addHook('onRequest', async (request) => {
@@ -1212,6 +1408,7 @@ async function makeFixture(
     attempt,
     audit,
     grant,
+    nativeAuthority,
     receipt,
     service,
     store,

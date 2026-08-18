@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ResolvedAppConfig } from './config';
 import type { IntegrationConfigService } from './integrations/integration-config';
+import type { NativeExecutionAuthorizationIssuer } from './contracts/native-execution-authorization';
 import type { PolicyManager } from './policy/policy-manager';
 import type { ChainedAuditStore } from './security/audit-chain';
 import type { AuthService } from './security/auth-service';
@@ -22,6 +23,7 @@ export interface ActionProxyAppContext {
   config: ResolvedAppConfig;
   executionGrants: ExecutionGrantService;
   integrationConfig: IntegrationConfigService;
+  nativeExecutionAuthorizationIssuer: NativeExecutionAuthorizationIssuer;
   policyDetector: PolicyDetectorService;
   policyManager: PolicyManager;
   redaction: RedactionOptions;

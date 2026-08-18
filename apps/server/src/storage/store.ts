@@ -136,6 +136,63 @@ export type AtomicActionReceiptOutcomeResult = {
   receipt?: ActionReceiptRecord;
 };
 
+export interface AtomicApprovedExternalAuthorizationPublicationInput {
+  approvalId: string;
+  attempt: ExecutionAttemptRecordV1;
+  grant: ExecutionGrantRecord;
+  receipt: ActionReceiptRecord;
+  toolCall: ToolCallRecord;
+}
+
+export interface AtomicApprovedExternalAuthorizationPublicationResult {
+  approval?: ApprovalRecord;
+  attempt?: ExecutionAttemptRecordV1;
+  grant?: ExecutionGrantRecord;
+  outcome: 'binding_mismatch' | 'conflict' | 'created' | 'not_found' | 'replay' | 'state_mismatch';
+  receipt?: ActionReceiptRecord;
+  toolCall?: ToolCallRecord;
+}
+
+export interface AtomicKnownExternalExecutionOutcomeAdoptionInput {
+  attemptId: string;
+  receipt: ActionReceiptRecord;
+  toolCall: ToolCallRecord;
+  workspaceId: string;
+}
+
+export interface AtomicKnownExternalExecutionOutcomeAdoptionResult {
+  attempt?: ExecutionAttemptRecordV1;
+  grant?: ExecutionGrantRecord;
+  outcome: 'adopted' | 'binding_mismatch' | 'conflict' | 'not_found' | 'reconciliation_required' | 'replay' | 'state_mismatch';
+  receipt?: ActionReceiptRecord;
+  toolCall?: ToolCallRecord;
+}
+
+export interface AtomicKnownExternalExecutionOutcomeRecordingInput {
+  attemptId: string;
+  attemptOutcome: ExecutionAttemptOutcomeV1;
+  receiptOutcome: NonNullable<ActionReceiptRecord['outcome']>;
+  reservationOwner: string;
+  toolCall: ToolCallRecord;
+  workspaceId: string;
+}
+
+export interface AtomicKnownExternalExecutionOutcomeRecordingResult {
+  attempt?: ExecutionAttemptRecordV1;
+  grant?: ExecutionGrantRecord;
+  outcome:
+    | 'binding_mismatch'
+    | 'conflict'
+    | 'not_found'
+    | 'owner_mismatch'
+    | 'reconciliation_required'
+    | 'recorded'
+    | 'replay'
+    | 'state_mismatch';
+  receipt?: ActionReceiptRecord;
+  toolCall?: ToolCallRecord;
+}
+
 export interface ApprovalAuthorizationGuard {
   activePolicyVersionHash: string;
   authorization: ApprovalAuthorizationV1;
@@ -297,6 +354,15 @@ export interface Store {
     input: AtomicExecutionAttemptGrantBindingInput,
   ): Promise<AtomicExecutionAttemptGrantBindingResult>;
   consumeExecutionGrantAndDispatchAttemptAtomically(input: AtomicGrantDispatchInput): Promise<AtomicGrantDispatchResult>;
+  publishApprovedExternalAuthorizationAtomically(
+    input: AtomicApprovedExternalAuthorizationPublicationInput,
+  ): Promise<AtomicApprovedExternalAuthorizationPublicationResult>;
+  adoptKnownExternalExecutionOutcomeAtomically(
+    input: AtomicKnownExternalExecutionOutcomeAdoptionInput,
+  ): Promise<AtomicKnownExternalExecutionOutcomeAdoptionResult>;
+  recordKnownExternalExecutionOutcomeAtomically(
+    input: AtomicKnownExternalExecutionOutcomeRecordingInput,
+  ): Promise<AtomicKnownExternalExecutionOutcomeRecordingResult>;
 
   createActionReceipt(record: ActionReceiptRecord): Promise<ActionReceiptRecord>;
   getActionReceipt(id: string): Promise<ActionReceiptRecord | undefined>;

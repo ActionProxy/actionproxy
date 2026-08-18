@@ -2,10 +2,14 @@ import { Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ResolvedAppConfig } from '../config';
-import { assertNoDuplicateJsonKeys, DuplicateJsonKeyError, type McpActionIngress } from '../contracts/action-request';
+import {
+  assertNoDuplicateJsonKeys,
+  DuplicateJsonKeyError,
+  hashCanonicalJson,
+  type McpActionIngress,
+} from '../contracts/action-request';
 import { ConflictError, ForbiddenError, McpInsufficientScopeError, NotFoundError, UnauthorizedError } from '../errors';
 import type { ApprovalRecord, AuthContext, JsonObject, ToolCallRecord } from '../models';
-import type { ActionProxyScope } from '../security/scopes';
 import { redactJsonObject, type RedactionOptions } from '../security/redaction';
 import {
   McpSessionAuthority,
@@ -14,6 +18,11 @@ import {
   type McpSessionBinding,
 } from '../security/mcp-session';
 import { deriveInfluenceScopeId } from '../security/influence-scope';
+import {
+  assertMcpAuthenticatedPrincipal,
+  presentsMcpOAuth,
+  type McpRequestAuthentication,
+} from '../security/http-security';
 import { isModelVisibleResultWithheld, WITHHELD_MODEL_RESULT_MESSAGE } from '../security/result-visibility';
 import type { ActionProxyService } from '../services/action-gate';
 import type { Store } from '../storage/store';
@@ -35,14 +44,28 @@ const FORBIDDEN_RESULT_KEY_FRAGMENTS = [
   'signature',
   'token',
 ];
+const SAFE_RESULT_KEYS_WITH_SENSITIVE_FRAGMENTS = new Set([
+  'accesstokenexpiresat',
+  'storedauthorizationstatus',
+]);
 
 type McpActionProxy = Pick<ActionProxyService, 'getToolCall' | 'submitToolCall'>;
 type McpStore = Pick<Store, 'getApprovalByToolCallId' | 'getExecutionAttemptByToolCallId'>;
 
 export interface McpAdditionalToolContext {
+  /** Server-derived adapter id bound into the verified MCP session. */
+  adapterId: string;
+  /** Server-derived agent id for ActionProxy submissions from this adapter. */
+  agentId: string;
   auth: AuthContext & { clientId: string };
+  /** Deterministic revision of the exact MCP catalog bound into this signed session. */
+  catalogRevision: string;
   /** Stable for one signed MCP session + JSON-RPC id; safe for durable replay protection. */
   idempotencyKey: string;
+  /** Canonical, transport-owned MCP ingress provenance for ActionProxy submissions. */
+  ingress: McpActionIngress;
+  /** Server-derived ActionEnvelope source for this authenticated MCP adapter. */
+  source: { id: string; name: string; type: 'mcp' };
 }
 
 export interface McpAdditionalToolResult {
@@ -63,16 +86,33 @@ export interface McpAdditionalTool {
   inputSchema: JsonObject;
   invoke: (input: JsonObject, context: McpAdditionalToolContext) => Promise<McpAdditionalToolResult>;
   name: string;
-  requiredScope: ActionProxyScope;
+  requiredScope: string;
   title: string;
+}
+
+export interface McpRetiredTool {
+  refreshInstruction: string;
+  replacement: string;
+}
+
+export interface McpExtensionErrorProjection {
+  code: number;
+  data?: JsonObject;
+  message: string;
 }
 
 export interface McpRouteExtensionOptions {
   additionalTools?: readonly McpAdditionalTool[];
   /** Platform mode disables Community mock tools and supplies a reviewed catalog instead. */
   includeBuiltinTools?: boolean;
-  /** Scope required to enumerate the selected catalog after OAuth authentication. */
-  listToolsScope?: ActionProxyScope;
+  /** Scope required to enumerate the selected catalog after MCP request authentication. */
+  listToolsScope?: string;
+  /** Maps only failures thrown by injected additional tools. */
+  projectAdditionalToolError?: (error: unknown) => McpExtensionErrorProjection | undefined;
+  /** Server-owned request authentication; omitted means Community OAuth bearer validation. */
+  requestAuthentication?: McpRequestAuthentication;
+  /** Known historical names that must return actionable diagnostics but never be advertised. */
+  retiredTools?: Readonly<Record<string, McpRetiredTool>>;
 }
 
 export interface McpRouteOptions extends McpRouteExtensionOptions {
@@ -146,16 +186,22 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
   const transport = options.config.mcp.streamableHttp;
   const sessionAuthority = options.sessionAuthority ?? createSessionAuthority(options.config);
   const additionalTools = validateAdditionalTools(options.additionalTools ?? [], options.includeBuiltinTools !== false);
+  const catalogRevision = mcpCatalogRevision(options.includeBuiltinTools !== false, [...additionalTools.values()]);
+  const retiredTools = validateRetiredTools(options.retiredTools ?? {}, additionalTools, options.includeBuiltinTools !== false);
 
-  app.get('/.well-known/oauth-protected-resource', async (_request, reply) => {
+  // registerSecurityHooks enforces this exact limit globally. Repeat it in the
+  // route metadata so Fastify security tooling can verify these public routes.
+  app.get('/.well-known/oauth-protected-resource', { config: { rateLimit: options.config.auth.rateLimit } }, async (_request, reply) => {
     if (!transport.enabled) return disabled(reply);
+    if (!presentsMcpOAuth(options.requestAuthentication)) return oauthMetadataDisabled(reply);
     return reply
       .header('cache-control', 'public, max-age=300')
       .send(protectedResourceMetadata(options.config, options, additionalTools));
   });
 
-  app.get('/.well-known/oauth-protected-resource/mcp', async (_request, reply) => {
+  app.get('/.well-known/oauth-protected-resource/mcp', { config: { rateLimit: options.config.auth.rateLimit } }, async (_request, reply) => {
     if (!transport.enabled) return disabled(reply);
+    if (!presentsMcpOAuth(options.requestAuthentication)) return oauthMetadataDisabled(reply);
     return reply
       .header('cache-control', 'public, max-age=300')
       .send(protectedResourceMetadata(options.config, options, additionalTools));
@@ -163,14 +209,14 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
 
   app.get('/mcp', async (request, reply) => {
     if (!transport.enabled) return disabled(reply);
-    requireMcpPrincipal(request);
+    requireMcpPrincipal(request, options.requestAuthentication);
     assertAllowedOrigin(request, transport.allowedOrigins);
     return reply.header('allow', 'POST').status(405).send({ error: 'mcp_sse_not_supported' });
   });
 
   app.delete('/mcp', async (request, reply) => {
     if (!transport.enabled) return disabled(reply);
-    requireMcpPrincipal(request);
+    requireMcpPrincipal(request, options.requestAuthentication);
     assertAllowedOrigin(request, transport.allowedOrigins);
     return reply.header('allow', 'POST').status(405).send({ error: 'mcp_session_deletion_not_supported' });
   });
@@ -180,7 +226,7 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
     { bodyLimit: MCP_MAX_REQUEST_BYTES, preParsing: rejectAmbiguousMcpJson },
     async (request, reply) => {
       if (!transport.enabled) return disabled(reply);
-      const auth = requireMcpPrincipal(request);
+      const auth = requireMcpPrincipal(request, options.requestAuthentication);
       assertAllowedOrigin(request, transport.allowedOrigins);
       if (!isJsonContentType(headerValue(request.headers['content-type']))) {
         return reply.status(415).send({ error: 'unsupported_media_type', message: 'MCP requests require application/json.' });
@@ -216,6 +262,7 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
         // it. ActionProxy currently implements the 2025-06-18 feature set.
         const issued = sessionAuthority.issue({
           adapterId: auth.clientId!,
+          catalogRevision,
           principalId: auth.principalId,
           protocolVersion: MCP_PROTOCOL_VERSION,
           resource: requiredResourceUrl(options.config),
@@ -226,6 +273,7 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
         return sendRpc(
           reply,
           rpcResult(message.id, {
+            _meta: { 'actionproxy/catalogRevision': catalogRevision },
             capabilities: { tools: { listChanged: false } },
             protocolVersion: MCP_PROTOCOL_VERSION,
             serverInfo: { name: 'actionproxy', version: '0.1.1' },
@@ -236,7 +284,7 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
 
       let session: McpSessionBinding;
       try {
-        session = verifyRequestSession(request, auth, options.config, sessionAuthority);
+        session = verifyRequestSession(request, auth, options.config, sessionAuthority, catalogRevision);
       } catch (error) {
         if (error instanceof McpSessionError) {
           reply.status(error.code === 'mcp_session_expired' ? 404 : 400);
@@ -259,7 +307,16 @@ export async function registerMcpRoutes(app: FastifyInstance, options: McpRouteO
 
       try {
         const result = await withTimeout(
-          handleRequest({ ...message, id: message.id }, auth, session, options, sessionAuthority, additionalTools),
+          handleRequest(
+            { ...message, id: message.id },
+            auth,
+            session,
+            options,
+            sessionAuthority,
+            additionalTools,
+            retiredTools,
+            catalogRevision,
+          ),
           transport.requestTimeoutMs,
         );
         return sendRpc(reply, result, transport.maxResponseBytes);
@@ -314,6 +371,8 @@ async function handleRequest(
   options: McpRouteOptions,
   sessions: McpSessionAuthority,
   additionalTools: ReadonlyMap<string, McpAdditionalTool>,
+  retiredTools: ReadonlyMap<string, McpRetiredTool>,
+  catalogRevision: string,
 ): Promise<JsonRpcResponse> {
   if (message.method === 'ping') return rpcResult(message.id, {});
 
@@ -322,7 +381,13 @@ async function handleRequest(
     const parsed = listToolsParamsSchema.safeParse(message.params ?? {});
     if (!parsed.success) return rpcError(message.id, -32602, 'Invalid tools/list params.');
     return rpcResult(message.id, {
-      tools: toolDescriptors(options.includeBuiltinTools !== false, [...additionalTools.values()]),
+      _meta: { 'actionproxy/catalogRevision': catalogRevision },
+      tools: toolDescriptors(
+        options.includeBuiltinTools !== false,
+        [...additionalTools.values()],
+        presentsMcpOAuth(options.requestAuthentication),
+        catalogRevision,
+      ),
     });
   }
 
@@ -334,21 +399,34 @@ async function handleRequest(
 
   const name = parsed.data.name;
   const rawArguments = parsed.data.arguments ?? {};
+  const actionContext = mcpActionContext(auth, session, options.config, sessions, message.id, catalogRevision);
   const additionalTool = additionalTools.get(name);
   if (additionalTool) {
     requireMcpScope(auth, additionalTool.requiredScope);
     try {
-      const result = await additionalTool.invoke(rawArguments, {
-        auth,
-        idempotencyKey: sessions.idempotencyKey(session, message.id),
-      });
+      const result = await additionalTool.invoke(rawArguments, actionContext);
       return rpcResult(message.id, projectAdditionalToolResult(result, options.redaction));
     } catch (error) {
       if (error instanceof McpInvalidToolInputError) {
         return rpcError(message.id, -32602, `Invalid ${name} input.`);
       }
+      const projected = options.projectAdditionalToolError?.(error);
+      if (projected) {
+        return rpcError(message.id, projected.code, projected.message, projected.data);
+      }
       throw error;
     }
+  }
+
+  const retiredTool = retiredTools.get(name);
+  if (retiredTool) {
+    return rpcError(message.id, -32602, `Platform tool retired: ${name}`, {
+      catalogRevision,
+      code: 'tool_retired',
+      refreshInstruction: retiredTool.refreshInstruction,
+      replacement: retiredTool.replacement,
+      retrySafe: false,
+    });
   }
 
   if (options.includeBuiltinTools === false) {
@@ -367,8 +445,43 @@ async function handleRequest(
   const input = parseGovernedInput(name, rawArguments);
   if (!input) return rpcError(message.id, -32602, `Unknown or invalid governed tool: ${name}`);
 
-  const agentId = `mcp-client:${auth.clientId}`;
-  const idempotencyKey = sessions.idempotencyKey(session, message.id);
+  const result = await options.actionProxy.submitToolCall(
+    {
+      action: {
+        executionMode: 'local_mock',
+        operation: { kind: operationKind(name), name },
+        protocol: 'mcp',
+        resources: [{ name, type: 'mcp.tool' }],
+        source: actionContext.source,
+      },
+      agentId: actionContext.agentId,
+      input,
+      metadata: { adapter: 'mcp-streamable-http' },
+      reason: `Authenticated MCP client requested ${name}`,
+      requestedBy: auth.email ?? auth.principalId,
+      toolName: name,
+    },
+    {
+      auth,
+      idempotencyKey: actionContext.idempotencyKey,
+      ingress: actionContext.ingress,
+    },
+  );
+  assertOriginatingAdapter(result.toolCall, auth, session);
+  return rpcResult(message.id, await projectToolCall(result.toolCall, options, result.approval));
+}
+
+function mcpActionContext(
+  auth: AuthContext & { clientId: string },
+  session: McpSessionBinding,
+  config: ResolvedAppConfig,
+  sessions: McpSessionAuthority,
+  messageId: McpJsonRpcId,
+  catalogRevision: string,
+): McpAdditionalToolContext {
+  const adapterIdentity = mcpAdapterIdentity(auth);
+  const adapterId = auth.clientId;
+  const agentId = `mcp-client:${adapterId}`;
   const influenceScopeId = deriveInfluenceScopeId({
     adapterId: session.adapterId,
     principalId: session.principalId,
@@ -377,17 +490,18 @@ async function handleRequest(
     transportSessionId: session.sessionId,
     workspaceId: session.tenantId,
   });
+  const source = { id: adapterId, name: adapterIdentity.sourceName, type: 'mcp' as const };
   const ingress: McpActionIngress = {
-    adapterId: auth.clientId,
-    adapterSource: 'oauth.access-token.client-id',
-    adapterTrust: 'externally_verified',
+    adapterId,
+    adapterSource: adapterIdentity.provenance,
+    adapterTrust: adapterIdentity.trust,
     agent: {
       id: agentId,
-      name: 'Authenticated MCP OAuth client',
-      source: 'mcp.adapter-agent-label',
+      name: adapterIdentity.agentName,
+      source: adapterIdentity.provenance,
       trust: 'derived',
     },
-    environment: options.config.deployment?.mode ?? 'self_hosted',
+    environment: config.deployment?.mode ?? 'self_hosted',
     idempotency: { source: 'mcp.signed-session+jsonrpc-id', trust: 'derived' },
     protocol: 'mcp',
     session: {
@@ -397,26 +511,37 @@ async function handleRequest(
     },
     source: 'mcp',
   };
-  const result = await options.actionProxy.submitToolCall(
-    {
-      action: {
-        executionMode: 'local_mock',
-        operation: { kind: operationKind(name), name },
-        protocol: 'mcp',
-        resources: [{ name, type: 'mcp.tool' }],
-        source: { id: auth.clientId, name: 'MCP Streamable HTTP', type: 'mcp' },
-      },
-      agentId,
-      input,
-      metadata: { adapter: 'mcp-streamable-http' },
-      reason: `Authenticated MCP client requested ${name}`,
-      requestedBy: auth.email ?? auth.principalId,
-      toolName: name,
-    },
-    { auth, idempotencyKey, ingress },
-  );
-  assertOriginatingAdapter(result.toolCall, auth, session);
-  return rpcResult(message.id, await projectToolCall(result.toolCall, options, result.approval));
+  return {
+    adapterId,
+    agentId,
+    auth,
+    catalogRevision,
+    idempotencyKey: sessions.idempotencyKey(session, messageId),
+    ingress,
+    source,
+  };
+}
+
+function mcpAdapterIdentity(auth: AuthContext): {
+  agentName: string;
+  provenance: string;
+  sourceName: string;
+  trust: McpActionIngress['adapterTrust'];
+} {
+  if (auth.authProvider === 'tunnel_single_user') {
+    return {
+      agentName: 'Server-authenticated single-user MCP tunnel client',
+      provenance: 'actionproxy.mcp-request-authentication.tunnel-single-user',
+      sourceName: 'Authenticated Single-User MCP Tunnel',
+      trust: 'trusted',
+    };
+  }
+  return {
+    agentName: 'Authenticated MCP OAuth client',
+    provenance: 'oauth.access-token.client-id',
+    sourceName: 'MCP Streamable HTTP',
+    trust: 'externally_verified',
+  };
 }
 
 function parseGovernedInput(name: string, input: JsonObject): JsonObject | undefined {
@@ -529,6 +654,7 @@ function verifyRequestSession(
   auth: AuthContext & { clientId: string },
   config: ResolvedAppConfig,
   sessions: McpSessionAuthority,
+  catalogRevision: string,
 ): McpSessionBinding {
   const token = headerValue(request.headers['mcp-session-id']);
   const protocolVersion = headerValue(request.headers['mcp-protocol-version']);
@@ -538,6 +664,7 @@ function verifyRequestSession(
   }
   return sessions.verify(token, {
     adapterId: auth.clientId,
+    catalogRevision,
     principalId: auth.principalId,
     protocolVersion,
     resource: requiredResourceUrl(config),
@@ -571,12 +698,15 @@ function createSessionAuthority(config: ResolvedAppConfig): McpSessionAuthority 
   return new McpSessionAuthority(transport.sessionSecret, transport.sessionTtlMs);
 }
 
-function requireMcpPrincipal(request: FastifyRequest): AuthContext & { clientId: string } {
-  const auth = request.authContext;
-  if (auth?.authProvider !== 'oidc_jwt' || typeof auth.clientId !== 'string' || !auth.clientId.trim()) {
+function requireMcpPrincipal(
+  request: FastifyRequest,
+  requestAuthentication: McpRequestAuthentication | undefined,
+): AuthContext & { clientId: string } {
+  const auth = assertMcpAuthenticatedPrincipal(request.authContext);
+  if (!requestAuthentication && auth.authProvider !== 'oidc_jwt') {
     throw new UnauthorizedError('MCP requires an OAuth bearer with a verified client identity.');
   }
-  return auth as AuthContext & { clientId: string };
+  return auth;
 }
 
 function requireMcpScope(auth: AuthContext, scope: string): void {
@@ -616,12 +746,17 @@ function mcpError(message: string, code: string): McpToolResult {
   };
 }
 
-function toolDescriptors(includeBuiltinTools: boolean, additionalTools: readonly McpAdditionalTool[]): JsonObject[] {
-  const submitSecurity = [{ scopes: ['tool_call:submit'], type: 'oauth2' }];
-  const readSecurity = [{ scopes: ['tool_call:read'], type: 'oauth2' }];
+function toolDescriptors(
+  includeBuiltinTools: boolean,
+  additionalTools: readonly McpAdditionalTool[],
+  oauthPresented = true,
+  catalogRevision?: string,
+): JsonObject[] {
+  const submitSecurity = toolSecuritySchemes(oauthPresented, 'tool_call:submit');
+  const readSecurity = toolSecuritySchemes(oauthPresented, 'tool_call:read');
   const builtins = includeBuiltinTools ? [
     {
-      _meta: { securitySchemes: submitSecurity },
+      _meta: descriptorMeta(submitSecurity, catalogRevision),
       annotations: {
         destructiveHint: false,
         idempotentHint: true,
@@ -640,7 +775,7 @@ function toolDescriptors(includeBuiltinTools: boolean, additionalTools: readonly
       title: 'Search Docs',
     },
     {
-      _meta: { securitySchemes: submitSecurity },
+      _meta: descriptorMeta(submitSecurity, catalogRevision),
       annotations: {
         destructiveHint: true,
         idempotentHint: false,
@@ -663,7 +798,7 @@ function toolDescriptors(includeBuiltinTools: boolean, additionalTools: readonly
       title: 'Send Email',
     },
     {
-      _meta: { securitySchemes: submitSecurity },
+      _meta: descriptorMeta(submitSecurity, catalogRevision),
       annotations: {
         destructiveHint: true,
         idempotentHint: false,
@@ -685,7 +820,7 @@ function toolDescriptors(includeBuiltinTools: boolean, additionalTools: readonly
       title: 'Delete Customer Demo',
     },
     {
-      _meta: { securitySchemes: readSecurity },
+      _meta: descriptorMeta(readSecurity, catalogRevision),
       annotations: {
         destructiveHint: false,
         idempotentHint: true,
@@ -699,7 +834,7 @@ function toolDescriptors(includeBuiltinTools: boolean, additionalTools: readonly
       title: 'Get Action Status',
     },
     {
-      _meta: { securitySchemes: readSecurity },
+      _meta: descriptorMeta(readSecurity, catalogRevision),
       annotations: {
         destructiveHint: false,
         idempotentHint: true,
@@ -715,14 +850,18 @@ function toolDescriptors(includeBuiltinTools: boolean, additionalTools: readonly
   ] : [];
   return [
     ...builtins,
-    ...additionalTools.map(additionalToolDescriptor),
+    ...additionalTools.map((tool) => additionalToolDescriptor(tool, oauthPresented, catalogRevision)),
   ];
 }
 
-function additionalToolDescriptor(tool: McpAdditionalTool): JsonObject {
-  const securitySchemes = [{ scopes: [tool.requiredScope], type: 'oauth2' }];
+function additionalToolDescriptor(
+  tool: McpAdditionalTool,
+  oauthPresented: boolean,
+  catalogRevision?: string,
+): JsonObject {
+  const securitySchemes = toolSecuritySchemes(oauthPresented, tool.requiredScope);
   return {
-    _meta: { securitySchemes },
+    _meta: descriptorMeta(securitySchemes, catalogRevision),
     annotations: tool.annotations,
     description: tool.description,
     inputSchema: tool.inputSchema,
@@ -730,6 +869,17 @@ function additionalToolDescriptor(tool: McpAdditionalTool): JsonObject {
     securitySchemes,
     title: tool.title,
   };
+}
+
+function descriptorMeta(securitySchemes: JsonObject[], catalogRevision?: string): JsonObject {
+  return {
+    ...(catalogRevision ? { 'actionproxy/catalogRevision': catalogRevision } : {}),
+    securitySchemes,
+  };
+}
+
+function toolSecuritySchemes(oauthPresented: boolean, scope: string): JsonObject[] {
+  return oauthPresented ? [{ scopes: [scope], type: 'oauth2' }] : [{ type: 'noauth' }];
 }
 
 function validateAdditionalTools(
@@ -752,6 +902,64 @@ function validateAdditionalTools(
     registrations.set(tool.name, tool);
   }
   return registrations;
+}
+
+function validateRetiredTools(
+  tools: Readonly<Record<string, McpRetiredTool>>,
+  additionalTools: ReadonlyMap<string, McpAdditionalTool>,
+  includeBuiltinTools: boolean,
+): ReadonlyMap<string, McpRetiredTool> {
+  const advertised = new Set(
+    toolDescriptors(includeBuiltinTools, [...additionalTools.values()])
+      .map((descriptor) => String(descriptor.name)),
+  );
+  const retired = new Map<string, McpRetiredTool>();
+  for (const [name, detail] of Object.entries(tools)) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,255}$/u.test(name)) {
+      throw new Error(`Invalid retired MCP tool name: ${name}`);
+    }
+    if (advertised.has(name)) throw new Error(`Retired MCP tool is still advertised: ${name}`);
+    if (!detail.replacement.trim() || !detail.refreshInstruction.trim()) {
+      throw new Error(`Retired MCP tool requires replacement and refresh instructions: ${name}`);
+    }
+    if (!advertised.has(detail.replacement)) {
+      throw new Error(`Retired MCP tool replacement is not advertised: ${name} -> ${detail.replacement}`);
+    }
+    retired.set(name, detail);
+  }
+  return retired;
+}
+
+/**
+ * Deterministic deployment revision for the effective catalog. Invocation
+ * handlers and OAuth/no-auth presentation are intentionally excluded.
+ */
+export function mcpCatalogRevision(
+  includeBuiltinTools: boolean,
+  additionalTools: readonly McpAdditionalTool[],
+): string {
+  const tools = toolDescriptors(includeBuiltinTools, additionalTools, true)
+    .map((descriptor) => {
+      const securitySchemes = Array.isArray(descriptor.securitySchemes)
+        ? descriptor.securitySchemes.filter(isRecord)
+        : [];
+      return {
+        annotations: descriptor.annotations,
+        description: descriptor.description,
+        inputSchema: descriptor.inputSchema,
+        name: descriptor.name,
+        scopes: securitySchemes
+          .flatMap((scheme) => Array.isArray(scheme.scopes) ? scheme.scopes : [])
+          .filter((scope): scope is string => typeof scope === 'string')
+          .sort(),
+      };
+    })
+    .sort((left, right) => {
+      const leftName = String(left.name);
+      const rightName = String(right.name);
+      return leftName === rightName ? 0 : leftName < rightName ? -1 : 1;
+    });
+  return `mcp_catalog_${hashCanonicalJson({ tools, version: 'actionproxy.mcp-catalog.v1' })}`;
 }
 
 function supportedScopes(
@@ -826,7 +1034,10 @@ function scrubSensitiveResult(value: unknown): unknown {
   const output: JsonObject = {};
   for (const [key, item] of Object.entries(value)) {
     const normalized = key.replaceAll(/[-_\s]/gu, '').toLowerCase();
-    if (FORBIDDEN_RESULT_KEY_FRAGMENTS.some((fragment) => normalized.includes(fragment))) continue;
+    if (
+      !SAFE_RESULT_KEYS_WITH_SENSITIVE_FRAGMENTS.has(normalized)
+      && FORBIDDEN_RESULT_KEY_FRAGMENTS.some((fragment) => normalized.includes(fragment))
+    ) continue;
     output[key] = scrubSensitiveResult(item);
   }
   return output;
@@ -854,6 +1065,10 @@ function requiredResourceUrl(config: ResolvedAppConfig): string {
 
 function disabled(reply: FastifyReply): FastifyReply {
   return reply.status(404).send({ error: 'mcp_streamable_http_disabled' });
+}
+
+function oauthMetadataDisabled(reply: FastifyReply): FastifyReply {
+  return reply.status(404).send({ error: 'mcp_oauth_metadata_disabled' });
 }
 
 async function rejectAmbiguousMcpJson(

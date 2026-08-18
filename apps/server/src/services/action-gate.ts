@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type {
   ActionEnvelope,
   ActionReceiptRecord,
+  ApprovalDecisionSource,
   ApprovalDecisionRecord,
   ApprovalDeliveryRecord,
   ApprovalRecord,
   AuditEvent,
   AuthContext,
+  ExecutionGrantRecord,
   JsonObject,
   RemediationDescriptor,
   RemediationPlan,
@@ -70,14 +72,24 @@ import {
 import type { ApprovalAuthorizationGuard, ContentExposureRevisionGuard, Store } from '../storage/store';
 import type { AuditStore } from '../storage/audit-store';
 import type { ToolRegistry } from './tool-registry';
-import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
+import {
+  ApprovalPresentationSynchronizedConflictError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from '../errors';
 import type { ListToolCallsFilters } from '../storage/store';
 import { hashJson } from '../security/crypto';
 import { actionEnvelopeForInput, normalizeActionEnvelope, reviewHashFor } from '../security/action-envelope';
 import { ACTION_RECEIPT_KEY_ID, signReceipt } from '../security/action-receipts';
 import { redactToolCallResult } from '../security/redaction';
 import { hasAnyGroup, principalMatchesActor } from '../security/scopes';
-import type { ApprovalNotifier, ApprovalNotificationResult } from '../integrations/approval-notifications';
+import type {
+  ApprovalNotifier,
+  ApprovalNotificationResult,
+  ApprovalPresentationResult,
+  ApprovalResolutionContext,
+} from '../integrations/approval-notifications';
 import type { ApprovalNotificationRecipient, ApproverDirectoryService } from './approver-directory';
 import type { PolicyDetectorService } from './policy-detector';
 import type { TelemetryAttributes, TelemetryRecorder } from '../telemetry/telemetry';
@@ -87,6 +99,15 @@ import {
   remediationFromToolResult,
   unavailableRemediation,
 } from './remediation';
+import {
+  actionEnvelopeWithPreparedAction,
+  ActionContractUnavailableError,
+  PreparedActionEditConflict,
+  type PreparedActionEditDisposition,
+  type PreparedActionLifecycle,
+  type PreparedActionReviewProjection,
+  type PreparedActionSubmission,
+} from '../contracts/prepared-action-lifecycle';
 
 export interface ExecutionGrantIssuer {
   createGrant(input: {
@@ -96,6 +117,19 @@ export interface ExecutionGrantIssuer {
     toolCall: ToolCallRecord;
     ttlSeconds?: number;
   }): Promise<unknown>;
+  prepareGrant?(input: {
+    actor: string;
+    auth?: AuthContext;
+    deterministicSeed: string;
+    issuedAt: string;
+    receipt: ActionReceiptRecord;
+    toolCall: ToolCallRecord;
+    ttlSeconds?: number;
+  }): ExecutionGrantRecord;
+  recordPreparedGrantCreated?(
+    grant: ExecutionGrantRecord,
+    input: { actor: string; auditId?: string; auth?: AuthContext; emitTelemetry?: boolean },
+  ): Promise<void>;
 }
 
 export interface ActionProxyServiceDeps {
@@ -131,6 +165,7 @@ export interface ApprovalReview {
     versionId?: string;
   };
   proposerRationaleTrust: 'untrusted';
+  preparedAction?: PreparedActionReviewProjection;
   reviewHash: string;
   toolCall: ToolCallRecord;
 }
@@ -157,35 +192,256 @@ interface EvaluatedInfluenceState {
   evidence: ContentInfluenceEvidenceV1;
 }
 
+interface PendingApprovalCandidate {
+  approval: ApprovalRecord;
+  resolvedRecipients?: ApprovalNotificationRecipient[];
+  toolCall: ToolCallRecord;
+}
+
+export interface ApprovalDecisionOptions {
+  source?: ApprovalDecisionSource;
+}
+
+export interface ApprovalPresentationReference {
+  channelId: string;
+  destination: string;
+  messageId: string;
+  provider: ApprovalDeliveryRecord['provider'];
+}
+
+interface ApprovalPresentationSyncWork {
+  approval: ApprovalRecord;
+  deliveriesOverride?: ApprovalDeliveryRecord[];
+  includeStoredDeliveries: boolean;
+  resolution?: ApprovalResolutionContext;
+  syncPresentation: NonNullable<ApprovalNotifier['syncApprovalPresentation']>;
+  toolCall: ToolCallRecord;
+}
+
+interface ApprovalPresentationSyncState {
+  acceptingTrailing: boolean;
+  trailing?: ApprovalPresentationSyncWork;
+  promise: Promise<void>;
+}
+
 export class ActionProxyService {
+  private readonly approvalPresentationSyncs = new Map<string, ApprovalPresentationSyncState>();
+  private preparedActionLifecycle?: PreparedActionLifecycle;
+
   constructor(private readonly deps: ActionProxyServiceDeps) {}
+
+  /** Installed once by the private platform composition before routes open. */
+  installPreparedActionLifecycle(lifecycle: PreparedActionLifecycle): void {
+    if (this.preparedActionLifecycle && this.preparedActionLifecycle !== lifecycle) {
+      throw new Error('Prepared-action lifecycle is already installed.');
+    }
+    this.preparedActionLifecycle = lifecycle;
+  }
 
   async submitToolCall(
     request: SubmitToolCallRequest,
-    options: { auth?: AuthContext; idempotencyKey?: string; ingress?: CanonicalActionIngress } = {},
-  ): Promise<{ toolCall: ToolCallRecord; approval?: ApprovalRecord }> {
+    options: {
+      actionContractId?: string;
+      auth?: AuthContext;
+      connectionId?: string;
+      forceApproval?: boolean;
+      idempotencyKey?: string;
+      ingress?: CanonicalActionIngress;
+      supersedesIntentId?: string;
+      /** Trusted internal identity for pre-bound internal child actions. Never read from request bodies. */
+      toolCallId?: string;
+      /** Trusted original linkage for an atomic prepared-action approval revision. */
+      revision?: {
+        createdAt: string;
+        createdBy: string;
+        fromApprovalId: string;
+        fromIntentId: string;
+        fromToolCallId: string;
+        supersededAt: string;
+      };
+    } = {},
+  ): Promise<{
+    approval?: ApprovalRecord;
+    revision?: {
+      outcome: 'created' | 'replay';
+      supersededApproval: ApprovalRecord;
+      supersededToolCall: ToolCallRecord;
+    };
+    toolCall: ToolCallRecord;
+  }> {
     const now = this.now().toISOString();
-    const actor = actorForSubmit(request, options.auth);
     const workspaceId = options.auth?.workspaceId ?? this.deps.workspaceId ?? 'default';
-    const toolCallId = `toolcall_${randomUUID()}`;
+    const requestHash = hashJson({
+      actionContractId: options.actionContractId ?? null,
+      connectionId: options.connectionId ?? null,
+      forceApproval: options.forceApproval ?? false,
+      proposalRequest: request,
+      route: 'POST /v1/tool-calls',
+      supersedesIntentId: options.supersedesIntentId ?? null,
+      toolCallId: options.toolCallId ?? null,
+      revision: options.revision
+        ? {
+            fromApprovalId: options.revision.fromApprovalId,
+            fromIntentId: options.revision.fromIntentId,
+            fromToolCallId: options.revision.fromToolCallId,
+          }
+        : null,
+    });
+    if (options.idempotencyKey) {
+      const existingIdempotency = await this.deps.store.getIdempotencyRecord(
+        workspaceId,
+        'POST /v1/tool-calls',
+        options.idempotencyKey,
+      );
+      if (existingIdempotency) {
+        if (existingIdempotency.requestHash !== requestHash) {
+          throw new ConflictError('Idempotency key was already used for a different request.');
+        }
+        const replayedToolCall = await this.getToolCall(existingIdempotency.toolCallId, options.auth);
+        if (
+          this.preparedActionLifecycle?.isPreparedAction(request.toolName) &&
+          !replayedToolCall.actionEnvelope?.preparedAction
+        ) {
+          throw new ConflictError(
+            'Idempotency record points to an unprepared action where a prepared intent is required. Reject and resubmit with a new key.',
+          );
+        }
+        const approval = await this.deps.store.getApprovalByToolCallId(replayedToolCall.id);
+        if (
+          !approval &&
+          replayedToolCall.actionEnvelope?.preparedAction &&
+          replayedToolCall.decision === 'require_approval'
+        ) {
+          throw new ConflictError('Prepared-action approval publication is incomplete; reject and resubmit with a new key.');
+        }
+        if (options.revision && approval) {
+          const supersededApproval = await this.deps.store.getApproval(options.revision.fromApprovalId);
+          const supersededToolCall = await this.deps.store.getToolCall(options.revision.fromToolCallId);
+          if (
+            !supersededApproval ||
+            !supersededToolCall ||
+            supersededApproval.status !== 'superseded' ||
+            supersededApproval.supersededByApprovalId !== approval.id ||
+            supersededToolCall.status !== 'rejected'
+          ) {
+            throw new ConflictError('Prepared-action revision replay does not match the authoritative supersession chain.');
+          }
+          return {
+            approval,
+            revision: { outcome: 'replay', supersededApproval, supersededToolCall },
+            toolCall: replayedToolCall,
+          };
+        }
+        if (replayedToolCall.actionEnvelope?.preparedAction) {
+          await this.recordPreparedSubmissionPublishedBestEffort({
+            actor: actorForSubmit(request, options.auth),
+            approval,
+            auth: options.auth,
+            toolCall: replayedToolCall,
+          });
+        }
+        return approval ? { approval, toolCall: replayedToolCall } : { toolCall: replayedToolCall };
+      }
+    }
+    const toolCallId = options.toolCallId ?? `toolcall_${randomUUID()}`;
+    let prepared = this.preparedActionLifecycle
+      ? await this.preparedActionLifecycle.prepareSubmission(request, {
+          actionContractId: options.actionContractId,
+          auth: options.auth,
+          connectionId: options.connectionId,
+          idempotencyKey: options.idempotencyKey,
+          now,
+          supersedesIntentId: options.supersedesIntentId,
+          toolCallId,
+          workspaceId,
+        })
+      : undefined;
+    if (
+      this.preparedActionLifecycle?.isPreparedAction(request.toolName) &&
+      !prepared
+    ) {
+      throw new ActionContractUnavailableError(
+        `No enabled prepared-action contract is registered for ${request.toolName}.`,
+      );
+    }
+    const effectiveRequest: SubmitToolCallRequest = prepared
+      ? {
+          ...request,
+          action: {
+            context: {
+              dataClassification: request.action?.context?.dataClassification,
+              metadata: request.action?.context?.metadata,
+              reason: request.action?.context?.reason,
+              risk: prepared.governance.risk,
+              sideEffects: `prepared_${prepared.governance.operationKind}`,
+            },
+            executionMode: prepared.governance.executionMode,
+            operation: {
+              kind: prepared.governance.operationKind,
+              name: request.toolName,
+            },
+            protocol: request.action?.protocol,
+            resources: prepared.resources,
+            source: request.action?.source,
+          },
+          input: prepared.effectiveInput,
+          metadata: metadataWithPreparedGovernance(request.metadata, prepared),
+        }
+      : request;
+    const actor = actorForSubmit(effectiveRequest, options.auth);
     const canonicalActionRequest = options.ingress
       ? normalizeActionRequest({
           auth: options.auth,
           idempotencyKey: options.idempotencyKey,
           ingress: options.ingress,
           receivedAt: now,
-          request,
+          request: effectiveRequest,
           requestId: toolCallId,
+          trustedResources: prepared
+            ? {
+                source: `action-contract:${prepared.binding.contractId}@${prepared.binding.contractVersion}`,
+                value: prepared.resources,
+              }
+            : undefined,
+          trustedCredentialReference: prepared
+            ? {
+                source: `prepared-intent:${prepared.binding.intentId}`,
+                value: prepared.connectionId,
+              }
+            : undefined,
+          trustedExecutionMode: prepared
+            ? {
+                source: `action-contract:${prepared.binding.contractId}@${prepared.binding.contractVersion}`,
+                value: prepared.governance.executionMode,
+              }
+            : undefined,
+          trustedOperation: prepared
+            ? {
+                source: `action-contract:${prepared.binding.contractId}@${prepared.binding.contractVersion}`,
+                value: {
+                  kind: prepared.governance.operationKind,
+                  name: effectiveRequest.toolName,
+                },
+              }
+            : undefined,
+          trustedPolicy: prepared
+            ? {
+                customerVisible: prepared.governance.customerVisible,
+                operationKind: prepared.governance.operationKind,
+                risk: prepared.governance.risk,
+                source: `action-contract:${prepared.binding.contractId}@${prepared.binding.contractVersion}`,
+              }
+            : undefined,
           workspaceId,
         })
       : undefined;
     const policyVersionHash = this.currentPolicyVersionHash();
     const policyVersionId = this.currentPolicyVersionId(policyVersionHash);
     const baseProviderEvaluation = this.evaluatePolicyProvider(
-      request.toolName,
+      effectiveRequest.toolName,
       canonicalActionRequest
         ? policyContextFromCanonicalActionRequest(canonicalActionRequest)
-        : policyContextFromSubmit(request),
+        : policyContextFromSubmit(effectiveRequest),
       { policyVersionHash, policyVersionId },
     );
     const baseEvaluation = baseProviderEvaluation.trace.evaluation;
@@ -198,16 +454,24 @@ export class ActionProxyService {
       policyVersionId,
       workspaceId,
     });
-    const evaluation = effectivePolicyEvaluation(baseEvaluation, contentInfluence?.evidence);
+    const policyEvaluation = effectivePolicyEvaluation(baseEvaluation, contentInfluence?.evidence);
+    const evaluation: PolicyEvaluation = (options.forceApproval || prepared) && policyEvaluation.decision === 'allow'
+      ? {
+          ...policyEvaluation,
+          decision: 'require_approval',
+          reason: `${policyEvaluation.reason} This server-owned action contract requires human approval.`,
+        }
+      : policyEvaluation;
     const providerEvaluation = providerEvaluationWithEffectiveDecision(baseProviderEvaluation, evaluation);
-    const actionEnvelope = normalizeActionEnvelope({ actor, auth: options.auth, request });
-    const requestHash = hashJson({ input: request, route: 'POST /v1/tool-calls' });
-
+    const normalizedEnvelope = normalizeActionEnvelope({ actor, auth: options.auth, request: effectiveRequest });
+    const actionEnvelope = prepared
+      ? actionEnvelopeWithPreparedAction(normalizedEnvelope, prepared, hashJson)
+      : normalizedEnvelope;
     let toolCall: ToolCallRecord = {
       id: toolCallId,
       workspaceId,
-      toolName: request.toolName,
-      input: request.input,
+      toolName: effectiveRequest.toolName,
+      input: effectiveRequest.input,
       inputHash: actionEnvelope.inputHash,
       actionEnvelope,
       actionEnvelopeHash: actionEnvelope.envelopeHash,
@@ -219,10 +483,10 @@ export class ActionProxyService {
       influenceScopeId,
       requestedBy: actor,
       requestedByAuth: options.auth,
-      agentId: request.agentId,
-      reason: request.reason,
-      metadata: request.metadata ?? {},
-      status: 'submitted',
+      agentId: effectiveRequest.agentId,
+      reason: effectiveRequest.reason,
+      metadata: effectiveRequest.metadata ?? {},
+      status: prepared && evaluation.decision === 'deny' ? 'blocked' : 'submitted',
       decision: evaluation.decision,
       authorizationDecision: evaluation.decision,
       authorizationReason: evaluation.reason,
@@ -251,16 +515,87 @@ export class ActionProxyService {
       // follows durable exposure and audit evidence.
       toolCall = { ...toolCall, resultWithheld: true };
     }
-    if (options.idempotencyKey) {
-      const reservation = await this.deps.store.createToolCallIdempotentlyAtomically({
-        idempotency: {
+    const preparedApprovalCandidate = prepared && evaluation.decision === 'require_approval'
+      ? await this.buildPendingApprovalCandidate({
+          actionEnvelope,
+          actor,
+          auth: options.auth,
+          input: effectiveRequest.input,
+          now,
+          prepared: true,
+          rule: evaluation.rule,
+          toolCall,
+          workspaceId,
+        })
+      : undefined;
+    if (preparedApprovalCandidate) toolCall = preparedApprovalCandidate.toolCall;
+    const idempotency = options.idempotencyKey
+      ? {
           createdAt: now,
           key: options.idempotencyKey,
           requestHash,
           route: 'POST /v1/tool-calls',
           toolCallId: toolCall.id,
           workspaceId,
-        },
+        }
+      : undefined;
+    let persistedPreparedApproval: ApprovalRecord | undefined;
+    if (prepared && this.preparedActionLifecycle) {
+      if (options.revision) {
+        const revisionResult = await this.preparedActionLifecycle.persistRevision({
+          approval: requiredPreparedApproval(preparedApprovalCandidate).approval,
+          createdAt: options.revision.createdAt,
+          createdBy: options.revision.createdBy,
+          fromApprovalId: options.revision.fromApprovalId,
+          fromIntentId: options.revision.fromIntentId,
+          fromToolCallId: options.revision.fromToolCallId,
+          idempotency,
+          prepared,
+          supersededAt: options.revision.supersededAt,
+          toolCall,
+        });
+        if (revisionResult.outcome === 'conflict') {
+          throw new ConflictError('Another revision already superseded this approval.');
+        }
+        return {
+          approval: revisionResult.replacementApproval,
+          revision: {
+            outcome: revisionResult.outcome,
+            supersededApproval: revisionResult.supersededApproval,
+            supersededToolCall: revisionResult.supersededToolCall,
+          },
+          toolCall: revisionResult.replacementToolCall,
+        };
+      }
+      const reservation = await this.preparedActionLifecycle.persistSubmission({
+        approval: preparedApprovalCandidate?.approval,
+        idempotency,
+        prepared,
+        toolCall,
+      });
+      if (reservation.outcome === 'conflict') {
+        throw new ConflictError('Prepared-action idempotency or persistence binding conflicts with existing state.');
+      }
+      if (reservation.outcome === 'replay') {
+        const replayedToolCall = await this.getToolCall(reservation.toolCall.id, options.auth);
+        const approval = reservation.approval ?? await this.deps.store.getApprovalByToolCallId(replayedToolCall.id);
+        if (!approval && replayedToolCall.decision === 'require_approval') {
+          throw new ConflictError('Prepared-action approval publication is incomplete; reject and resubmit with a new key.');
+        }
+        await this.recordPreparedSubmissionPublishedBestEffort({
+          actor,
+          approval,
+          auth: options.auth,
+          toolCall: replayedToolCall,
+        });
+        return approval ? { approval, toolCall: replayedToolCall } : { toolCall: replayedToolCall };
+      }
+      prepared = reservation.prepared;
+      toolCall = reservation.toolCall;
+      persistedPreparedApproval = reservation.approval;
+    } else if (idempotency) {
+      const reservation = await this.deps.store.createToolCallIdempotentlyAtomically({
+        idempotency,
         toolCall,
       });
       if (reservation.outcome === 'conflict') {
@@ -275,16 +610,31 @@ export class ActionProxyService {
     } else {
       await this.deps.store.createToolCall(toolCall);
     }
-    await this.deps.policyDetector?.observeTool({
-      agentId: request.agentId,
+    const observation = {
+      agentId: effectiveRequest.agentId,
       auth: options.auth,
-      input: request.input,
+      input: effectiveRequest.input,
       policy: this.deps.policy,
-      source: runtimeObservationSource(request),
-      toolName: request.toolName,
+      source: runtimeObservationSource(effectiveRequest),
+      toolName: effectiveRequest.toolName,
       workspaceId,
-    });
-    await this.audit('tool_call.submitted', {
+    };
+    if (prepared) {
+      await this.recordPreparedSubmissionPublishedBestEffort({
+        actor,
+        approval: persistedPreparedApproval,
+        auth: options.auth,
+        toolCall,
+      });
+      try {
+        await this.deps.policyDetector?.observeTool(observation);
+      } catch {
+        // The compound prepared-action publication is authoritative. Detector
+        // telemetry cannot roll it back or strand a reviewable approval.
+      }
+    } else {
+      await this.deps.policyDetector?.observeTool(observation);
+      await this.audit('tool_call.submitted', {
       toolCallId: toolCall.id,
       actor,
       auth: options.auth,
@@ -293,14 +643,14 @@ export class ActionProxyService {
       policyVersionId: toolCall.policyVersionId,
       workspaceId,
       data: {
-        agentId: request.agentId,
+        agentId: effectiveRequest.agentId,
         decisionV1: toolCall.decisionTrace?.decisionV1,
-        input: request.input,
-        reason: request.reason,
-        toolName: request.toolName,
+        input: effectiveRequest.input,
+        reason: effectiveRequest.reason,
+        toolName: effectiveRequest.toolName,
       },
-    });
-    await this.audit('action.envelope_created', {
+      });
+      await this.audit('action.envelope_created', {
       toolCallId: toolCall.id,
       actor,
       auth: options.auth,
@@ -322,9 +672,9 @@ export class ActionProxyService {
         protocol: actionEnvelope.protocol,
         source: actionEnvelope.source,
       },
-    });
-    if (contentInfluence) {
-      await this.audit('content.influence_evaluated', {
+      });
+      if (contentInfluence) {
+        await this.audit('content.influence_evaluated', {
         toolCallId: toolCall.id,
         actor,
         auth: options.auth,
@@ -333,7 +683,8 @@ export class ActionProxyService {
         policyVersionId: toolCall.policyVersionId,
         workspaceId,
         data: contentInfluence.evidence as unknown as JsonObject,
-      });
+        });
+      }
     }
     this.telemetry('tool_call.submit', telemetryForToolCall(toolCall, { status: toolCall.status }));
     this.telemetry('policy.evaluate', telemetryForToolCall(toolCall, {
@@ -359,18 +710,22 @@ export class ActionProxyService {
     }
 
     if (evaluation.decision === 'deny') {
-      toolCall = { ...toolCall, status: 'blocked', updatedAt: new Date().toISOString() };
-      await this.deps.store.updateToolCall(toolCall);
-      await this.audit('policy.deny', {
-        toolCallId: toolCall.id,
-        actor,
-        auth: options.auth,
-        inputHash: toolCall.inputHash,
-        policyVersionHash: toolCall.policyVersionHash,
-        policyVersionId: toolCall.policyVersionId,
-        workspaceId,
-        data: { reason: evaluation.reason, risk: evaluation.risk, matchedRule: evaluation.matchedRule },
-      });
+      if (toolCall.status !== 'blocked') {
+        toolCall = { ...toolCall, status: 'blocked', updatedAt: new Date().toISOString() };
+        await this.deps.store.updateToolCall(toolCall);
+      }
+      if (!prepared) {
+        await this.audit('policy.deny', {
+          toolCallId: toolCall.id,
+          actor,
+          auth: options.auth,
+          inputHash: toolCall.inputHash,
+          policyVersionHash: toolCall.policyVersionHash,
+          policyVersionId: toolCall.policyVersionId,
+          workspaceId,
+          data: { reason: evaluation.reason, risk: evaluation.risk, matchedRule: evaluation.matchedRule },
+        });
+      }
       this.telemetry('policy.deny', telemetryForToolCall(toolCall, {
         decision: evaluation.decision,
         matched_rule: evaluation.matchedRule,
@@ -381,72 +736,60 @@ export class ActionProxyService {
 
     if (evaluation.decision === 'require_approval') {
       const influenceIntroducedApproval = contentInfluence?.evidence.baseDecision === 'allow';
-      const resolvedRecipients = await this.resolveApprovalRecipients(evaluation.rule, workspaceId);
-      const approvalId = `approval_${randomUUID()}`;
-      const reviewHash = reviewHashFor({
-        actionEnvelopeHash: actionEnvelope.envelopeHash,
-        approvalId,
-        policyVersionHash: toolCall.policyVersionHash,
-        toolCallId: toolCall.id,
-      });
-      const approverUsers = approvalApproverUsersFor(evaluation.rule, resolvedRecipients);
-      const approverGroups = evaluation.rule.approvers?.groups ?? [];
-      const requiredApprovals = evaluation.rule.approvers?.requiredApprovals ?? 1;
-      const separationOfDuties = evaluation.rule.approvers?.separationOfDuties ?? false;
-      const expiresAt = new Date(
-        Date.parse(now) + Math.max(1, this.deps.approvalAuthorizationTtlMs ?? DEFAULT_APPROVAL_AUTHORIZATION_TTL_MS),
-      ).toISOString();
-      const authorization = buildApprovalAuthorization({
-        approvalId,
-        approverGroups,
-        approverUsers,
-        expiresAt,
-        issuedAt: now,
-        originalEnvelopeHash: actionEnvelope.envelopeHash,
-        originalInputHash: actionEnvelope.inputHash,
-        requestedBy: actor,
-        requestedByPrincipalId: options.auth?.principalId,
-        requiredApprovals,
-        reviewHash,
-        separationOfDuties,
-        toolCall,
-      });
-      const approval: ApprovalRecord = {
-        id: approvalId,
-        workspaceId,
-        toolCallId: toolCall.id,
-        status: 'pending',
-        requestedBy: actor,
-        requestedByAuth: options.auth,
-        authorization,
-        originalInput: request.input,
-        originalEnvelopeHash: actionEnvelope.envelopeHash,
-        originalInputHash: actionEnvelope.inputHash,
-        reviewHash,
-        approverUsers,
-        approverGroups,
-        requiredApprovals,
-        separationOfDuties,
-        decisions: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      toolCall = { ...toolCall, status: 'pending_approval', updatedAt: new Date().toISOString() };
-      await this.deps.store.updateToolCall(toolCall);
-      await this.deps.store.createApproval(approval);
-      await this.audit('policy.require_approval', {
-        toolCallId: toolCall.id,
-        actor,
-        auth: options.auth,
-        inputHash: toolCall.inputHash,
-        policyVersionHash: toolCall.policyVersionHash,
-        policyVersionId: toolCall.policyVersionId,
-        workspaceId,
-        data: { reason: evaluation.reason, risk: evaluation.risk, matchedRule: evaluation.matchedRule },
-      });
-      if (influenceIntroducedApproval) {
-        await this.audit('content.influence_approval_required', {
+      const candidate = prepared
+        ? requiredPreparedApproval(preparedApprovalCandidate)
+        : await this.buildPendingApprovalCandidate({
+            actionEnvelope,
+            actor,
+            auth: options.auth,
+            input: effectiveRequest.input,
+            now,
+            prepared: false,
+            rule: evaluation.rule,
+            toolCall,
+            workspaceId,
+          });
+      let approval = prepared ? persistedPreparedApproval ?? candidate.approval : candidate.approval;
+      const resolvedRecipients = candidate.resolvedRecipients;
+      if (prepared) {
+        if (toolCall.status !== 'pending_approval' || approval.toolCallId !== toolCall.id) {
+          throw new ConflictError('Prepared approval publication does not match the authoritative tool call.');
+        }
+      } else {
+        toolCall = candidate.toolCall;
+        await this.deps.store.updateToolCall(toolCall);
+        await this.deps.store.createApproval(approval);
+      }
+      const authorization = approval.authorization;
+      if (!authorization || !approval.reviewHash) {
+        throw new ConflictError('Approval authorization is missing from the authoritative pending approval.');
+      }
+      const reviewHash = approval.reviewHash;
+      if (!prepared) {
+        await this.audit('policy.require_approval', {
+          toolCallId: toolCall.id,
+          actor,
+          auth: options.auth,
+          inputHash: toolCall.inputHash,
+          policyVersionHash: toolCall.policyVersionHash,
+          policyVersionId: toolCall.policyVersionId,
+          workspaceId,
+          data: { reason: evaluation.reason, risk: evaluation.risk, matchedRule: evaluation.matchedRule },
+        });
+        if (influenceIntroducedApproval) {
+          await this.audit('content.influence_approval_required', {
+            toolCallId: toolCall.id,
+            approvalId: approval.id,
+            actor,
+            auth: options.auth,
+            inputHash: toolCall.inputHash,
+            policyVersionHash: toolCall.policyVersionHash,
+            policyVersionId: toolCall.policyVersionId,
+            workspaceId,
+            data: minimizedInfluenceAudit(contentInfluence!.evidence),
+          });
+        }
+        await this.audit('approval.created', {
           toolCallId: toolCall.id,
           approvalId: approval.id,
           actor,
@@ -455,34 +798,23 @@ export class ActionProxyService {
           policyVersionHash: toolCall.policyVersionHash,
           policyVersionId: toolCall.policyVersionId,
           workspaceId,
-          data: minimizedInfluenceAudit(contentInfluence!.evidence),
+          data: {
+            approverGroups: approval.approverGroups ?? [],
+            approverUsers: approval.approverUsers ?? [],
+            approvalAuthorizationHash: authorization.authorizationHash,
+            approvalAuthorizationVersion: authorization.version,
+            expiresAt: authorization.expiresAt,
+            notificationChannels: evaluation.rule.notify?.channels ?? null,
+            originalInput: effectiveRequest.input,
+            originalInputHash: actionEnvelope.inputHash,
+            originalEnvelopeHash: actionEnvelope.envelopeHash,
+            reviewHash,
+            contentInfluence: contentInfluence?.evidence ?? null,
+            requiredApprovals: approval.requiredApprovals ?? 1,
+            separationOfDuties: approval.separationOfDuties ?? false,
+          },
         });
       }
-      await this.audit('approval.created', {
-        toolCallId: toolCall.id,
-        approvalId: approval.id,
-        actor,
-        auth: options.auth,
-        inputHash: toolCall.inputHash,
-        policyVersionHash: toolCall.policyVersionHash,
-        policyVersionId: toolCall.policyVersionId,
-        workspaceId,
-        data: {
-          approverGroups: approval.approverGroups ?? [],
-          approverUsers: approval.approverUsers ?? [],
-          approvalAuthorizationHash: authorization.authorizationHash,
-          approvalAuthorizationVersion: authorization.version,
-          expiresAt: authorization.expiresAt,
-          notificationChannels: evaluation.rule.notify?.channels ?? null,
-          originalInput: request.input,
-          originalInputHash: actionEnvelope.inputHash,
-          originalEnvelopeHash: actionEnvelope.envelopeHash,
-          reviewHash,
-          contentInfluence: contentInfluence?.evidence ?? null,
-          requiredApprovals: approval.requiredApprovals ?? 1,
-          separationOfDuties: approval.separationOfDuties ?? false,
-        },
-      });
       this.telemetry('approval.created', telemetryForToolCall(toolCall, {
         'approval.id': approval.id,
         'approval.status': approval.status,
@@ -513,20 +845,97 @@ export class ActionProxyService {
       actor,
       auth: options.auth,
       decisionKind: 'policy_allow',
-      input: request.input,
+      input: effectiveRequest.input,
       toolCall,
     });
     toolCall = actionEnvelope.executionMode === 'external_grant'
       ? await this.authorizeExternalExecution(
           toolCall,
-          request.input,
+          effectiveRequest.input,
           actor,
           options.auth,
           evaluation.rule.externalExecution?.grantTtlSeconds,
           receipt,
         )
-      : await this.executeToolCall(toolCall, request.input, actor, options.auth, receipt);
+      : await this.executeToolCall(toolCall, effectiveRequest.input, actor, options.auth, receipt);
     return { toolCall };
+  }
+
+  private async buildPendingApprovalCandidate(input: {
+    actionEnvelope: ActionEnvelope;
+    actor: string;
+    auth?: AuthContext;
+    input: JsonObject;
+    now: string;
+    prepared: boolean;
+    rule: PolicyRule;
+    toolCall: ToolCallRecord;
+    workspaceId: string;
+  }): Promise<PendingApprovalCandidate> {
+    const resolvedRecipients = await this.resolveApprovalRecipients(input.rule, input.workspaceId);
+    const approverUsers = approvalApproverUsersFor(input.rule, resolvedRecipients);
+    const approverGroups = input.rule.approvers?.groups ?? [];
+    const requiredApprovals = input.rule.approvers?.requiredApprovals ?? 1;
+    const separationOfDuties = input.rule.approvers?.separationOfDuties ?? false;
+    const pendingToolCall: ToolCallRecord = {
+      ...input.toolCall,
+      status: 'pending_approval',
+      updatedAt: input.now,
+    };
+    const approvalId = input.prepared && this.preparedActionLifecycle
+      ? this.preparedActionLifecycle.preparedApprovalId(pendingToolCall)
+      : `approval_${randomUUID()}`;
+    const reviewHash = reviewHashFor({
+      actionEnvelopeHash: input.actionEnvelope.envelopeHash,
+      approvalId,
+      policyVersionHash: pendingToolCall.policyVersionHash,
+      toolCallId: pendingToolCall.id,
+    });
+    const expiresAt = new Date(
+      Date.parse(input.now) + Math.max(
+        1,
+        this.deps.approvalAuthorizationTtlMs ?? DEFAULT_APPROVAL_AUTHORIZATION_TTL_MS,
+      ),
+    ).toISOString();
+    const authorization = buildApprovalAuthorization({
+      approvalId,
+      approverGroups,
+      approverUsers,
+      expiresAt,
+      issuedAt: input.now,
+      originalEnvelopeHash: input.actionEnvelope.envelopeHash,
+      originalInputHash: input.actionEnvelope.inputHash,
+      requestedBy: input.actor,
+      requestedByPrincipalId: input.auth?.principalId,
+      requiredApprovals,
+      reviewHash,
+      separationOfDuties,
+      toolCall: pendingToolCall,
+    });
+    return {
+      approval: {
+        approverGroups,
+        approverUsers,
+        authorization,
+        createdAt: input.now,
+        decisions: [],
+        id: approvalId,
+        originalEnvelopeHash: input.actionEnvelope.envelopeHash,
+        originalInput: input.input,
+        originalInputHash: input.actionEnvelope.inputHash,
+        requestedBy: input.actor,
+        requestedByAuth: input.auth,
+        requiredApprovals,
+        reviewHash,
+        separationOfDuties,
+        status: 'pending',
+        toolCallId: pendingToolCall.id,
+        updatedAt: input.now,
+        workspaceId: input.workspaceId,
+      },
+      resolvedRecipients,
+      toolCall: pendingToolCall,
+    };
   }
 
   async getToolCall(id: string, auth?: AuthContext): Promise<ToolCallRecord> {
@@ -618,6 +1027,7 @@ export class ActionProxyService {
       policyVersionHash: toolCall.policyVersionHash,
       toolCallId: toolCall.id,
     });
+    const preparedAction = await this.preparedActionLifecycle?.reviewProjection(toolCall);
     await this.audit('approval.review_rendered', {
       toolCallId: toolCall.id,
       approvalId: approval.id,
@@ -645,6 +1055,7 @@ export class ActionProxyService {
         versionId: toolCall.policyVersionId,
       },
       proposerRationaleTrust: 'untrusted',
+      preparedAction,
       reviewHash,
       toolCall,
     };
@@ -859,6 +1270,14 @@ export class ActionProxyService {
 
   /** Used by the external-grant boundary immediately before durable dispatch. */
   async assertExternalDispatchCurrent(toolCall: ToolCallRecord, input: JsonObject): Promise<void> {
+    if (toolCall.actionEnvelope?.preparedAction) {
+      if (!this.preparedActionLifecycle) {
+        throw new ActionContractUnavailableError(
+          'The prepared-action lifecycle is unavailable for this authorized action.',
+        );
+      }
+      await this.preparedActionLifecycle.assertDispatchCurrent(toolCall, input);
+    }
     const failure = await this.finalPolicyRevalidationFailure(toolCall, input);
     if (failure) throw new ForbiddenError(failure);
   }
@@ -989,27 +1408,54 @@ export class ActionProxyService {
       reviewHash?: string;
     },
     auth?: AuthContext,
+    options: ApprovalDecisionOptions = {},
   ): Promise<{ approval: ApprovalRecord; toolCall: ToolCallRecord }> {
     const initial = await this.loadApprovalState(approvalId, auth);
-    const initialApproval = await this.expireApprovalIfNeeded(initial.approval, initial.toolCall, auth);
-    if (initialApproval.status !== 'pending') {
-      throw new ConflictError(`Approval is already ${initialApproval.status}`);
+    this.assertCanDecideApproval(initial.approval, auth);
+    const inputDecision = approvalInputDecision(input);
+    const initialPreparedEditDisposition = await this.resolvePreparedInlineEditDisposition(
+      initial.toolCall,
+      inputDecision.mode === 'edited',
+    );
+    if (initial.approval.status !== 'pending') {
+      if (initialPreparedEditDisposition) {
+        throw new PreparedActionEditConflict(initialPreparedEditDisposition);
+      }
+      const recovered = await this.recoverApprovedPreparedExternalAuthorization(
+        initial.approval,
+        initial.toolCall,
+        auth,
+      );
+      if (recovered) return recovered;
+      throw new ConflictError(`Approval is already ${initial.approval.status}`);
     }
-    this.assertCanDecideApproval(initialApproval, auth);
-    this.assertClientApprovalNonce(initialApproval, input.approvalNonce);
 
     // Reload immediately before policy evaluation and the storage CAS. No execution decision
     // relies on the earlier route-facing snapshot.
     const authoritative = await this.loadApprovalState(approvalId, auth);
+    this.assertCanDecideApproval(authoritative.approval, auth);
+    const authoritativePreparedEditDisposition = await this.resolvePreparedInlineEditDisposition(
+      authoritative.toolCall,
+      inputDecision.mode === 'edited',
+    );
+    const preparedEditDisposition = authoritativePreparedEditDisposition ?? initialPreparedEditDisposition;
+    if (preparedEditDisposition) {
+      throw new PreparedActionEditConflict(preparedEditDisposition);
+    }
     const approval = await this.expireApprovalIfNeeded(authoritative.approval, authoritative.toolCall, auth);
     const toolCall = authoritative.toolCall;
-    if (approval.status !== 'pending') throw new ConflictError(`Approval is already ${approval.status}`);
+    if (approval.status !== 'pending') {
+      throw authoritative.approval.status === 'pending' && approval.status === 'expired'
+        ? new ApprovalPresentationSynchronizedConflictError('Approval is already expired')
+        : new ConflictError(`Approval is already ${approval.status}`);
+    }
     if (toolCall.status !== 'pending_approval') throw new ConflictError(`Tool call is not pending approval: ${toolCall.status}`);
     this.assertCanDecideApproval(approval, auth);
     this.assertClientApprovalNonce(approval, input.approvalNonce);
 
     const now = this.now().toISOString();
     const actor = actorForDecision(input.approvedBy, auth);
+    const source = approvalDecisionSource(options.source, auth);
     const actionEnvelope = this.actionEnvelopeForToolCall(toolCall);
     const expectedReviewHash = reviewHashFor({
       actionEnvelopeHash: actionEnvelope.envelopeHash,
@@ -1020,13 +1466,25 @@ export class ActionProxyService {
     if (input.reviewHash !== undefined && input.reviewHash !== expectedReviewHash) {
       throw new ConflictError('Approval review hash is stale or does not match this approval.');
     }
-    const inputDecision = approvalInputDecision(input);
     const requiredApprovals = Math.max(1, approval.requiredApprovals ?? 1);
+    if (inputDecision.mode === 'edited' && toolCall.metadata.approvalInputMode === 'original_only') {
+      throw new ConflictError(
+        'This approval only permits the original input. Reject it and submit a new proposal to make changes.',
+      );
+    }
     if (inputDecision.mode === 'edited' && requiredApprovals > 1) {
       throw new ConflictError('Edited input is not supported when requiredApprovals is greater than 1.');
     }
     const approvedInput = inputDecision.mode === 'edited' ? inputDecision.input : approval.originalInput;
     const approvedEnvelope = actionEnvelopeForInput(actionEnvelope, approvedInput);
+    if (actionEnvelope.preparedAction) {
+      if (!this.preparedActionLifecycle) {
+        throw new ActionContractUnavailableError(
+          'The prepared-action registry is unavailable for this approval.',
+        );
+      }
+      await this.preparedActionLifecycle.assertApprovalCurrent(toolCall, approvedInput);
+    }
     this.assertApprovalBindingIsCurrent(approval, actionEnvelope, expectedReviewHash);
     await this.assertApprovalPolicyIsCurrent(toolCall, approvedInput, approvedEnvelope);
     const authorization = this.approvalAuthorizationGuard(approval, toolCall);
@@ -1044,6 +1502,7 @@ export class ActionProxyService {
       inputDecision: inputDecision.mode,
       note: input.note,
       reviewHash: expectedReviewHash,
+      source,
     };
     const transition = await this.deps.store.recordApprovalDecisionAtomically({
       approvalId: approval.id,
@@ -1070,7 +1529,9 @@ export class ActionProxyService {
     }
     if (transition.outcome === 'expired') {
       await this.recordExpiredApproval(transition.approval, toolCall, auth);
-      throw new ConflictError('Approval authorization has expired. Resubmit the action.');
+      throw new ApprovalPresentationSynchronizedConflictError(
+        'Approval authorization has expired. Resubmit the action.',
+      );
     }
     if (transition.outcome === 'replayed') {
       throw new ConflictError('Approval authorization nonce has already been consumed.');
@@ -1081,75 +1542,713 @@ export class ActionProxyService {
     const updatedApproval = transition.approval!;
     const nextDecisions = updatedApproval.decisions ?? [];
     const isFinalApproval = transition.outcome === 'finalized';
-    await this.audit(isFinalApproval ? 'approval.approved' : 'approval.approval_recorded', {
-      toolCallId: toolCall.id,
-      approvalId: approval.id,
-      actor,
-      auth,
-      inputHash: toolCall.inputHash,
-      policyVersionHash: toolCall.policyVersionHash,
-      policyVersionId: toolCall.policyVersionId,
-      workspaceId: toolCall.workspaceId,
-      data: {
-        approvalsRecorded: nextDecisions.length,
-        requiredApprovals,
-        note: input.note ?? null,
-        originalInput: approval.originalInput,
-        editedInput: inputDecision.mode === 'edited' ? inputDecision.input : null,
-        inputDecision: inputDecision.mode,
-        originalInputHash: approval.originalInputHash ?? actionEnvelope.inputHash,
-        originalEnvelopeHash: approval.originalEnvelopeHash ?? actionEnvelope.envelopeHash,
-        approvedInputHash: approvedEnvelope.inputHash,
-        approvedEnvelopeHash: approvedEnvelope.envelopeHash,
-        approvalAuthorizationHash: authorization.authorization.authorizationHash,
-        approvalAuthorizationVersion: authorization.authorization.version,
-        reviewHash: expectedReviewHash,
-      },
-    });
-    this.telemetry(isFinalApproval ? 'approval.approved' : 'approval.approval_recorded', telemetryForToolCall(toolCall, {
-      'approval.id': approval.id,
-      'approval.status': updatedApproval.status,
-    }));
+    const recordDecisionEvidence = async () => {
+      await this.audit(isFinalApproval ? 'approval.approved' : 'approval.approval_recorded', {
+        toolCallId: toolCall.id,
+        approvalId: approval.id,
+        actor,
+        auth,
+        inputHash: toolCall.inputHash,
+        policyVersionHash: toolCall.policyVersionHash,
+        policyVersionId: toolCall.policyVersionId,
+        workspaceId: toolCall.workspaceId,
+        data: {
+          approvalsRecorded: nextDecisions.length,
+          requiredApprovals,
+          note: input.note ?? null,
+          originalInput: approval.originalInput,
+          editedInput: inputDecision.mode === 'edited' ? inputDecision.input : null,
+          inputDecision: inputDecision.mode,
+          originalInputHash: approval.originalInputHash ?? actionEnvelope.inputHash,
+          originalEnvelopeHash: approval.originalEnvelopeHash ?? actionEnvelope.envelopeHash,
+          approvedInputHash: approvedEnvelope.inputHash,
+          approvedEnvelopeHash: approvedEnvelope.envelopeHash,
+          approvalAuthorizationHash: authorization.authorization.authorizationHash,
+          approvalAuthorizationVersion: authorization.authorization.version,
+          reviewHash: expectedReviewHash,
+          source,
+        },
+      });
+      this.telemetry(isFinalApproval ? 'approval.approved' : 'approval.approval_recorded', telemetryForToolCall(toolCall, {
+        'approval.id': approval.id,
+        'approval.status': updatedApproval.status,
+      }));
+    };
 
     if (!isFinalApproval) {
+      await recordDecisionEvidence();
       return { approval: updatedApproval, toolCall };
     }
 
-    const receipt = await this.createActionReceipt({
+    const resolution: ApprovalResolutionContext = {
       actor,
-      approval: updatedApproval,
       auth,
+      decidedAt: updatedApproval.finalizedAt ?? now,
+      source,
+    };
+    try {
+      await recordDecisionEvidence();
+      if (toolCall.actionEnvelope?.preparedAction && approvedEnvelope.executionMode === 'external_grant') {
+        const published = await this.publishApprovedPreparedExternalAuthorization(updatedApproval, toolCall, auth);
+        return { approval: updatedApproval, toolCall: published };
+      }
+
+      const receipt = await this.createActionReceipt({
+        actor,
+        approval: updatedApproval,
+        auth,
+        decisionKind: 'human_approval',
+        input: approvedInput,
+        reviewHash: expectedReviewHash,
+        toolCall,
+      });
+      const executedToolCall = approvedEnvelope.executionMode === 'external_grant'
+        ? await this.authorizeExternalExecution(toolCall, approvedInput, actor, auth, undefined, receipt, updatedApproval)
+        : await this.executeToolCall(toolCall, approvedInput, actor, auth, receipt, updatedApproval);
+
+      return { approval: updatedApproval, toolCall: executedToolCall };
+    } finally {
+      await this.syncApprovalPresentationBestEffort(updatedApproval, toolCall, resolution);
+    }
+  }
+
+  private async resolvePreparedInlineEditDisposition(
+    toolCall: ToolCallRecord,
+    edited: boolean,
+  ): Promise<PreparedActionEditDisposition | undefined> {
+    if (!edited || !toolCall.actionEnvelope?.preparedAction) return undefined;
+    if (!this.preparedActionLifecycle) {
+      throw new ActionContractUnavailableError(
+        'The prepared-action registry is unavailable for this approval.',
+      );
+    }
+    const revision = await this.preparedActionLifecycle.revisionContext(toolCall);
+    return revision.editMode;
+  }
+
+  private async recoverApprovedPreparedExternalAuthorization(
+    approval: ApprovalRecord,
+    toolCall: ToolCallRecord,
+    auth?: AuthContext,
+  ): Promise<{ approval: ApprovalRecord; toolCall: ToolCallRecord } | undefined> {
+    if (
+      approval.status !== 'approved' ||
+      !toolCall.actionEnvelope?.preparedAction ||
+      this.actionEnvelopeForToolCall(toolCall).executionMode !== 'external_grant' ||
+      !['authorized', 'pending_approval'].includes(toolCall.status)
+    ) {
+      return undefined;
+    }
+    let recoveredToolCall = toolCall;
+    try {
+      recoveredToolCall = await this.publishApprovedPreparedExternalAuthorization(approval, toolCall, auth);
+      return { approval, toolCall: recoveredToolCall };
+    } finally {
+      await this.syncApprovalPresentationBestEffort(approval, recoveredToolCall);
+    }
+  }
+
+  private async publishApprovedPreparedExternalAuthorization(
+    approval: ApprovalRecord,
+    toolCall: ToolCallRecord,
+    requestAuth?: AuthContext,
+  ): Promise<ToolCallRecord> {
+    const grantIssuer = this.deps.executionGrants;
+    if (!grantIssuer?.prepareGrant || !grantIssuer.recordPreparedGrantCreated) {
+      throw new ActionContractUnavailableError(
+        'Prepared-action authorization publication is unavailable in this server composition.',
+      );
+    }
+    const approvedInput = approval.editedInput ?? approval.originalInput;
+    if (
+      approval.approvedInputHash !== hashJson(approvedInput) ||
+      approval.approvedEnvelopeHash === undefined
+    ) {
+      throw new ConflictError('Approved prepared action does not match its finalized input binding.');
+    }
+    await this.preparedActionLifecycle?.assertApprovalCurrent(toolCall, approvedInput);
+    const revalidationFailure = await this.finalPolicyRevalidationFailure(toolCall, approvedInput);
+    if (revalidationFailure) {
+      return this.failToolCall(toolCall, approvedInput, approval.approvedBy ?? 'actionproxy:approval', revalidationFailure, requestAuth);
+    }
+
+    const finalDecision = [...(approval.decisions ?? [])]
+      .sort((left, right) => left.decidedAt.localeCompare(right.decidedAt))
+      .at(-1);
+    const actor = approval.approvedBy ?? finalDecision?.actor ?? 'actionproxy:approval';
+    const decisionAuth = finalDecision?.auth;
+    const issuedAt = approval.finalizedAt ?? approval.authorizationConsumedAt ?? approval.updatedAt;
+    const seed = hashJson({
+      approvalAuthorizationHash: approval.authorization?.authorizationHash ?? null,
+      approvalId: approval.id,
+      approvedEnvelopeHash: approval.approvedEnvelopeHash,
+      approvedInputHash: approval.approvedInputHash,
+      finalizedAt: issuedAt,
+      toolCallId: toolCall.id,
+    });
+    const approvedEnvelope = actionEnvelopeForInput(this.actionEnvelopeForToolCall(toolCall), approvedInput);
+    if (approvedEnvelope.envelopeHash !== approval.approvedEnvelopeHash) {
+      throw new ConflictError('Approved prepared action envelope no longer matches the finalized approval.');
+    }
+    const baseToolCall: ToolCallRecord = {
+      ...toolCall,
+      actionEnvelope: approvedEnvelope,
+      actionEnvelopeHash: approvedEnvelope.envelopeHash,
+      input: approvedInput,
+      inputHash: approvedEnvelope.inputHash,
+    };
+    const receipt = this.prepareActionReceipt({
+      actor,
+      approval,
+      auth: decisionAuth,
       decisionKind: 'human_approval',
       input: approvedInput,
-      reviewHash: expectedReviewHash,
-      toolCall,
+      reviewHash: approval.reviewHash,
+      toolCall: baseToolCall,
+    }, { deterministicSeed: seed, issuedAt });
+    const grant = grantIssuer.prepareGrant({
+      actor,
+      auth: decisionAuth,
+      deterministicSeed: seed,
+      issuedAt,
+      receipt,
+      toolCall: baseToolCall,
     });
-    const executedToolCall = approvedEnvelope.executionMode === 'external_grant'
-      ? await this.authorizeExternalExecution(toolCall, approvedInput, actor, auth, undefined, receipt, updatedApproval)
-      : await this.executeToolCall(toolCall, approvedInput, actor, auth, receipt, updatedApproval);
+    const attemptSeed = hashJson({ grantId: grant.id, kind: 'prepared-external-attempt', seed });
+    const attempt: ExecutionAttemptRecordV1 = {
+      ...buildExecutionAttempt({
+        approval,
+        executionMode: 'external_grant',
+        id: `attempt_${attemptSeed.slice(0, 32)}`,
+        inputHash: baseToolCall.inputHash!,
+        now: issuedAt,
+        receipt,
+        reservationOwner: `reservation_${attemptSeed.slice(32)}`,
+        toolCall: baseToolCall,
+      }),
+      grantId: grant.id,
+    };
+    const result = redactToolCallResult({
+      externalExecution: true,
+      grant,
+      note: 'Execution authorized for the server-owned prepared-action executor.',
+      ok: true,
+      receipt,
+    } as JsonObject);
+    const authorizedToolCall: ToolCallRecord = {
+      ...baseToolCall,
+      result,
+      status: 'authorized',
+      updatedAt: issuedAt,
+    };
+    const publication = await this.deps.store.publishApprovedExternalAuthorizationAtomically({
+      approvalId: approval.id,
+      attempt,
+      grant,
+      receipt,
+      toolCall: authorizedToolCall,
+    });
+    if (
+      (publication.outcome !== 'created' && publication.outcome !== 'replay') ||
+      !publication.toolCall ||
+      !publication.grant ||
+      !publication.receipt ||
+      !publication.attempt
+    ) {
+      throw new ConflictError(`Prepared-action authorization publication was rejected: ${publication.outcome}.`);
+    }
+    await this.recordApprovedExternalAuthorizationPublishedBestEffort({
+      actor,
+      approval,
+      attempt: publication.attempt,
+      auth: decisionAuth,
+      emitTelemetry: publication.outcome === 'created',
+      grant: publication.grant,
+      receipt: publication.receipt,
+      toolCall: publication.toolCall,
+    });
+    return publication.toolCall;
+  }
 
-    return { approval: updatedApproval, toolCall: executedToolCall };
+  private async recordApprovedExternalAuthorizationPublishedBestEffort(input: {
+    actor: string;
+    approval: ApprovalRecord;
+    attempt: ExecutionAttemptRecordV1;
+    auth?: AuthContext;
+    emitTelemetry: boolean;
+    grant: ExecutionGrantRecord;
+    receipt: ActionReceiptRecord;
+    toolCall: ToolCallRecord;
+  }): Promise<void> {
+    const eventId = (type: string) => `audit_prepared_authorization_${hashJson({
+      approvalId: input.approval.id,
+      type,
+      workspaceId: input.toolCall.workspaceId ?? 'default',
+    })}`;
+    const bestEffort = async (operation: () => Promise<void>): Promise<void> => {
+      try {
+        await operation();
+      } catch {
+        // Each event is attempted independently. Deterministic ids let an
+        // approval replay fill missing events without duplicating existing ones.
+      }
+    };
+    await bestEffort(() => this.recordActionReceiptCreated(input.receipt, input, {
+      auditId: eventId('receipt.created'),
+      emitTelemetry: input.emitTelemetry,
+    }));
+    await bestEffort(() => this.auditExecutionAttempt(
+      'execution.attempt_reserved',
+      input.attempt,
+      input.actor,
+      input.auth,
+      undefined,
+      eventId('execution.attempt_reserved'),
+    ));
+    await bestEffort(() => this.deps.executionGrants!.recordPreparedGrantCreated!(input.grant, {
+        auditId: eventId('execution_grant.created'),
+        actor: input.actor,
+        auth: input.auth,
+        emitTelemetry: input.emitTelemetry,
+      }));
+    await bestEffort(() => this.audit('tool_call.authorized', {
+        actor: input.actor,
+        approvalId: input.approval.id,
+        auth: input.auth,
+        data: {
+          actionEnvelopeHash: input.toolCall.actionEnvelopeHash,
+          executionAttemptId: input.attempt.id,
+          grantId: input.grant.id,
+          input: input.toolCall.input,
+          receiptHash: input.receipt.receiptHash,
+          receiptId: input.receipt.id,
+          result: input.toolCall.result ?? null,
+          toolName: input.toolCall.toolName,
+        },
+        id: eventId('tool_call.authorized'),
+        inputHash: input.toolCall.inputHash,
+        policyVersionHash: input.toolCall.policyVersionHash,
+        policyVersionId: input.toolCall.policyVersionId,
+        toolCallId: input.toolCall.id,
+        workspaceId: input.toolCall.workspaceId,
+      }));
+    if (input.emitTelemetry) {
+      this.telemetry('tool_call.authorized', telemetryForToolCall(input.toolCall, {
+        'grant.id': input.grant.id,
+        'receipt.hash': input.receipt.receiptHash,
+        'receipt.id': input.receipt.id,
+        status: input.toolCall.status,
+      }));
+    }
+  }
+
+  private async recordPreparedRevisionPublishedBestEffort(input: {
+    actor: string;
+    approval: ApprovalRecord;
+    auth?: AuthContext;
+    supersededApproval: ApprovalRecord;
+    supersededToolCall: ToolCallRecord;
+    toolCall: ToolCallRecord;
+  }): Promise<void> {
+    const binding = input.toolCall.actionEnvelope?.preparedAction;
+    const base = {
+      actor: input.actor,
+      auth: input.auth,
+      inputHash: input.toolCall.inputHash,
+      policyVersionHash: input.toolCall.policyVersionHash,
+      policyVersionId: input.toolCall.policyVersionId,
+      timestamp: input.approval.createdAt,
+      toolCallId: input.toolCall.id,
+      workspaceId: input.toolCall.workspaceId,
+    };
+    const eventId = (type: string) => `audit_revision_${hashJson({
+      approvalId: input.approval.id,
+      type,
+      workspaceId: input.toolCall.workspaceId ?? 'default',
+    })}`;
+    try {
+      await this.audit('prepared_action.created', {
+        ...base,
+        data: {
+          adapterId: binding?.adapterId ?? null,
+          adapterVersion: binding?.adapterVersion ?? null,
+          contractId: binding?.contractId ?? null,
+          contractVersion: binding?.contractVersion ?? null,
+          intentHash: binding?.intentHash ?? null,
+          intentId: binding?.intentId ?? null,
+          operationHash: binding?.operationHash ?? null,
+          revision: true,
+          serializerVersion: binding?.serializerVersion ?? null,
+        },
+        id: eventId('prepared_action.created'),
+      });
+      await this.audit('tool_call.submitted', {
+        ...base,
+        data: {
+          agentId: input.toolCall.agentId,
+          decisionV1: input.toolCall.decisionTrace?.decisionV1,
+          input: input.toolCall.input,
+          preparedIntentHash: binding?.intentHash ?? null,
+          reason: input.toolCall.reason,
+          revision: true,
+          toolName: input.toolCall.toolName,
+        },
+        id: eventId('tool_call.submitted'),
+      });
+      await this.audit('action.envelope_created', {
+        ...base,
+        data: {
+          actionEnvelope: input.toolCall.actionEnvelope ?? null,
+          actionEnvelopeHash: input.toolCall.actionEnvelopeHash ?? null,
+          canonicalActionRequestHash: input.toolCall.canonicalActionRequestHash ?? null,
+          canonicalActionRequestVersion: input.toolCall.canonicalActionRequestVersion ?? null,
+          canonicalDecisionInputHash: input.toolCall.canonicalDecisionInputHash ?? null,
+          canonicalPolicyContext: input.toolCall.canonicalPolicyContext ?? null,
+          revision: true,
+        },
+        id: eventId('action.envelope_created'),
+      });
+      await this.audit('policy.require_approval', {
+        ...base,
+        data: {
+          reason: input.toolCall.policyReason,
+          revision: true,
+          risk: input.toolCall.risk,
+        },
+        id: eventId('policy.require_approval'),
+      });
+      await this.audit('approval.created', {
+        ...base,
+        approvalId: input.approval.id,
+        data: {
+          approvalAuthorizationHash: input.approval.authorization?.authorizationHash ?? null,
+          approvalAuthorizationVersion: input.approval.authorization?.version ?? null,
+          approverGroups: input.approval.approverGroups ?? [],
+          approverUsers: input.approval.approverUsers ?? [],
+          expiresAt: input.approval.authorization?.expiresAt ?? null,
+          originalEnvelopeHash: input.approval.originalEnvelopeHash ?? null,
+          originalInput: input.approval.originalInput,
+          originalInputHash: input.approval.originalInputHash ?? null,
+          requiredApprovals: input.approval.requiredApprovals ?? 1,
+          reviewHash: input.approval.reviewHash ?? null,
+          revision: true,
+          separationOfDuties: input.approval.separationOfDuties ?? false,
+        },
+        id: eventId('approval.created'),
+      });
+      await this.audit('approval.superseded', {
+        actor: input.actor,
+        approvalId: input.supersededApproval.id,
+        auth: input.auth,
+        data: {
+          replacementApprovalId: input.approval.id,
+          replacementToolCallId: input.toolCall.id,
+        },
+        id: eventId('approval.superseded'),
+        inputHash: input.supersededToolCall.inputHash,
+        policyVersionHash: input.supersededToolCall.policyVersionHash,
+        policyVersionId: input.supersededToolCall.policyVersionId,
+        timestamp: input.approval.createdAt,
+        toolCallId: input.supersededToolCall.id,
+        workspaceId: input.supersededToolCall.workspaceId,
+      });
+      await this.audit('approval.revised', {
+        ...base,
+        approvalId: input.approval.id,
+        data: {
+          supersededApprovalId: input.supersededApproval.id,
+          supersededToolCallId: input.supersededToolCall.id,
+        },
+        id: eventId('approval.revised'),
+      });
+    } catch {
+      // The composite revision transaction is authoritative. Deterministic
+      // event ids let an exact idempotent replay fill any missing audit rows.
+    }
+  }
+
+  private async recordPreparedSubmissionPublishedBestEffort(input: {
+    actor: string;
+    approval?: ApprovalRecord;
+    auth?: AuthContext;
+    toolCall: ToolCallRecord;
+  }): Promise<void> {
+    const binding = input.toolCall.actionEnvelope?.preparedAction;
+    if (!binding) return;
+    const timestamp = input.approval?.createdAt ?? input.toolCall.createdAt;
+    const base = {
+      actor: input.actor,
+      auth: input.auth,
+      inputHash: input.toolCall.inputHash,
+      policyVersionHash: input.toolCall.policyVersionHash,
+      policyVersionId: input.toolCall.policyVersionId,
+      timestamp,
+      toolCallId: input.toolCall.id,
+      workspaceId: input.toolCall.workspaceId,
+    };
+    const record = async (
+      type: AuditEvent['type'],
+      data: JsonObject,
+      approvalId?: string,
+    ): Promise<void> => {
+      try {
+        await this.audit(type, {
+          ...base,
+          approvalId,
+          data,
+          id: `audit_prepared_submission_${hashJson({
+            approvalId: approvalId ?? null,
+            toolCallId: input.toolCall.id,
+            type,
+            workspaceId: input.toolCall.workspaceId ?? 'default',
+          })}`,
+        });
+      } catch {
+        // Each append is independently replayable. One unavailable secondary
+        // audit sink must not prevent later events or strand the durable action.
+      }
+    };
+    await record('prepared_action.created', {
+      adapterId: binding.adapterId,
+      adapterVersion: binding.adapterVersion,
+      contractId: binding.contractId,
+      contractVersion: binding.contractVersion,
+      intentHash: binding.intentHash,
+      intentId: binding.intentId,
+      operationHash: binding.operationHash,
+      serializerVersion: binding.serializerVersion,
+    });
+    await record('tool_call.submitted', {
+      agentId: input.toolCall.agentId,
+      decisionV1: input.toolCall.decisionTrace?.decisionV1,
+      input: input.toolCall.input,
+      preparedIntentHash: binding.intentHash,
+      reason: input.toolCall.reason,
+      toolName: input.toolCall.toolName,
+    });
+    await record('action.envelope_created', {
+      actionEnvelope: input.toolCall.actionEnvelope,
+      actionEnvelopeHash: input.toolCall.actionEnvelopeHash,
+      canonicalActionRequestHash: input.toolCall.canonicalActionRequestHash,
+      canonicalActionRequestVersion: input.toolCall.canonicalActionRequestVersion,
+      canonicalDecisionInputHash: input.toolCall.canonicalDecisionInputHash,
+      canonicalPolicyContext: input.toolCall.canonicalPolicyContext,
+      executionMode: input.toolCall.actionEnvelope?.executionMode,
+      protocol: input.toolCall.actionEnvelope?.protocol,
+      source: input.toolCall.actionEnvelope?.source,
+    });
+    if (input.toolCall.contentInfluence) {
+      await record(
+        'content.influence_evaluated',
+        input.toolCall.contentInfluence as unknown as JsonObject,
+      );
+    }
+    const policyType: AuditEvent['type'] = input.toolCall.decision === 'deny'
+      ? 'policy.deny'
+      : input.toolCall.decision === 'allow'
+        ? 'policy.allow'
+        : 'policy.require_approval';
+    await record(policyType, {
+      reason: input.toolCall.policyReason,
+      risk: input.toolCall.risk,
+    });
+    if (
+      input.toolCall.contentInfluence?.baseDecision !== input.toolCall.contentInfluence?.effectiveDecision &&
+      input.toolCall.contentInfluence?.effectiveDecision === 'deny'
+    ) {
+      await record('content.influence_denied', minimizedInfluenceAudit(input.toolCall.contentInfluence));
+    }
+    if (
+      input.approval &&
+      input.toolCall.contentInfluence?.baseDecision === 'allow' &&
+      input.toolCall.contentInfluence?.effectiveDecision === 'require_approval'
+    ) {
+      await record(
+        'content.influence_approval_required',
+        minimizedInfluenceAudit(input.toolCall.contentInfluence),
+        input.approval.id,
+      );
+    }
+    if (input.approval) {
+      await record('approval.created', {
+        approvalAuthorizationHash: input.approval.authorization?.authorizationHash ?? null,
+        approvalAuthorizationVersion: input.approval.authorization?.version ?? null,
+        approverGroups: input.approval.approverGroups ?? [],
+        approverUsers: input.approval.approverUsers ?? [],
+        expiresAt: input.approval.authorization?.expiresAt ?? null,
+        originalEnvelopeHash: input.approval.originalEnvelopeHash ?? null,
+        originalInput: input.approval.originalInput,
+        originalInputHash: input.approval.originalInputHash ?? null,
+        requiredApprovals: input.approval.requiredApprovals ?? 1,
+        reviewHash: input.approval.reviewHash ?? null,
+        separationOfDuties: input.approval.separationOfDuties ?? false,
+      }, input.approval.id);
+    }
+  }
+
+  async reviseApproval(
+    approvalId: string,
+    input: { input: JsonObject; reason?: string },
+    options: { auth?: AuthContext; idempotencyKey?: string; source?: ApprovalDecisionSource } = {},
+  ): Promise<{
+    approval: ApprovalRecord;
+    supersededApproval: ApprovalRecord;
+    supersededToolCall: ToolCallRecord;
+    toolCall: ToolCallRecord;
+  }> {
+    if (!this.preparedActionLifecycle) {
+      throw new ActionContractUnavailableError('Prepared-action revisions are not available in this edition.');
+    }
+    const authoritative = await this.loadApprovalState(approvalId, options.auth);
+    const replayingFinalizedRevision =
+      Boolean(options.idempotencyKey) &&
+      authoritative.approval.status === 'superseded' &&
+      Boolean(authoritative.approval.supersededAt) &&
+      Boolean(authoritative.approval.supersededByApprovalId);
+    const approval = replayingFinalizedRevision
+      ? authoritative.approval
+      : await this.expireApprovalIfNeeded(
+          authoritative.approval,
+          authoritative.toolCall,
+          options.auth,
+        );
+    const toolCall = authoritative.toolCall;
+    if (
+      !replayingFinalizedRevision &&
+      (approval.status !== 'pending' || toolCall.status !== 'pending_approval')
+    ) {
+      throw new ConflictError(`Approval is already ${approval.status}.`);
+    }
+    this.assertCanDecideApproval(approval, options.auth);
+    if (!toolCall.actionEnvelope?.preparedAction) {
+      throw new ActionContractUnavailableError(
+        'Only server-prepared actions can use the revision endpoint.',
+      );
+    }
+    await this.preparedActionLifecycle.assertRevisionAllowed(toolCall);
+    const revision = await this.preparedActionLifecycle.revisionContext(toolCall);
+    if (revision.editMode === 'original_only') {
+      throw new ConflictError('This exact action permits approval of the original input only; reject and resubmit a new proposal.');
+    }
+    const envelope = this.actionEnvelopeForToolCall(toolCall);
+    const actor = actorForDecision(undefined, options.auth);
+    const revisionAt = replayingFinalizedRevision
+      ? approval.supersededAt!
+      : this.now().toISOString();
+    const submitted = await this.submitToolCall(
+      {
+        action: {
+          context: envelope.context,
+          executionMode: envelope.executionMode,
+          operation: envelope.operation,
+          protocol: envelope.protocol,
+          source: envelope.source,
+        },
+        agentId: toolCall.agentId,
+        input: input.input,
+        metadata: {
+          ...toolCall.metadata,
+          approvalRevision: {
+            fromApprovalId: approval.id,
+            fromIntentId: revision.intentId,
+            fromToolCallId: toolCall.id,
+          },
+        },
+        reason: input.reason ?? `Revision of approval ${approval.id}.`,
+        requestedBy: actor,
+        toolName: toolCall.toolName,
+      },
+      {
+        actionContractId: revision.contractId,
+        auth: options.auth,
+        connectionId: revision.connectionId,
+        forceApproval: true,
+        idempotencyKey: options.idempotencyKey
+          ? `approval-revision:${approval.id}:${options.idempotencyKey}`
+          : undefined,
+        revision: {
+          createdAt: revisionAt,
+          createdBy: actor,
+          fromApprovalId: approval.id,
+          fromIntentId: revision.intentId,
+          fromToolCallId: toolCall.id,
+          supersededAt: revisionAt,
+        },
+        supersedesIntentId: revision.intentId,
+      },
+    );
+    if (!submitted.approval || !submitted.revision || submitted.toolCall.status !== 'pending_approval') {
+      throw new ConflictError('A native-action revision must create a separate pending approval.');
+    }
+    const {
+      supersededApproval,
+      supersededToolCall,
+    } = submitted.revision;
+    const replacementApproval = submitted.approval;
+    const replacementToolCall = submitted.toolCall;
+    await this.recordPreparedRevisionPublishedBestEffort({
+      actor,
+      approval: replacementApproval,
+      auth: options.auth,
+      supersededApproval,
+      supersededToolCall,
+      toolCall: replacementToolCall,
+    });
+    await this.syncApprovalPresentationBestEffort(
+      supersededApproval,
+      supersededToolCall,
+      submitted.revision.outcome === 'created'
+        ? {
+            actor,
+            auth: options.auth,
+            decidedAt: supersededApproval.supersededAt ?? revisionAt,
+            source: approvalDecisionSource(options.source, options.auth),
+          }
+        : undefined,
+    );
+    if (submitted.revision.outcome === 'created') {
+      await this.notifyApprovalRequired(
+        replacementToolCall,
+        replacementApproval,
+        actor,
+        options.auth,
+      );
+    }
+    return {
+      approval: replacementApproval,
+      supersededApproval,
+      supersededToolCall,
+      toolCall: replacementToolCall,
+    };
   }
 
   async rejectApproval(
     approvalId: string,
     input: { approvalNonce?: string; rejectedBy?: string; reason?: string },
     auth?: AuthContext,
+    options: ApprovalDecisionOptions = {},
   ): Promise<{ approval: ApprovalRecord; toolCall: ToolCallRecord }> {
     const initial = await this.loadApprovalState(approvalId, auth);
+    this.assertCanDecideApproval(initial.approval, auth);
     const initialApproval = await this.expireApprovalIfNeeded(initial.approval, initial.toolCall, auth);
     if (initialApproval.status !== 'pending') {
-      throw new ConflictError(`Approval is already ${initialApproval.status}`);
+      throw initial.approval.status === 'pending' && initialApproval.status === 'expired'
+        ? new ApprovalPresentationSynchronizedConflictError('Approval is already expired')
+        : new ConflictError(`Approval is already ${initialApproval.status}`);
     }
-    this.assertCanDecideApproval(initialApproval, auth);
     this.assertClientApprovalNonce(initialApproval, input.approvalNonce);
 
     const authoritative = await this.loadApprovalState(approvalId, auth);
     const approval = await this.expireApprovalIfNeeded(authoritative.approval, authoritative.toolCall, auth);
     const toolCall = authoritative.toolCall;
-    if (approval.status !== 'pending') throw new ConflictError(`Approval is already ${approval.status}`);
+    if (approval.status !== 'pending') {
+      throw authoritative.approval.status === 'pending' && approval.status === 'expired'
+        ? new ApprovalPresentationSynchronizedConflictError('Approval is already expired')
+        : new ConflictError(`Approval is already ${approval.status}`);
+    }
     const now = this.now().toISOString();
     const actor = actorForDecision(input.rejectedBy, auth);
+    const source = approvalDecisionSource(options.source, auth);
     this.assertCanDecideApproval(approval, auth);
     this.assertClientApprovalNonce(approval, input.approvalNonce);
 
@@ -1166,7 +2265,7 @@ export class ActionProxyService {
     }
     if (transition.outcome === 'expired') {
       await this.recordExpiredApproval(transition.approval, toolCall, auth);
-      throw new ConflictError('Approval authorization has expired.');
+      throw new ApprovalPresentationSynchronizedConflictError('Approval authorization has expired.');
     }
     if (transition.outcome === 'replayed') {
       throw new ConflictError('Approval authorization nonce has already been consumed.');
@@ -1182,23 +2281,34 @@ export class ActionProxyService {
       updatedAt: now,
     };
 
-    await this.deps.store.updateToolCall(updatedToolCall);
-    await this.audit('approval.rejected', {
-      toolCallId: toolCall.id,
-      approvalId: approval.id,
+    const resolution: ApprovalResolutionContext = {
       actor,
       auth,
-      inputHash: toolCall.inputHash,
-      policyVersionHash: toolCall.policyVersionHash,
-      policyVersionId: toolCall.policyVersionId,
-      workspaceId: toolCall.workspaceId,
-      data: { reason: input.reason ?? null },
-    });
-    this.telemetry('approval.rejected', telemetryForToolCall(updatedToolCall, {
-      'approval.id': approval.id,
-      'approval.status': updatedApproval.status,
-      status: updatedToolCall.status,
-    }));
+      decidedAt: updatedApproval.finalizedAt ?? now,
+      reason: input.reason,
+      source,
+    };
+    try {
+      await this.deps.store.updateToolCall(updatedToolCall);
+      await this.audit('approval.rejected', {
+        toolCallId: toolCall.id,
+        approvalId: approval.id,
+        actor,
+        auth,
+        inputHash: toolCall.inputHash,
+        policyVersionHash: toolCall.policyVersionHash,
+        policyVersionId: toolCall.policyVersionId,
+        workspaceId: toolCall.workspaceId,
+        data: { reason: input.reason ?? null, source },
+      });
+      this.telemetry('approval.rejected', telemetryForToolCall(updatedToolCall, {
+        'approval.id': approval.id,
+        'approval.status': updatedApproval.status,
+        status: updatedToolCall.status,
+      }));
+    } finally {
+      await this.syncApprovalPresentationBestEffort(updatedApproval, updatedToolCall, resolution);
+    }
 
     return { approval: updatedApproval, toolCall: updatedToolCall };
   }
@@ -1207,24 +2317,32 @@ export class ActionProxyService {
     approvalId: string,
     input: { approvalNonce?: string; cancelledBy?: string; reason?: string },
     auth?: AuthContext,
+    options: ApprovalDecisionOptions = {},
   ): Promise<{ approval: ApprovalRecord; toolCall: ToolCallRecord }> {
     const initial = await this.loadApprovalState(approvalId, auth);
+    this.assertCanDecideApproval(initial.approval, auth);
     const initialApproval = await this.expireApprovalIfNeeded(initial.approval, initial.toolCall, auth);
     if (initialApproval.status !== 'pending') {
-      throw new ConflictError(`Approval is already ${initialApproval.status}`);
+      throw initial.approval.status === 'pending' && initialApproval.status === 'expired'
+        ? new ApprovalPresentationSynchronizedConflictError('Approval is already expired')
+        : new ConflictError(`Approval is already ${initialApproval.status}`);
     }
-    this.assertCanDecideApproval(initialApproval, auth);
     this.assertClientApprovalNonce(initialApproval, input.approvalNonce);
 
     const authoritative = await this.loadApprovalState(approvalId, auth);
     const approval = await this.expireApprovalIfNeeded(authoritative.approval, authoritative.toolCall, auth);
     const toolCall = authoritative.toolCall;
-    if (approval.status !== 'pending') throw new ConflictError(`Approval is already ${approval.status}`);
+    if (approval.status !== 'pending') {
+      throw authoritative.approval.status === 'pending' && approval.status === 'expired'
+        ? new ApprovalPresentationSynchronizedConflictError('Approval is already expired')
+        : new ConflictError(`Approval is already ${approval.status}`);
+    }
     this.assertCanDecideApproval(approval, auth);
     this.assertClientApprovalNonce(approval, input.approvalNonce);
 
     const now = this.now().toISOString();
     const actor = actorForDecision(input.cancelledBy, auth);
+    const source = approvalDecisionSource(options.source, auth);
     const transition = await this.deps.store.cancelApprovalAtomically({
       approvalId: approval.id,
       authorization: this.safeTerminalAuthorizationGuard(approval, toolCall),
@@ -1238,7 +2356,7 @@ export class ActionProxyService {
     }
     if (transition.outcome === 'expired') {
       await this.recordExpiredApproval(transition.approval, toolCall, auth);
-      throw new ConflictError('Approval authorization has expired.');
+      throw new ApprovalPresentationSynchronizedConflictError('Approval authorization has expired.');
     }
     if (transition.outcome === 'replayed') {
       throw new ConflictError('Approval authorization nonce has already been consumed.');
@@ -1247,27 +2365,39 @@ export class ActionProxyService {
       throw new ConflictError(`Approval is already ${transition.approval?.status ?? 'finalized'}`);
     }
     const updatedApproval = transition.approval!;
-    const updatedToolCall = await this.terminalizeToolCall(toolCall, now);
-
-    await this.audit('approval.cancelled', {
-      toolCallId: toolCall.id,
-      approvalId: approval.id,
+    let updatedToolCall = toolCall;
+    const resolution: ApprovalResolutionContext = {
       actor,
       auth,
-      inputHash: toolCall.inputHash,
-      policyVersionHash: toolCall.policyVersionHash,
-      policyVersionId: toolCall.policyVersionId,
-      workspaceId: toolCall.workspaceId,
-      data: {
-        approvalAuthorizationHash: approval.authorization?.authorizationHash ?? null,
-        reason: input.reason ?? null,
-      },
-    });
-    this.telemetry('approval.cancelled', telemetryForToolCall(updatedToolCall, {
-      'approval.id': approval.id,
-      'approval.status': updatedApproval.status,
-      status: updatedToolCall.status,
-    }));
+      decidedAt: updatedApproval.finalizedAt ?? now,
+      reason: input.reason,
+      source,
+    };
+    try {
+      updatedToolCall = await this.terminalizeToolCall(toolCall, now);
+      await this.audit('approval.cancelled', {
+        toolCallId: toolCall.id,
+        approvalId: approval.id,
+        actor,
+        auth,
+        inputHash: toolCall.inputHash,
+        policyVersionHash: toolCall.policyVersionHash,
+        policyVersionId: toolCall.policyVersionId,
+        workspaceId: toolCall.workspaceId,
+        data: {
+          approvalAuthorizationHash: approval.authorization?.authorizationHash ?? null,
+          reason: input.reason ?? null,
+          source,
+        },
+      });
+      this.telemetry('approval.cancelled', telemetryForToolCall(updatedToolCall, {
+        'approval.id': approval.id,
+        'approval.status': updatedApproval.status,
+        status: updatedToolCall.status,
+      }));
+    } finally {
+      await this.syncApprovalPresentationBestEffort(updatedApproval, updatedToolCall, resolution);
+    }
     return { approval: updatedApproval, toolCall: updatedToolCall };
   }
 
@@ -1362,26 +2492,37 @@ export class ActionProxyService {
     auth?: AuthContext,
   ): Promise<void> {
     if (!approval) return;
-    const updatedToolCall = await this.terminalizeToolCall(toolCall, approval.expiredAt ?? approval.updatedAt);
-    await this.audit('approval.expired', {
-      toolCallId: toolCall.id,
-      approvalId: approval.id,
+    let updatedToolCall = toolCall;
+    const resolution: ApprovalResolutionContext = {
       actor: 'actionproxy:approval-expiry',
-      auth,
-      inputHash: toolCall.inputHash,
-      policyVersionHash: toolCall.policyVersionHash,
-      policyVersionId: toolCall.policyVersionId,
-      workspaceId: toolCall.workspaceId,
-      data: {
-        approvalAuthorizationHash: approval.authorization?.authorizationHash ?? null,
-        expiredAt: approval.expiredAt ?? approval.updatedAt,
-      },
-    });
-    this.telemetry('approval.expired', telemetryForToolCall(updatedToolCall, {
-      'approval.id': approval.id,
-      'approval.status': approval.status,
-      status: updatedToolCall.status,
-    }));
+      decidedAt: approval.expiredAt ?? approval.updatedAt,
+      source: 'system',
+    };
+    try {
+      updatedToolCall = await this.terminalizeToolCall(toolCall, approval.expiredAt ?? approval.updatedAt);
+      await this.audit('approval.expired', {
+        toolCallId: toolCall.id,
+        approvalId: approval.id,
+        actor: 'actionproxy:approval-expiry',
+        auth,
+        inputHash: toolCall.inputHash,
+        policyVersionHash: toolCall.policyVersionHash,
+        policyVersionId: toolCall.policyVersionId,
+        workspaceId: toolCall.workspaceId,
+        data: {
+          approvalAuthorizationHash: approval.authorization?.authorizationHash ?? null,
+          expiredAt: approval.expiredAt ?? approval.updatedAt,
+          source: 'system',
+        },
+      });
+      this.telemetry('approval.expired', telemetryForToolCall(updatedToolCall, {
+        'approval.id': approval.id,
+        'approval.status': approval.status,
+        status: updatedToolCall.status,
+      }));
+    } finally {
+      await this.syncApprovalPresentationBestEffort(approval, updatedToolCall, resolution);
+    }
   }
 
   private async terminalizeToolCall(toolCall: ToolCallRecord, updatedAt: string): Promise<ToolCallRecord> {
@@ -1849,11 +2990,13 @@ export class ActionProxyService {
     actor: string,
     auth?: AuthContext,
     executionAuthorization?: ExecutionAuthorizationProjectionV1,
+    auditId?: string,
   ): Promise<void> {
     await this.audit(type, {
       actor,
       approvalId: attempt.binding.approvalId ?? undefined,
       auth,
+      id: auditId,
       data: {
         attemptId: attempt.id,
         attemptNumber: attempt.attemptNumber,
@@ -2051,7 +3194,22 @@ export class ActionProxyService {
     reviewHash?: string;
     toolCall: ToolCallRecord;
   }): Promise<ActionReceiptRecord> {
-    const now = new Date().toISOString();
+    const receipt = this.prepareActionReceipt(input);
+    await this.deps.store.createActionReceipt(receipt);
+    await this.recordActionReceiptCreated(receipt, input);
+    return receipt;
+  }
+
+  private prepareActionReceipt(input: {
+    actor: string;
+    approval?: ApprovalRecord;
+    auth?: AuthContext;
+    decisionKind: 'human_approval' | 'policy_allow';
+    input: JsonObject;
+    reviewHash?: string;
+    toolCall: ToolCallRecord;
+  }, options: { deterministicSeed?: string; issuedAt?: string } = {}): ActionReceiptRecord {
+    const now = options.issuedAt ?? new Date().toISOString();
     const originalEnvelope = this.actionEnvelopeForToolCall(input.toolCall);
     const approvedEnvelope = actionEnvelopeForInput(originalEnvelope, input.input);
     const unsigned = {
@@ -2063,7 +3221,9 @@ export class ActionProxyService {
       decisionAuth: input.auth,
       decisionKind: input.decisionKind,
       executionMode: approvedEnvelope.executionMode,
-      id: `receipt_${randomUUID()}`,
+      id: options.deterministicSeed
+        ? `receipt_${hashJson({ kind: 'prepared-external-receipt', seed: options.deterministicSeed }).slice(0, 32)}`
+        : `receipt_${randomUUID()}`,
       issuedAt: now,
       keyId: ACTION_RECEIPT_KEY_ID,
       operation: approvedEnvelope.operation,
@@ -2083,14 +3243,26 @@ export class ActionProxyService {
       version: 'actionproxy.receipt.v1' as const,
       workspaceId: input.toolCall.workspaceId ?? input.auth?.workspaceId ?? this.deps.workspaceId ?? 'default',
     };
-    const receipt = signReceipt(this.deps.receiptSigningSecret ?? 'local-dev-execution-grant-secret', unsigned);
-    await this.deps.store.createActionReceipt(receipt);
+    return signReceipt(this.deps.receiptSigningSecret ?? 'local-dev-execution-grant-secret', unsigned);
+  }
+
+  private async recordActionReceiptCreated(
+    receipt: ActionReceiptRecord,
+    input: {
+      actor: string;
+      approval?: ApprovalRecord;
+      auth?: AuthContext;
+      toolCall: ToolCallRecord;
+    },
+    options: { auditId?: string; emitTelemetry?: boolean } = {},
+  ): Promise<void> {
     await this.audit('receipt.created', {
       toolCallId: input.toolCall.id,
       approvalId: input.approval?.id,
       actor: input.actor,
       auth: input.auth,
-      inputHash: approvedEnvelope.inputHash,
+      id: options.auditId,
+      inputHash: receipt.approvedInputHash,
       policyVersionHash: input.toolCall.policyVersionHash,
       policyVersionId: input.toolCall.policyVersionId,
       workspaceId: receipt.workspaceId,
@@ -2105,11 +3277,12 @@ export class ActionProxyService {
         reviewHash: receipt.reviewHash ?? null,
       },
     });
-    this.telemetry('receipt.created', telemetryForToolCall(input.toolCall, {
-      'receipt.hash': receipt.receiptHash,
-      'receipt.id': receipt.id,
-    }));
-    return receipt;
+    if (options.emitTelemetry !== false) {
+      this.telemetry('receipt.created', telemetryForToolCall(input.toolCall, {
+        'receipt.hash': receipt.receiptHash,
+        'receipt.id': receipt.id,
+      }));
+    }
   }
 
   private async recordReceiptOutcome(
@@ -2391,12 +3564,20 @@ export class ActionProxyService {
     if (!this.deps.approvalNotifier) return [];
 
     try {
-      const recipients =
+      const approvalWorkspaceId =
+        approval.workspaceId ?? toolCall.workspaceId ?? auth?.workspaceId ?? this.deps.workspaceId ?? 'default';
+      if (approval.workspaceId && toolCall.workspaceId && approval.workspaceId !== toolCall.workspaceId) {
+        throw new ConflictError('Approval notification workspace binding does not match its tool call.');
+      }
+      const resolved =
         resolvedRecipients ??
         (await this.resolveApprovalRecipients(
           rule ?? this.evaluatePolicy(toolCall.toolName, policyContextFromToolCall(toolCall)).rule,
-          approval.workspaceId ?? toolCall.workspaceId ?? auth?.workspaceId ?? this.deps.workspaceId ?? 'default',
+          approvalWorkspaceId,
         ));
+      const recipients = resolved === undefined
+        ? undefined
+        : approvalNotificationRecipientsFor(approval, resolved);
       if (recipients !== undefined && recipients.length === 0) {
         return [
           await this.recordApprovalDelivery(
@@ -2404,7 +3585,7 @@ export class ActionProxyService {
             approval,
             {
               channelId: 'approval-recipient-resolution',
-              error: 'No enabled approval recipients resolved for this approval.',
+              error: 'No enabled recipient remains within this approval\'s frozen authorization.',
               provider: 'email',
               status: 'failed',
             },
@@ -2420,8 +3601,15 @@ export class ActionProxyService {
         toolCall,
       });
       const records: ApprovalDeliveryRecord[] = [];
-      for (const delivery of deliveries) {
-        records.push(await this.recordApprovalDelivery(toolCall, approval, delivery, actor, auth));
+      try {
+        for (const delivery of deliveries) {
+          records.push(await this.recordApprovalDelivery(toolCall, approval, delivery, actor, auth));
+        }
+      } finally {
+        // A decision can win while a provider send is still in flight. Re-read only
+        // after the complete delivery batch has been persisted so one bounded sync
+        // repairs every newly recorded Telegram card, even with many recipients.
+        await this.syncTerminalPresentationAfterDeliveryPersistence(approval, toolCall);
       }
       return records;
     } catch (error) {
@@ -2506,6 +3694,298 @@ export class ActionProxyService {
     return record;
   }
 
+  private async syncTerminalPresentationAfterDeliveryPersistence(
+    approval: ApprovalRecord,
+    toolCall: ToolCallRecord,
+  ): Promise<void> {
+    try {
+      const authoritativeApproval = await this.deps.store.getApproval(approval.id);
+      if (!authoritativeApproval || authoritativeApproval.status === 'pending') return;
+      const authoritativeToolCall =
+        await this.deps.store.getToolCall(authoritativeApproval.toolCallId) ?? toolCall;
+      await this.syncApprovalPresentationBestEffort(authoritativeApproval, authoritativeToolCall);
+    } catch {
+      // Persisted delivery and approval state remain authoritative. A read or
+      // provider projection failure must not turn notification delivery into a
+      // failed submission or trigger a surprise replacement message.
+    }
+  }
+
+  async syncApprovalPresentation(
+    approvalId: string,
+    resolution?: ApprovalResolutionContext,
+    reference?: ApprovalPresentationReference,
+    options: {
+      auth?: AuthContext;
+      repair?: boolean;
+      repairUntrackedReference?: boolean;
+    } = {},
+  ): Promise<{ approval: ApprovalRecord; resolution: ApprovalResolutionContext; toolCall: ToolCallRecord }> {
+    const approval = await this.deps.store.getApproval(approvalId);
+    if (!approval) throw new NotFoundError(`Approval not found: ${approvalId}`);
+    assertWorkspace(approval.workspaceId, options.auth);
+    this.assertCanDecideApproval(approval, options.auth);
+    const toolCall = await this.deps.store.getToolCall(approval.toolCallId);
+    if (!toolCall) throw new NotFoundError(`Tool call not found: ${approval.toolCallId}`);
+    assertWorkspace(toolCall.workspaceId, options.auth);
+    const deliveries = await this.deps.store.listApprovalDeliveries(approval.id);
+    const matchingReference = reference
+      ? deliveries.find((delivery) =>
+          delivery.channelId === reference.channelId &&
+          delivery.destination === reference.destination &&
+          delivery.messageId === reference.messageId &&
+          delivery.provider === reference.provider,
+        )
+      : undefined;
+    const fallbackDelivery = reference && !matchingReference
+      ? {
+          approvalId: approval.id,
+          channelId: reference.channelId,
+          createdAt: this.now().toISOString(),
+          data: {},
+          destination: reference.destination,
+          id: `delivery_untracked_${hashJson({ approvalId, ...reference }).slice(0, 32)}`,
+          messageId: reference.messageId,
+          provider: reference.provider,
+          status: 'sent' as const,
+          toolCallId: toolCall.id,
+          updatedAt: this.now().toISOString(),
+          workspaceId: approval.workspaceId,
+        }
+      : undefined;
+    const resolved = resolution ?? await this.resolveApprovalResolution(approval, toolCall);
+    if (options.repair !== false) {
+      await this.syncApprovalPresentationBestEffort(
+        approval,
+        toolCall,
+        resolved,
+        fallbackDelivery ? [...deliveries, fallbackDelivery] : deliveries,
+      );
+    } else if (options.repairUntrackedReference && fallbackDelivery) {
+      // An expiry-observing callback may already have reconciled every stored
+      // card. Still repair the clicked coordinates when Telegram supplied an
+      // older/untracked card, without repeating the full provider batch.
+      await this.syncApprovalPresentationBestEffort(
+        approval,
+        toolCall,
+        resolved,
+        [fallbackDelivery],
+      );
+    }
+    return { approval, resolution: resolved, toolCall };
+  }
+
+  private async syncApprovalPresentationBestEffort(
+    approval: ApprovalRecord,
+    toolCall: ToolCallRecord,
+    resolution?: ApprovalResolutionContext,
+    deliveriesOverride?: ApprovalDeliveryRecord[],
+  ): Promise<void> {
+    const syncPresentation = this.deps.approvalNotifier?.syncApprovalPresentation?.bind(
+      this.deps.approvalNotifier,
+    );
+    if (approval.status === 'pending' || !syncPresentation) return;
+
+    const work: ApprovalPresentationSyncWork = {
+      approval,
+      deliveriesOverride,
+      includeStoredDeliveries: deliveriesOverride === undefined,
+      resolution,
+      syncPresentation,
+      toolCall,
+    };
+    const active = this.approvalPresentationSyncs.get(approval.id);
+    if (active) {
+      if (!active.acceptingTrailing) {
+        // A trailing provider pass is already running, so its immutable request
+        // cannot absorb a newly supplied callback coordinate. Wait for this
+        // bounded batch, then let concurrent late arrivals form a new
+        // coalesced batch instead of silently dropping their repair.
+        await active.promise;
+        await this.syncApprovalPresentationBestEffort(
+          approval,
+          toolCall,
+          resolution,
+          deliveriesOverride,
+        );
+        return;
+      }
+      // Coalesce a burst of stale callbacks or post-send repairs into at most
+      // one trailing pass. This prevents a Telegram outage from creating an
+      // unbounded queue of sequential three-second waits.
+      active.trailing = mergeApprovalPresentationSyncWork(active.trailing, work);
+      await active.promise;
+      return;
+    }
+
+    const state = {} as ApprovalPresentationSyncState;
+    state.acceptingTrailing = true;
+    const drain = Promise.resolve().then(async () => {
+      await this.performApprovalPresentationSync(
+        work.approval,
+        work.toolCall,
+        work.resolution,
+        work.deliveriesOverride,
+        work.includeStoredDeliveries,
+        work.syncPresentation,
+      );
+      // Snapshot one coalesced trailing request. Any later calls see the same
+      // active promise and merge into this work before it begins.
+      const trailing = state.trailing;
+      state.trailing = undefined;
+      state.acceptingTrailing = false;
+      if (trailing) {
+        await this.performApprovalPresentationSync(
+          trailing.approval,
+          trailing.toolCall,
+          trailing.resolution,
+          trailing.deliveriesOverride,
+          trailing.includeStoredDeliveries,
+          trailing.syncPresentation,
+        );
+      }
+    });
+    state.promise = drain.finally(() => {
+      if (this.approvalPresentationSyncs.get(approval.id) === state) {
+        this.approvalPresentationSyncs.delete(approval.id);
+      }
+    });
+    this.approvalPresentationSyncs.set(approval.id, state);
+    await state.promise;
+  }
+
+  private async performApprovalPresentationSync(
+    approval: ApprovalRecord,
+    toolCall: ToolCallRecord,
+    resolution?: ApprovalResolutionContext,
+    deliveriesOverride?: ApprovalDeliveryRecord[],
+    includeStoredDeliveries = deliveriesOverride === undefined,
+    syncPresentation?: NonNullable<ApprovalNotifier['syncApprovalPresentation']>,
+  ): Promise<void> {
+    try {
+      if (!syncPresentation) return;
+      const storedDeliveries = includeStoredDeliveries
+        ? await this.deps.store.listApprovalDeliveries(approval.id)
+        : [];
+      const deliveries = [
+        ...new Map(
+          [...storedDeliveries, ...(deliveriesOverride ?? [])]
+            .map((delivery) => [delivery.id, delivery]),
+        ).values(),
+      ];
+      if (deliveries.length === 0) return;
+      const resolved = resolution ?? await this.resolveApprovalResolution(approval, toolCall);
+      const attemptedAt = this.now().toISOString();
+      const results = await withPresentationTimeout(
+        syncPresentation({
+          approval,
+          deliveries,
+          resolution: resolved,
+          toolCall,
+        }),
+        deliveries,
+      );
+      await Promise.all(results.map((result) => this.recordApprovalPresentationResult(
+        approval,
+        toolCall,
+        deliveries,
+        result,
+        attemptedAt,
+      )));
+    } catch {
+      // Presentation synchronization is a non-authoritative projection. Approval,
+      // authorization, and execution outcomes must never depend on Telegram.
+    }
+  }
+
+  private async resolveApprovalResolution(
+    approval: ApprovalRecord,
+    toolCall: ToolCallRecord,
+  ): Promise<ApprovalResolutionContext> {
+    const fallback = approvalResolutionFor(approval);
+    if (approval.status === 'approved' || approval.status === 'expired') return fallback;
+
+    try {
+      const eventType = approval.status === 'rejected'
+        ? 'approval.rejected'
+        : approval.status === 'cancelled'
+          ? 'approval.cancelled'
+          : 'approval.superseded';
+      const events = await this.deps.auditStore.list('all', {
+        toolCallId: toolCall.id,
+        workspaceId: toolCall.workspaceId,
+      });
+      const event = events.find((candidate) =>
+        candidate.approvalId === approval.id && candidate.type === eventType,
+      );
+      if (!event) return fallback;
+      const source = isApprovalDecisionSource(event.data.source)
+        ? event.data.source
+        : approvalDecisionSource(undefined, event.auth);
+      return {
+        actor: event.actor ?? fallback.actor,
+        auth: event.auth,
+        decidedAt: fallback.decidedAt,
+        reason: typeof event.data.reason === 'string' ? event.data.reason : fallback.reason,
+        source,
+      };
+    } catch {
+      return fallback;
+    }
+  }
+
+  private async recordApprovalPresentationResult(
+    approval: ApprovalRecord,
+    toolCall: ToolCallRecord,
+    deliveries: ApprovalDeliveryRecord[],
+    result: ApprovalPresentationResult,
+    attemptedAt: string,
+  ): Promise<void> {
+    const delivery = deliveries.find((candidate) => candidate.id === result.deliveryId);
+    if (!delivery) return;
+    const completedAt = this.now().toISOString();
+    const presentation: JsonObject = result.status === 'updated'
+      ? {
+          attemptedAt,
+          result: 'updated',
+          syncedAt: completedAt,
+          targetStatus: approval.status,
+          version: 1,
+        }
+      : {
+          attemptedAt,
+          error: sanitizePresentationError(result.error),
+          result: 'failed',
+          targetStatus: approval.status,
+          version: 1,
+        };
+    const persisted = !delivery.id.startsWith('delivery_untracked_');
+    const updated: ApprovalDeliveryRecord = {
+      ...delivery,
+      data: {
+        ...delivery.data,
+        telegramPresentation: presentation,
+      },
+      updatedAt: completedAt,
+    };
+    if (persisted) await this.deps.store.updateApprovalDelivery(updated);
+    await this.audit(
+      result.status === 'updated'
+        ? 'approval_notification.presentation_updated'
+        : 'approval_notification.presentation_update_failed',
+      {
+        actor: 'actionproxy:approval-notification',
+        approvalId: approval.id,
+        data: deliveryAuditData(updated),
+        inputHash: toolCall.inputHash,
+        policyVersionHash: toolCall.policyVersionHash,
+        policyVersionId: toolCall.policyVersionId,
+        toolCallId: toolCall.id,
+        workspaceId: toolCall.workspaceId,
+      },
+    );
+  }
+
   private async resolveApprovalRecipients(
     rule: PolicyRule,
     workspaceId: string,
@@ -2516,6 +3996,7 @@ export class ActionProxyService {
   private async audit(
     type: AuditEvent['type'],
     payload: {
+      id?: string;
       toolCallId?: string;
       approvalId?: string;
       actor?: string;
@@ -2524,11 +4005,12 @@ export class ActionProxyService {
       inputHash?: string;
       policyVersionHash?: string;
       policyVersionId?: string;
+      timestamp?: string;
       workspaceId?: string;
     },
   ): Promise<void> {
     await this.deps.auditStore.append({
-      id: `audit_${randomUUID()}`,
+      id: payload.id ?? `audit_${randomUUID()}`,
       type,
       workspaceId: payload.workspaceId ?? payload.auth?.workspaceId ?? this.deps.workspaceId,
       toolCallId: payload.toolCallId,
@@ -2538,7 +4020,7 @@ export class ActionProxyService {
       inputHash: payload.inputHash,
       policyVersionHash: payload.policyVersionHash,
       policyVersionId: payload.policyVersionId,
-      timestamp: new Date().toISOString(),
+      timestamp: payload.timestamp ?? new Date().toISOString(),
       data: payload.data,
     });
   }
@@ -2569,6 +4051,27 @@ export class ActionProxyService {
   private telemetry(name: string, attributes: TelemetryAttributes): void {
     void this.deps.telemetry?.recordLifecycle(name, attributes).catch(() => undefined);
   }
+}
+
+function mergeApprovalPresentationSyncWork(
+  current: ApprovalPresentationSyncWork | undefined,
+  incoming: ApprovalPresentationSyncWork,
+): ApprovalPresentationSyncWork {
+  if (!current) return incoming;
+  const overrides = [...(current.deliveriesOverride ?? []), ...(incoming.deliveriesOverride ?? [])];
+  const deliveriesOverride = overrides.length
+    ? [
+        ...new Map(
+          overrides.map((delivery) => [delivery.id, delivery]),
+        ).values(),
+      ]
+    : undefined;
+  return {
+    ...incoming,
+    deliveriesOverride,
+    includeStoredDeliveries: current.includeStoredDeliveries || incoming.includeStoredDeliveries,
+    resolution: incoming.resolution ?? current.resolution,
+  };
 }
 
 function verifiedInfluenceScopeId(request: CanonicalActionRequest | undefined): string | undefined {
@@ -2761,6 +4264,25 @@ function approvalApproverUsersFor(
   return undefined;
 }
 
+function approvalNotificationRecipientsFor(
+  approval: ApprovalRecord,
+  resolvedRecipients: ApprovalNotificationRecipient[],
+): ApprovalNotificationRecipient[] {
+  // Addresses and channel identifiers may be refreshed, but authorization identity
+  // is frozen when the approval is published. Never disclose the payload to a
+  // directory principal that was not part of that immutable authorization set.
+  if (approval.approverUsers === undefined) return [];
+  const authorizedPrincipalIds = new Set(approval.approverUsers);
+  return resolvedRecipients.filter((recipient) => authorizedPrincipalIds.has(recipient.principalId));
+}
+
+function requiredPreparedApproval(candidate: PendingApprovalCandidate | undefined): PendingApprovalCandidate {
+  if (!candidate) {
+    throw new ActionContractUnavailableError('Prepared action did not produce a frozen pending approval.');
+  }
+  return candidate;
+}
+
 function legacyNotificationAuditType(delivery: ApprovalNotificationResult): AuditEvent['type'] | undefined {
   if (delivery.provider === 'slack') {
     return delivery.status === 'sent' ? 'slack.approval_notification.sent' : 'slack.approval_notification.failed';
@@ -2783,7 +4305,17 @@ function approvalInputDecision(input: {
   editedInput?: JsonObject | null;
   inputDecision?: { mode: 'edited'; input: JsonObject } | { mode: 'original' };
 }): { mode: 'edited'; input: JsonObject } | { mode: 'original' } {
-  if (input.inputDecision) return input.inputDecision;
+  if (input.inputDecision) {
+    if (input.editedInput !== undefined) {
+      const representationsConflict = input.inputDecision.mode === 'original'
+        ? input.editedInput !== null
+        : input.editedInput === null || hashJson(input.inputDecision.input) !== hashJson(input.editedInput);
+      if (representationsConflict) {
+        throw new ConflictError('Approval input decision representations conflict.');
+      }
+    }
+    return input.inputDecision;
+  }
   if (input.editedInput !== undefined && input.editedInput !== null) {
     return { input: input.editedInput, mode: 'edited' };
   }
@@ -2792,6 +4324,31 @@ function approvalInputDecision(input: {
 
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function metadataWithPreparedGovernance(
+  metadata: JsonObject | undefined,
+  prepared: PreparedActionSubmission,
+): JsonObject {
+  const sanitized: JsonObject = { ...(metadata ?? {}) };
+  for (const key of [
+    'amount',
+    'approverGroup',
+    'currency',
+    'customerVisible',
+    'operationKind',
+    'recipientDomain',
+    'riskKind',
+  ]) {
+    delete sanitized[key];
+  }
+  return {
+    ...sanitized,
+    customerVisible: prepared.governance.customerVisible,
+    operationKind: prepared.governance.operationKind,
+    requiredScopes: [...prepared.governance.requiredScopes],
+    riskKind: prepared.governance.risk,
+  };
 }
 
 function actorForSubmit(request: SubmitToolCallRequest, auth: AuthContext | undefined): string {
@@ -2806,6 +4363,90 @@ function runtimeObservationSource(request: SubmitToolCallRequest): 'local_demo' 
 function actorForDecision(bodyActor: string | undefined, auth: AuthContext | undefined): string {
   if (!auth || auth.authProvider === 'none') return bodyActor ?? 'local-admin';
   return auth.email ?? auth.principalId;
+}
+
+function approvalDecisionSource(
+  supplied: ApprovalDecisionSource | undefined,
+  auth: AuthContext | undefined,
+): ApprovalDecisionSource {
+  if (supplied) return supplied;
+  if (auth?.authProvider === 'slack') return 'slack';
+  if (auth?.authProvider === 'telegram') return 'telegram';
+  return 'actionproxy';
+}
+
+function isApprovalDecisionSource(value: unknown): value is ApprovalDecisionSource {
+  return value === 'actionproxy' || value === 'slack' || value === 'system' || value === 'telegram';
+}
+
+function approvalResolutionFor(approval: ApprovalRecord): ApprovalResolutionContext {
+  const finalDecision = [...(approval.decisions ?? [])]
+    .sort((left, right) => left.decidedAt.localeCompare(right.decidedAt))
+    .at(-1);
+  if (approval.status === 'approved') {
+    return {
+      actor: approval.approvedBy ?? finalDecision?.actor,
+      auth: finalDecision?.auth,
+      decidedAt: approval.finalizedAt ?? finalDecision?.decidedAt ?? approval.updatedAt,
+      source: finalDecision?.source ?? approvalDecisionSource(undefined, finalDecision?.auth),
+    };
+  }
+  if (approval.status === 'rejected') {
+    return {
+      actor: approval.rejectedBy,
+      decidedAt: approval.finalizedAt ?? approval.updatedAt,
+      reason: approval.rejectionReason,
+      source: 'actionproxy',
+    };
+  }
+  if (approval.status === 'cancelled') {
+    return {
+      actor: approval.cancelledBy,
+      decidedAt: approval.cancelledAt ?? approval.finalizedAt ?? approval.updatedAt,
+      reason: approval.cancellationReason,
+      source: 'actionproxy',
+    };
+  }
+  if (approval.status === 'expired') {
+    return {
+      actor: 'actionproxy:approval-expiry',
+      decidedAt: approval.expiredAt ?? approval.finalizedAt ?? approval.updatedAt,
+      source: 'system',
+    };
+  }
+  return {
+    decidedAt: approval.supersededAt ?? approval.finalizedAt ?? approval.updatedAt,
+    source: 'actionproxy',
+  };
+}
+
+async function withPresentationTimeout(
+  operation: Promise<ApprovalPresentationResult[]>,
+  deliveries: ApprovalDeliveryRecord[],
+): Promise<ApprovalPresentationResult[]> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<ApprovalPresentationResult[]>((resolve) => {
+    timeout = setTimeout(() => resolve(deliveries
+      .filter((delivery) => delivery.provider === 'telegram' && delivery.status === 'sent')
+      .map((delivery) => ({
+      deliveryId: delivery.id,
+      error: 'Approval notification presentation update timed out.',
+      status: 'failed' as const,
+      }))), 3_100);
+  });
+  try {
+    return await Promise.race([operation, timedOut]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function sanitizePresentationError(error: string | undefined): string {
+  const normalized = (error ?? 'Unknown presentation update error.')
+    .replace(/\b(?:bot)?\d{5,}:[A-Za-z0-9_-]{10,}\b/gu, 'bot[redacted]')
+    .replace(/[\r\n\t]+/gu, ' ')
+    .trim();
+  return normalized.slice(0, 500) || 'Unknown presentation update error.';
 }
 
 function assertWorkspace(workspaceId: string | undefined, auth: AuthContext | undefined): void {

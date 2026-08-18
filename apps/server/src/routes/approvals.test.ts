@@ -81,7 +81,46 @@ describe('approval routes', () => {
     });
   });
 
-  it('redacts credentials from edited approval decision history', async () => {
+  it.each([
+    {
+      label: 'modern inputDecision',
+      payload: (secret: string) => ({
+        approvedBy: 'manager@example.com',
+        inputDecision: {
+          input: { body: 'Hello', nested: { refreshToken: secret }, subject: 'Edited', to: 'customer@example.com' },
+          mode: 'edited',
+        },
+      }),
+    },
+    {
+      label: 'legacy editedInput',
+      payload: (secret: string) => ({
+        approvedBy: 'manager@example.com',
+        editedInput: {
+          body: 'Hello',
+          nested: { refreshToken: secret },
+          subject: 'Edited',
+          to: 'customer@example.com',
+        },
+      }),
+    },
+    {
+      label: 'matching modern and legacy representations',
+      payload: (secret: string) => {
+        const editedInput = {
+          body: 'Hello',
+          nested: { refreshToken: secret },
+          subject: 'Edited',
+          to: 'customer@example.com',
+        };
+        return {
+          approvedBy: 'manager@example.com',
+          editedInput,
+          inputDecision: { input: editedInput, mode: 'edited' as const },
+        };
+      },
+    },
+  ])('executes Community edits through the $label form without reflecting secrets', async ({ payload }) => {
     app = await makeApp();
     const pending = await submitEmailApproval(app, 'Edited secret email');
     const approvalId = pending.json().approval.id as string;
@@ -89,13 +128,7 @@ describe('approval routes', () => {
 
     const approved = await app.inject({
       method: 'POST',
-      payload: {
-        approvedBy: 'manager@example.com',
-        inputDecision: {
-          input: { body: 'Hello', nested: { refreshToken: secret }, subject: 'Edited', to: 'customer@example.com' },
-          mode: 'edited',
-        },
-      },
+      payload: payload(secret),
       url: `/v1/approvals/${approvalId}/approve`,
     });
     const fetched = await app.inject({ method: 'GET', url: `/v1/approvals/${approvalId}` });
@@ -103,7 +136,104 @@ describe('approval routes', () => {
     expect(approved.statusCode).toBe(200);
     expect(JSON.stringify(approved.json())).not.toContain(secret);
     expect(JSON.stringify(fetched.json())).not.toContain(secret);
-    expect(fetched.json().approval.decisions[0].editedInput.nested.refreshToken).toBe('[REDACTED]');
+    expect(fetched.json()).toMatchObject({
+      approval: {
+        decisions: [{ inputDecision: 'edited' }],
+        editedInput: { subject: 'Edited', to: 'customer@example.com' },
+        status: 'approved',
+      },
+      toolCall: { status: 'executed' },
+    });
+  });
+
+  it.each([
+    {
+      label: 'original decision with legacy edited input',
+      payload: {
+        approvedBy: 'manager@example.com',
+        editedInput: { subject: 'Legacy edit', to: 'customer@example.com' },
+        inputDecision: { mode: 'original' },
+      },
+    },
+    {
+      label: 'different modern and legacy edits',
+      payload: {
+        approvedBy: 'manager@example.com',
+        editedInput: { subject: 'Legacy edit', to: 'customer@example.com' },
+        inputDecision: {
+          input: { subject: 'Modern edit', to: 'customer@example.com' },
+          mode: 'edited',
+        },
+      },
+    },
+    {
+      label: 'modern edit with legacy original marker',
+      payload: {
+        approvedBy: 'manager@example.com',
+        editedInput: null,
+        inputDecision: {
+          input: { subject: 'Modern edit', to: 'customer@example.com' },
+          mode: 'edited',
+        },
+      },
+    },
+  ])('rejects conflicting approval input representations before mutation: $label', async ({ label, payload }) => {
+    app = await makeApp();
+    const pending = await submitEmailApproval(app, `Conflicting representations: ${label}`);
+    const approvalId = pending.json().approval.id as string;
+
+    const response = await app.inject({
+      method: 'POST',
+      payload,
+      url: `/v1/approvals/${approvalId}/approve`,
+    });
+    const fetched = await app.inject({ method: 'GET', url: `/v1/approvals/${approvalId}` });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: 'invalid_request' });
+    expect(fetched.json()).toMatchObject({
+      approval: { decisions: [], status: 'pending' },
+      toolCall: { status: 'pending_approval' },
+    });
+  });
+
+  it('rejects fields that do not belong to the selected inputDecision variant', async () => {
+    app = await makeApp();
+    const pending = await submitEmailApproval(app, 'Strict original decision');
+    const approvalId = pending.json().approval.id as string;
+
+    const response = await app.inject({
+      method: 'POST',
+      payload: {
+        approvedBy: 'manager@example.com',
+        inputDecision: {
+          input: { subject: 'Must not be stripped', to: 'customer@example.com' },
+          mode: 'original',
+        },
+      },
+      url: `/v1/approvals/${approvalId}/approve`,
+    });
+    const fetched = await app.inject({ method: 'GET', url: `/v1/approvals/${approvalId}` });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: 'invalid_request' });
+    expect(fetched.json()).toMatchObject({
+      approval: { decisions: [], status: 'pending' },
+      toolCall: { status: 'pending_approval' },
+    });
+  });
+
+  it('does not register the private prepared-action revision route in Community', async () => {
+    app = await makeApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      payload: { input: { subject: 'Revised' } },
+      url: '/v1/approvals/approval_missing/revise',
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(app.printRoutes()).not.toContain('/revise');
   });
 
   it('rejects a stale nonce while preserving legacy approve payload compatibility', async () => {

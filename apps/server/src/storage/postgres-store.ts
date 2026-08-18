@@ -22,6 +22,12 @@ import type { AuditListFilters, AuditListLimit, AuditStore } from './audit-store
 import type {
   AtomicActionReceiptOutcomeInput,
   AtomicActionReceiptOutcomeResult,
+  AtomicApprovedExternalAuthorizationPublicationInput,
+  AtomicApprovedExternalAuthorizationPublicationResult,
+  AtomicKnownExternalExecutionOutcomeAdoptionInput,
+  AtomicKnownExternalExecutionOutcomeAdoptionResult,
+  AtomicKnownExternalExecutionOutcomeRecordingInput,
+  AtomicKnownExternalExecutionOutcomeRecordingResult,
   AtomicExecutionAttemptGrantBindingInput,
   AtomicExecutionAttemptGrantBindingResult,
   AtomicExecutionAttemptReservationResult,
@@ -63,6 +69,25 @@ import {
   ApproverPrincipalConflictError,
   isPostgresApproverPrincipalUniqueViolation,
 } from './approver-principal-constraint';
+import {
+  approvedExternalAuthorizationMatchesCurrent,
+  assertApprovedExternalAuthorizationPublicationCandidate,
+  sameApprovedExternalAuthorizationPublication,
+} from './approved-external-authorization-atomicity';
+import {
+  assertKnownExternalExecutionOutcomeAdoptionCandidate,
+  externalOutcomeAdoptionState,
+  knownExternalOutcomeMatchesCurrent,
+  outcomeProjectionCanBeAdopted,
+  sameKnownExternalOutcomeProjection,
+} from './external-outcome-adoption-atomicity';
+import {
+  assertKnownExternalExecutionOutcomeRecordingCandidate,
+  knownExternalOutcomeRecordingBindingsMatch,
+  knownExternalOutcomeRecordingConflictDisposition,
+  knownExternalOutcomeRecordingMatchesCurrent,
+  sameRecordedKnownExternalOutcomeProjection,
+} from './external-outcome-recording-atomicity';
 
 interface PgQueryable {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
@@ -1156,6 +1181,225 @@ export class PostgresStore implements Store, AuditStore, PolicyVersionStore {
     });
   }
 
+  async publishApprovedExternalAuthorizationAtomically(
+    input: AtomicApprovedExternalAuthorizationPublicationInput,
+  ): Promise<AtomicApprovedExternalAuthorizationPublicationResult> {
+    assertApprovedExternalAuthorizationPublicationCandidate(input);
+    const workspaceId = input.toolCall.workspaceId ?? 'default';
+    return this.withTransaction(async (client) => {
+      const toolCallRow = (await client.query(
+        'SELECT * FROM tool_calls WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [input.toolCall.id, workspaceId],
+      )).rows[0];
+      const approvalRow = (await client.query(
+        'SELECT * FROM approvals WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [input.approvalId, workspaceId],
+      )).rows[0];
+      const toolCall = toolCallRow ? toolCallFromRow(toolCallRow) : undefined;
+      const approval = approvalRow ? approvalFromRow(approvalRow) : undefined;
+      if (!toolCall || !approval) return { approval, outcome: 'not_found' as const, toolCall };
+
+      const receiptRows = (await client.query(
+        `SELECT * FROM action_receipts
+         WHERE (workspace_id = $1 AND tool_call_id = $2) OR id = $3
+         FOR UPDATE`,
+        [workspaceId, toolCall.id, input.receipt.id],
+      )).rows;
+      const grantRows = (await client.query(
+        `SELECT * FROM execution_grants
+         WHERE (workspace_id = $1 AND tool_call_id = $2) OR id = $3
+         FOR UPDATE`,
+        [workspaceId, toolCall.id, input.grant.id],
+      )).rows;
+      const attemptRows = (await client.query(
+        `SELECT * FROM execution_attempts
+         WHERE (workspace_id = $1 AND tool_call_id = $2) OR id = $3
+         FOR UPDATE`,
+        [workspaceId, toolCall.id, input.attempt.id],
+      )).rows;
+      const receiptRow = receiptRows.find((row) => String(row.workspace_id) === workspaceId && String(row.tool_call_id) === toolCall.id);
+      const grantRow = grantRows.find((row) => String(row.workspace_id) === workspaceId && String(row.tool_call_id) === toolCall.id);
+      const attemptRow = attemptRows.find((row) => String(row.workspace_id) === workspaceId && String(row.tool_call_id) === toolCall.id);
+      const receipt = receiptRow ? actionReceiptFromRow(receiptRow) : undefined;
+      const grant = grantRow ? executionGrantFromRow(grantRow) : undefined;
+      const attempt = attemptRow ? executionAttemptFromRow(attemptRow) : undefined;
+      const candidateIdCollision = receiptRows.some((row) => row !== receiptRow)
+        || grantRows.some((row) => row !== grantRow)
+        || attemptRows.some((row) => row !== attemptRow);
+      const publicationExists = candidateIdCollision
+        || receipt !== undefined
+        || grant !== undefined
+        || attempt !== undefined
+        || toolCall.status === 'authorized';
+      if (publicationExists) {
+        return !candidateIdCollision && sameApprovedExternalAuthorizationPublication(input, { attempt, grant, receipt, toolCall })
+          ? { approval, attempt, grant, outcome: 'replay' as const, receipt, toolCall }
+          : { approval, attempt, grant, outcome: 'conflict' as const, receipt, toolCall };
+      }
+      if (approval.status !== 'approved' || toolCall.status !== 'pending_approval') {
+        return { approval, outcome: 'state_mismatch' as const, toolCall };
+      }
+      if (!approvedExternalAuthorizationMatchesCurrent(input, approval, toolCall)) {
+        return { approval, outcome: 'binding_mismatch' as const, toolCall };
+      }
+
+      await this.writeActionReceipt(input.receipt, client, false);
+      await this.writeExecutionGrant(input.grant, client, false);
+      await insertExecutionAttempt(client, input.attempt);
+      await this.writeToolCall(input.toolCall, client);
+      return {
+        approval,
+        attempt: input.attempt,
+        grant: input.grant,
+        outcome: 'created' as const,
+        receipt: input.receipt,
+        toolCall: input.toolCall,
+      };
+    });
+  }
+
+  async adoptKnownExternalExecutionOutcomeAtomically(
+    input: AtomicKnownExternalExecutionOutcomeAdoptionInput,
+  ): Promise<AtomicKnownExternalExecutionOutcomeAdoptionResult> {
+    assertKnownExternalExecutionOutcomeAdoptionCandidate(input);
+    return this.withTransaction(async (client) => {
+      const attemptRow = (await client.query(
+        'SELECT * FROM execution_attempts WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [input.attemptId, input.workspaceId],
+      )).rows[0];
+      const attempt = attemptRow ? executionAttemptFromRow(attemptRow) : undefined;
+      if (!attempt) return { outcome: 'not_found' as const };
+      const toolCallRow = (await client.query(
+        'SELECT * FROM tool_calls WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [attempt.toolCallId, input.workspaceId],
+      )).rows[0];
+      const receiptRow = (await client.query(
+        'SELECT * FROM action_receipts WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [input.receipt.id, input.workspaceId],
+      )).rows[0];
+      const grantRow = attempt.grantId
+        ? (await client.query(
+            'SELECT * FROM execution_grants WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+            [attempt.grantId, input.workspaceId],
+          )).rows[0]
+        : undefined;
+      const toolCall = toolCallRow ? toolCallFromRow(toolCallRow) : undefined;
+      const receipt = receiptRow ? actionReceiptFromRow(receiptRow) : undefined;
+      const grant = grantRow ? executionGrantFromRow(grantRow) : undefined;
+      if (!toolCall || !receipt || !grant) return { attempt, grant, outcome: 'not_found' as const, receipt, toolCall };
+      const state = externalOutcomeAdoptionState(attempt);
+      if (state === 'reconciliation_required') return { attempt, grant, outcome: state, receipt, toolCall };
+      if (state === 'state_mismatch') return { attempt, grant, outcome: state, receipt, toolCall };
+      if (sameKnownExternalOutcomeProjection(input, receipt, toolCall)) {
+        return { attempt, grant, outcome: 'replay' as const, receipt, toolCall };
+      }
+      if (!knownExternalOutcomeMatchesCurrent(input, { attempt, grant, receipt, toolCall })) {
+        return { attempt, grant, outcome: 'binding_mismatch' as const, receipt, toolCall };
+      }
+      if (!outcomeProjectionCanBeAdopted(input, receipt, toolCall)) {
+        return { attempt, grant, outcome: 'conflict' as const, receipt, toolCall };
+      }
+      let adoptedReceipt = receipt;
+      if (!receipt.outcome) {
+        const updated = (await client.query(
+          'UPDATE action_receipts SET outcome_json = $3 WHERE id = $1 AND workspace_id = $2 AND outcome_json IS NULL RETURNING *',
+          [input.receipt.id, input.workspaceId, JSON.stringify(input.receipt.outcome)],
+        )).rows[0];
+        if (!updated) throw new Error('Known external outcome adoption lost its locked receipt.');
+        adoptedReceipt = actionReceiptFromRow(updated);
+      }
+      let adoptedToolCall = toolCall;
+      if (toolCall.status === 'authorized') {
+        await this.writeToolCall(input.toolCall, client);
+        adoptedToolCall = input.toolCall;
+      }
+      return { attempt, grant, outcome: 'adopted' as const, receipt: adoptedReceipt, toolCall: adoptedToolCall };
+    });
+  }
+
+  async recordKnownExternalExecutionOutcomeAtomically(
+    input: AtomicKnownExternalExecutionOutcomeRecordingInput,
+  ): Promise<AtomicKnownExternalExecutionOutcomeRecordingResult> {
+    assertKnownExternalExecutionOutcomeRecordingCandidate(input);
+    return this.withTransaction(async (client) => {
+      const attemptRow = (await client.query(
+        'SELECT * FROM execution_attempts WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [input.attemptId, input.workspaceId],
+      )).rows[0];
+      const attempt = attemptRow ? executionAttemptFromRow(attemptRow) : undefined;
+      if (!attempt) return { outcome: 'not_found' as const };
+      const toolCallRow = (await client.query(
+        'SELECT * FROM tool_calls WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+        [attempt.toolCallId, input.workspaceId],
+      )).rows[0];
+      const receiptRow = attempt.binding.receiptId
+        ? (await client.query(
+            'SELECT * FROM action_receipts WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+            [attempt.binding.receiptId, input.workspaceId],
+          )).rows[0]
+        : undefined;
+      const grantRow = attempt.grantId
+        ? (await client.query(
+            'SELECT * FROM execution_grants WHERE id = $1 AND workspace_id = $2 FOR UPDATE',
+            [attempt.grantId, input.workspaceId],
+          )).rows[0]
+        : undefined;
+      const toolCall = toolCallRow ? toolCallFromRow(toolCallRow) : undefined;
+      const receipt = receiptRow ? actionReceiptFromRow(receiptRow) : undefined;
+      const grant = grantRow ? executionGrantFromRow(grantRow) : undefined;
+      if (!toolCall || !receipt || !grant) {
+        return { attempt, grant, outcome: 'not_found' as const, receipt, toolCall };
+      }
+      if (attempt.reservationOwner !== input.reservationOwner) {
+        return { attempt, grant, outcome: 'owner_mismatch' as const, receipt, toolCall };
+      }
+      const current = { attempt, grant, receipt, toolCall };
+      if (!knownExternalOutcomeRecordingBindingsMatch(input, current)) {
+        return { ...current, outcome: 'binding_mismatch' as const };
+      }
+      if (sameRecordedKnownExternalOutcomeProjection(input, attempt, receipt, toolCall)) {
+        return { ...current, outcome: 'replay' as const };
+      }
+      if (!knownExternalOutcomeRecordingMatchesCurrent(input, current) || attempt.state !== 'dispatched') {
+        return { ...current, outcome: knownExternalOutcomeRecordingConflictDisposition(attempt) };
+      }
+      const completedAttemptRow = (await client.query(
+        `UPDATE execution_attempts
+         SET state = $3, updated_at = $4, completed_at = $4, outcome_json = $5
+         WHERE id = $1 AND workspace_id = $2 AND state = 'dispatched' AND outcome_json IS NULL
+         RETURNING *`,
+        [
+          attempt.id,
+          input.workspaceId,
+          input.attemptOutcome.status,
+          input.attemptOutcome.recordedAt,
+          JSON.stringify(input.attemptOutcome),
+        ],
+      )).rows[0];
+      if (!completedAttemptRow) {
+        throw new Error('Known external outcome recording lost its locked execution attempt.');
+      }
+      const completedReceiptRow = (await client.query(
+        `UPDATE action_receipts
+         SET outcome_json = $3
+         WHERE id = $1 AND workspace_id = $2 AND outcome_json IS NULL
+         RETURNING *`,
+        [receipt.id, input.workspaceId, JSON.stringify(input.receiptOutcome)],
+      )).rows[0];
+      if (!completedReceiptRow) {
+        throw new Error('Known external outcome recording lost its locked receipt.');
+      }
+      await this.writeToolCall(input.toolCall, client);
+      return {
+        attempt: executionAttemptFromRow(completedAttemptRow),
+        grant,
+        outcome: 'recorded' as const,
+        receipt: actionReceiptFromRow(completedReceiptRow),
+        toolCall: input.toolCall,
+      };
+    });
+  }
+
   async createActionReceipt(record: ActionReceiptRecord): Promise<ActionReceiptRecord> {
     return this.writeActionReceipt(record);
   }
@@ -1569,16 +1813,20 @@ export class PostgresStore implements Store, AuditStore, PolicyVersionStore {
     return record;
   }
 
-  private async writeExecutionGrant(record: ExecutionGrantRecord): Promise<ExecutionGrantRecord> {
-    await this.pool.query(
+  private async writeExecutionGrant(
+    record: ExecutionGrantRecord,
+    queryable: PgQueryable = this.pool,
+    upsert = true,
+  ): Promise<ExecutionGrantRecord> {
+    await queryable.query(
       `
         INSERT INTO execution_grants (
           id, workspace_id, tool_call_id, tool_name, input_hash, approved_input_hash, approved_envelope_hash,
           policy_version_hash, receipt_id, receipt_hash, actor, auth_json, expires_at, nonce, signature,
           consumed_at, created_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-        ON CONFLICT (id) DO UPDATE SET
-          consumed_at = EXCLUDED.consumed_at
+        ${upsert ? `ON CONFLICT (id) DO UPDATE SET
+          consumed_at = EXCLUDED.consumed_at` : ''}
       `,
       [
         record.id,
@@ -1603,8 +1851,12 @@ export class PostgresStore implements Store, AuditStore, PolicyVersionStore {
     return record;
   }
 
-  private async writeActionReceipt(record: ActionReceiptRecord): Promise<ActionReceiptRecord> {
-    await this.pool.query(
+  private async writeActionReceipt(
+    record: ActionReceiptRecord,
+    queryable: PgQueryable = this.pool,
+    upsert = true,
+  ): Promise<ActionReceiptRecord> {
+    await queryable.query(
       `
         INSERT INTO action_receipts (
           id, workspace_id, tool_call_id, approval_id, decision_kind, decision_actor,
@@ -1617,10 +1869,10 @@ export class PostgresStore implements Store, AuditStore, PolicyVersionStore {
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
           $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30
         )
-        ON CONFLICT (id) DO UPDATE SET
+        ${upsert ? `ON CONFLICT (id) DO UPDATE SET
           outcome_json = EXCLUDED.outcome_json,
           receipt_hash = EXCLUDED.receipt_hash,
-          signature = EXCLUDED.signature
+          signature = EXCLUDED.signature` : ''}
       `,
       [
         record.id,

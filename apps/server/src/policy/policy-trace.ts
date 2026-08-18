@@ -25,7 +25,9 @@ import {
 } from './policy-provider';
 import {
   CANONICAL_ACTION_REQUEST_VERSION,
+  CanonicalizationError,
   canonicalActionRequestEvidence,
+  canonicalJsonStringify,
   deriveCanonicalPolicyContext,
   normalizeActionRequest,
   type CanonicalActionRequest,
@@ -268,10 +270,8 @@ export function policyContextFromCanonicalActionRequest(request: CanonicalAction
 
 export function policyContextFromToolCall(toolCall: ToolCallRecord): PolicyEvaluationContext {
   if (toolCall.canonicalActionRequestVersion === CANONICAL_ACTION_REQUEST_VERSION) {
-    return policyContextFromCanonicalFields(
-      deriveCanonicalPolicyContext(toolCall.toolName, toolCall.input, toolCall.requestedByAuth),
-      toolCall.input,
-    );
+    const context = validatedFrozenCanonicalPolicyContext(toolCall);
+    return policyContextFromCanonicalFields(context, toolCall.input);
   }
   const metadata = toolCall.metadata ?? {};
   return {
@@ -285,6 +285,102 @@ export function policyContextFromToolCall(toolCall: ToolCallRecord): PolicyEvalu
     recipientDomain: stringMetadata(metadata.recipientDomain),
     risk: toolCall.actionEnvelope?.context.risk ?? stringMetadata(metadata.riskKind),
   };
+}
+
+const canonicalPolicyFields: readonly (keyof CanonicalPolicyContext)[] = [
+  'amount',
+  'approverGroup',
+  'currency',
+  'customerVisible',
+  'operationKind',
+  'recipientDomain',
+  'risk',
+];
+
+/**
+ * A canonical-v1 tool call must be re-evaluated from the policy context that
+ * was frozen at ingress. Re-deriving it from mutable projections discards the
+ * server-owned risk/visibility/operation fields supplied by native contracts.
+ * The input itself is deliberately supplied by the caller above so approval
+ * and dispatch revalidation still evaluate the exact finalized input.
+ */
+function validatedFrozenCanonicalPolicyContext(toolCall: ToolCallRecord): CanonicalPolicyContext {
+  const context = toolCall.canonicalPolicyContext;
+  if (!isCanonicalPolicyContext(context)) {
+    throw new CanonicalizationError('Canonical tool call has no valid frozen policy context.');
+  }
+
+  const traced = toolCall.decisionTrace?.canonicalPolicyContext;
+  if (toolCall.decisionTrace && !isCanonicalPolicyContext(traced)) {
+    throw new CanonicalizationError('Canonical decision trace has no valid frozen policy context.');
+  }
+  if (traced && hashJson(traced) !== hashJson(context)) {
+    throw new CanonicalizationError('Canonical policy context no longer matches its decision trace.');
+  }
+
+  const binding = toolCall.actionEnvelope?.preparedAction;
+  if (binding) {
+    const expectedSource = `action-contract:${binding.contractId}@${binding.contractVersion}`;
+    for (const field of ['customerVisible', 'operationKind', 'risk'] as const) {
+      const value = context[field];
+      if (
+        !value.present ||
+        value.provenance.trust !== 'trusted' ||
+        value.provenance.source !== expectedSource
+      ) {
+        throw new CanonicalizationError(
+          `Prepared action has no trusted frozen ${field} policy binding.`,
+        );
+      }
+    }
+    if (typeof context.customerVisible.value !== 'boolean') {
+      throw new CanonicalizationError('Prepared action customerVisible policy binding is invalid.');
+    }
+    if (
+      typeof context.operationKind.value !== 'string' ||
+      !['custom', 'delete', 'external_send', 'financial', 'read', 'write']
+        .includes(context.operationKind.value)
+    ) {
+      throw new CanonicalizationError('Prepared action operationKind policy binding is invalid.');
+    }
+    if (typeof context.risk.value !== 'string' || !context.risk.value.trim()) {
+      throw new CanonicalizationError('Prepared action risk policy binding is invalid.');
+    }
+  }
+  return context;
+}
+
+function isCanonicalPolicyContext(value: unknown): value is CanonicalPolicyContext {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value).sort();
+  if (
+    keys.length !== canonicalPolicyFields.length ||
+    canonicalPolicyFields.some((field, index) => keys[index] !== field)
+  ) return false;
+  return canonicalPolicyFields.every((field) => isCanonicalPolicyField(value[field]));
+}
+
+function isCanonicalPolicyField(value: unknown): value is CanonicalPolicyContext[keyof CanonicalPolicyContext] {
+  if (!isRecord(value) || typeof value.present !== 'boolean' || !isRecord(value.provenance)) return false;
+  if (
+    typeof value.provenance.source !== 'string' ||
+    !value.provenance.source.trim() ||
+    !['asserted', 'derived', 'externally_verified', 'trusted'].includes(
+      String(value.provenance.trust),
+    )
+  ) return false;
+  const hasValue = Object.prototype.hasOwnProperty.call(value, 'value');
+  if (value.present !== hasValue) return false;
+  try {
+    canonicalJsonStringify(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function policyContextFromCanonicalFields(

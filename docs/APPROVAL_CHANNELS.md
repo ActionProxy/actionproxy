@@ -24,7 +24,27 @@ operators still need to perform.
 - Delivery failure is audited and never removes the pending approval.
 - Slack and Telegram buttons call the same approval service as the web console.
 - Email and Telegram can include a web-console review URL resolved from the
-  deployment's public base URL.
+  deployment's public base URL. Telegram inherits
+  `ACTIONPROXY_PUBLIC_BASE_URL`, including its configured port and path; set
+  `TELEGRAM_PUBLIC_BASE_URL` only when Telegram intentionally needs a different
+  origin. ActionProxy does not substitute a fixed Telegram Web UI port.
+- When an approval becomes approved, rejected, cancelled, expired, or
+  superseded, ActionProxy best-effort edits every successfully sent Telegram
+  delivery and resend recorded for that approval. The terminal card preserves
+  the redacted request context, reports the decision and available actor/source
+  metadata, removes the Approve/Reject callbacks, and retains only the
+  web-console status link when one was present. Partial multi-approver progress
+  remains actionable until the required approval count is reached; a rejection
+  is terminal immediately. A stale Telegram click receives the authoritative
+  terminal result and triggers an opportunistic repair of that card.
+- Telegram presentation synchronization is bounded and non-authoritative. An
+  edit timeout or Bot API failure is audited but cannot roll back, delay, or
+  change the approval decision or tool execution. There is no durable retry
+  worker or startup sweep, and expiration cards are updated only when
+  ActionProxy observes the lazy expiry transition.
+- A terminal Telegram card reports the approval state, not the downstream
+  execution outcome. Follow its status link or the audit trail to determine
+  whether an approved action later executed successfully.
 - Actor identity and approval scopes are derived by the server. Client-supplied
   display names do not grant authority.
 - Separation-of-duties and multi-approval rules apply consistently across

@@ -780,7 +780,6 @@ function ApprovalDetail({
     await onAction(async () => {
       submitted = await approveApproval(approval.id, {
         approvedBy: actor,
-        editedInput: edited ? parsed.value : undefined,
         inputDecision: edited
           ? { input: parsed.value, mode: "edited" }
           : { mode: "original" },

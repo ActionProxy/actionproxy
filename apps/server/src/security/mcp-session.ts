@@ -1,12 +1,13 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { canonicalJsonStringify, hashCanonicalJson } from '../contracts/action-request';
 
-export const MCP_SESSION_VERSION = 'actionproxy.mcp-session.v1' as const;
+export const MCP_SESSION_VERSION = 'actionproxy.mcp-session.v2' as const;
 
 export type McpJsonRpcId = number | string;
 
 export interface McpSessionBinding {
   adapterId: string;
+  catalogRevision: string;
   expiresAt: number;
   issuedAt: number;
   principalId: string;
@@ -19,6 +20,7 @@ export interface McpSessionBinding {
 
 export interface McpSessionExpectedBinding {
   adapterId: string;
+  catalogRevision: string;
   principalId: string;
   protocolVersion?: string;
   resource: string;
@@ -76,6 +78,7 @@ export class McpSessionAuthority {
     const issuedAt = this.now();
     const session: McpSessionBinding = {
       adapterId: requiredString(input.adapterId, 'adapterId'),
+      catalogRevision: requiredString(input.catalogRevision, 'catalogRevision'),
       expiresAt: issuedAt + this.ttlMs,
       issuedAt,
       principalId: requiredString(input.principalId, 'principalId'),
@@ -101,6 +104,7 @@ export class McpSessionAuthority {
     }
     if (
       session.adapterId !== expected.adapterId ||
+      session.catalogRevision !== expected.catalogRevision ||
       session.principalId !== expected.principalId ||
       session.resource !== expected.resource ||
       session.tenantId !== expected.tenantId ||
@@ -143,6 +147,7 @@ function parseSession(payload: string): McpSessionBinding {
   if (
     session.version !== MCP_SESSION_VERSION ||
     typeof session.adapterId !== 'string' ||
+    typeof session.catalogRevision !== 'string' ||
     typeof session.principalId !== 'string' ||
     typeof session.protocolVersion !== 'string' ||
     typeof session.resource !== 'string' ||

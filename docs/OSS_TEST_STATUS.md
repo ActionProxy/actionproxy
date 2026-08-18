@@ -1,6 +1,6 @@
 # ActionProxy Community test status
 
-Last reviewed: **2026-08-04**
+Last reviewed: **2026-08-17**
 
 This page records what the Community/OSS boundary tests automatically, what has
 been exercised only with local fixtures or mocks, and what still needs manual or
@@ -9,13 +9,16 @@ complete production authorization or compliance boundary.
 
 ## Current release status
 
-Community v0.1 is **not ready to publish yet**. The automated coverage is broad,
-but the current source tree must be frozen and the complete release matrix must
-pass against that exact tree, followed by the owner-controlled public workflow,
-CodeQL, archive, and GitHub Release sequence.
+Community v0.1.1 is **not published yet**. The exact PR2 source checkpoint and
+generated Community tree passed the complete local release matrix described
+below. The remaining release gates are the owner-controlled public PR workflow,
+CodeQL on the exact public head, synchronization-ledger closure, and separately
+authorized tag, GitHub Release, and npm publication steps.
 
-This release is a source-only developer preview. A live ChatGPT Secure MCP
-Tunnel run, a live Google Workspace downstream-MCP run, and an uninvolved-user
+Until those steps finish, the public release remains a source-only developer
+preview and the two `@actionproxy` packages remain unavailable from npm.
+A live ChatGPT Secure MCP Tunnel run, a live Google Workspace downstream-MCP
+run, and an uninvolved-user
 walkthrough remain post-release validation—not core source-release blockers—so
 long as those paths stay explicitly experimental/unvalidated and no live
 interoperability, provider-effect, or usability-completion claim is made. npm
@@ -45,11 +48,28 @@ Stripe, Teams, and managed Mailgun/Resend delivery are outside the Community
 boundary. OSS release testing must prove those modules remain excluded and
 unreachable; their provider behavior is not an OSS release gate.
 
-## Implemented in the current worktree; freeze and revalidate
+## Exact PR2 candidate validation
 
-The following focused checks passed on Node `24.11.0` on 2026-08-03, with the
-Google reference/export checks refreshed on 2026-08-04. They are useful
-current-tree evidence, but do not replace the final Node 22/24 release matrix.
+The committed PR2 source regenerated a 350-entry Community manifest (351
+physical tracked files including `PUBLIC_MANIFEST.json`). The exact generated
+tree passed these local gates on 2026-08-17:
+
+| Area | Result | What it covered |
+| --- | ---: | --- |
+| Community Dashboard edited approval | 27 passed | The focused Community component suite, including editing the reviewed JSON, rendering the edited email proposal, and sending one `inputDecision.mode: "edited"` approval with the review hash |
+| JavaScript SDK approval API | 31 passed | The focused client suite, including exact serialization of both `inputDecision.mode: "edited"` and legacy `editedInput` approval payloads |
+| Telegram terminal presentation | 39 passed, 1 skipped; 1 Playwright E2E passed | Telegram service/routes plus Memory and SQLite presentation persistence; Postgres persistence was skipped because this focused run had no test database URL. The maintained browser/Fastify/fake-Bot-API E2E verified one terminal card update and exactly-once execution |
+| Generated Community export | Passed | Strict export verification and public secret scanning passed for 350 manifest-declared files and 351 physical files including `PUBLIC_MANIFEST.json` |
+| Focused type checks | Passed | Community web and JavaScript SDK TypeScript checks |
+| Complete Node matrix | Passed on Node 22.15.0 and 24.11.0 | Frozen dependency closure, full root tests, all workspace type checks, builds, package-consumer checks, contracts, schemas, supply-chain checks, and host/preflight suites |
+| Community browser lifecycle | 33 passed, 3 intentional skips | Desktop, tablet, 390px, and 320px projects; the desktop macOS visual baseline passed and the same visual-only assertion was intentionally skipped on the three non-desktop projects |
+| Real Postgres 16 | 58 passed, 0 skipped | All five required migration, atomicity, forensic-query, content-influence-upgrade, and MCP-backend files against Postgres 16.14 |
+| Community Docker | Passed | The exact Community image completed both Memory and SQLite restart/persistence smoke paths |
+| OSS boundary and secrets | Passed on Node 22.15.0 and 24.11.0 | Full source-import closure, exact manifest checkout, frozen Community mapping, and public secret scan |
+
+The older focused coverage below passed on Node `24.11.0` on 2026-08-03, with
+the Google reference checks refreshed on 2026-08-04. These historical counts
+remain useful but are not represented as a rerun against the current tree.
 
 | Area | Result | What it covered |
 | --- | ---: | --- |
@@ -62,7 +82,7 @@ current-tree evidence, but do not replace the final Node 22/24 release matrix.
 | Supply chain | Passed | Zero dependency advisories, 63 allowlisted production-license records, and a validated CycloneDX 1.7 SBOM with the same 63-component runtime closure |
 | Landing release candidate | 13/13 configuration; 24/24 applicable release cases | Four-viewport release/noindex checks for all 14 routes, contract artifacts, metadata, navigation, responsive layout, keyboard/reduced-motion behavior, and serious/critical Axe findings |
 | Google reference export boundary | 27/27 on Node 22.15.0 and 27/27 on Node 24.11.0 | Exactly eight explicitly classified reference files exported; `.env.local`, `.actionproxy`, native provider code, and secrets absent; pinned-artifact, environment-isolation, lifecycle, timeout, signal-cleanup, and audit safety checks passed; no live provider call made |
-| Public candidate boundary/determinism | 26/26 | Explicit export, byte identity, three-pass determinism, strict mutation rejection, manifest/checkout attestation, workflow hardening, and coding-agent contract; 337 files are declared in `PUBLIC_MANIFEST.json`, with 338 physical files including the manifest itself |
+| Public candidate boundary/determinism | 26/26 | Historical explicit-export, byte-identity, three-pass-determinism, strict-mutation, manifest/checkout, workflow, and coding-agent checks; current export size is reported separately above rather than attributed to this older run |
 
 ## Automated release coverage
 
@@ -71,8 +91,10 @@ The public workflow and local release tooling are designed to cover:
 - frozen install, unit/integration tests, type checks, and builds on Node 22 and
   Node 24;
 - policy allow, deny, require-approval, rejection, cancellation, expiry,
-  edited-input approval, idempotency, race, grant, replay, timeout,
-  `unknown_outcome`, hostile-output, and audit-chain behavior;
+  both edited-input approval forms for single-reviewer Community actions,
+  original-only and multi-reviewer edit rejection, absence of an approval
+  revision route, idempotency, race, grant, replay, timeout, `unknown_outcome`,
+  hostile-output, and audit-chain behavior;
 - memory and SQLite behavior plus a real Postgres 16 zero-skip conformance job;
 - the JavaScript SDK, external-runner authority flow, isolated package
   consumers, stdio MCP wrapper, packaged MCP smoke, and experimental `/mcp`
@@ -111,7 +133,7 @@ corepack pnpm smoke:mcp-package
 | ChatGPT Secure MCP Tunnel | Fake-launcher tests, secret-leak canaries, pinned installer tests, official-binary install/status/remove acceptance, and deterministic three-tool local smoke | Post-release experimental validation: one entitled ChatGPT workspace must complete the current-session allow/approve/deny, disconnect, recovery, persistence, and audit proof before any live interoperability claim |
 | Web console | Component and Community Playwright coverage for approval review, zero pre-approval effects, execution, rejection, denial, audit, recovery, responsive layout, and accessibility | Repeat the exact README path from the final clean archive; an uninvolved-developer repeat is post-release usability validation before any usability-completion claim |
 | Slack approvals | Mocked Slack API delivery plus signed approve/reject callback and approver-authorization tests | No complete real-workspace delivery and button callback acceptance is recorded for the final candidate |
-| Telegram approvals | Mocked Bot API delivery, webhook-secret, setup-link, identity mapping, and approval callback tests; limited historical live bot setup/test-send evidence | Run a complete public-HTTPS webhook approve/reject loop on the final candidate; add direct reject/replay regression coverage |
+| Telegram approvals | Mocked Bot API delivery, webhook-secret, setup-link, identity mapping, approval callbacks, stale/replayed callback handling, configured Web UI origin/port propagation, and terminal card synchronization across Web/API and Telegram decisions; automated cases cover removal of callback buttons, multiple deliveries/resends, partial quorum, finalization during send, and bounded edit failure without changing the authoritative decision. A maintained Playwright E2E drives the real Community Web UI and Fastify lifecycle while capturing an isolated fake Bot API send/edit pair and exactly-once execution. | Run a complete public-HTTPS webhook approve/reject loop on the final candidate and verify the real Bot API terminal edit, retained status link, stale-button response, and deleted/inaccessible-message behavior; existing live evidence covers only historical bot setup/test-send |
 | Email outbox | File delivery, payload redaction, review-link resolution, integration routes, and Docker-visible outbox smoke | No additional provider work is required for the local outbox itself |
 | SMTP | Configuration/readiness and shared email-message behavior | Add an automated local fake-SMTP protocol test and perform a real delivery/open test before calling SMTP live-validated |
 
@@ -120,18 +142,21 @@ if their documentation states that the operator must validate the provider path.
 Run one sandbox end-to-end acceptance per channel before describing it as
 release-quality or production-ready.
 
+Telegram terminal-card edits are best-effort presentation maintenance, not an
+authorization step. Automated failure and timeout isolation does not establish
+that a live Telegram message was edited; deployments must retain the web console
+as the canonical review/status surface and audit presentation-update failures.
+
 ## Formal release blockers
 
 These are release blockers for the exact final Community tree:
 
-1. Reconcile the working tree into an attributable source commit and freeze the
-   Community scope, migrations, package versions, links, and release metadata.
-2. Generate three clean Community trees and require identical file lists,
-   content digests, and `PUBLIC_MANIFEST.json` digests.
-3. Run the complete Node 22/24 matrix: frozen install, tests, lint, build,
-   memory/SQLite/Postgres, Community Playwright, packaged MCP, Docker,
-   contracts, dependency/license/SBOM, workflow, and secret checks with no
-   required skip.
+1. Preserve the exact attributable PR2 source checkpoint and regenerate an
+   identical Community tree after these evidence-only documentation updates.
+2. Run the public PR workflow and CodeQL against the exact reviewed PR2 head;
+   do not substitute local evidence from another tree.
+3. Close the private synchronization ledger with the exact squash topology,
+   merged-main checks, and restored-protection evidence before any release tag.
 4. From a fresh generated Mac tree with no `.git`, `node_modules`, or
    `.actionproxy`, prove exact approval, rejection, edited approval, denial,
    SQLite persistence, HTTP, SDK, MCP, and audit integrity.
@@ -147,14 +172,13 @@ These are release blockers for the exact final Community tree:
    attested bytes with the intended content type, CORS, cache behavior, and
    locally resolvable references.
 8. Obtain owner/legal signoff for the final project/source-release and trademark
-   names before publishing `v0.1.0`. Package-name clearance belongs to the later
+   names before publishing `v0.1.1`. Package-name clearance belongs to the later
    npm phase.
 
-After the repository is public, explicitly dispatch and pass the public
-workflow/CodeQL on exact `main`, then create the tag, verify the logged-out
-commit and tagged archives, publish the GitHub Release, and only then deploy the
-indexable landing artifact. npm package links are not part of this critical
-path.
+After PR2 merges, explicitly pass the public workflow/CodeQL on exact `main`,
+then create the tag, verify the logged-out commit and tagged archives, publish
+the GitHub Release, and only then deploy the indexable landing artifact. npm
+package links are not part of this critical path.
 
 ## Post-release validation for experimental paths
 
@@ -184,10 +208,11 @@ release blocker unless the corresponding public claim or release scope changes:
   the user-owned executor; start with discovery or a read-only call; require an
   explicit simulated-to-real transition; and verify one-use execution plus
   audit evidence without auto-approval or an ungoverned bypass claim;
-- keep npm publication as a separate owner-authorized phase; if v0.1 is changed
-  from source-only to an npm launch, registry publication and clean consumer
-  installation become release gates;
-- add fake-SMTP protocol coverage and direct Telegram reject/replay coverage;
+- keep npm publication as a separate owner-authorized phase; for the coordinated
+  v0.1.1 npm launch, registry provenance and clean consumer installation are
+  release gates;
+- add fake-SMTP protocol coverage and a secret-backed Telegram terminal-card
+  edit acceptance without making PR CI depend on third-party availability;
 - maintain optional secret-backed Slack, Telegram, SMTP, external OAuth, and
   arbitrary downstream MCP acceptance jobs without making PR CI depend on
   third-party availability;

@@ -11,7 +11,11 @@ import type {
   ToolCallRecord,
 } from '../models';
 import type { AuditStore } from '../storage/audit-store';
-import type { Store } from '../storage/store';
+import type {
+  AtomicGrantDispatchInput,
+  AtomicGrantDispatchResult,
+  Store,
+} from '../storage/store';
 import { hmacSha256Hex, randomToken, stableStringify, hashJson, safeEqual } from './crypto';
 import { verifyReceipt } from './action-receipts';
 import type { TelemetryAttributes, TelemetryRecorder } from '../telemetry/telemetry';
@@ -38,6 +42,11 @@ import {
   validContentInfluenceBindingHash,
   validatedContentExposureRevisionGuard,
 } from '../contracts/content-influence';
+import {
+  NativeExecutionAuthorizationError,
+  type NativeExecutionAuthorization,
+  type NativeExecutionAuthorizationVerifier,
+} from '../contracts/native-execution-authorization';
 
 export interface ConsumeExecutionGrantInput {
   input: JsonObject;
@@ -54,7 +63,37 @@ export interface ReportExecutionGrantOutcomeInput {
   status: 'cancelled' | 'failed' | 'succeeded' | 'timed_out' | 'unknown_outcome';
 }
 
+export interface PrepareExecutionGrantInput {
+  actor: string;
+  auth?: AuthContext;
+  /** Server-owned stable seed used only by replayable publication paths. */
+  deterministicSeed?: string;
+  issuedAt?: string;
+  receipt?: ActionReceiptRecord;
+  toolCall: ToolCallRecord;
+  ttlSeconds?: number;
+}
+
+export interface GrantDispatchRequest {
+  atomicInput: AtomicGrantDispatchInput;
+  attempt: ExecutionAttemptRecordV1;
+  grant: ExecutionGrantRecord;
+  toolCall: ToolCallRecord;
+}
+
+/**
+ * Connector-neutral seam for extending the final durable dispatch transition.
+ * Community uses the generic store transaction; private editions may install
+ * one coordinator before serving requests.
+ */
+export interface GrantDispatchCoordinator {
+  dispatch(request: Readonly<GrantDispatchRequest>): Promise<AtomicGrantDispatchResult>;
+}
+
 export class ExecutionGrantService {
+  private grantDispatchCoordinator?: GrantDispatchCoordinator;
+  private preparedNativeWriteRequired?: (toolName: string) => boolean;
+
   constructor(
     private readonly config: ExecutionGrantsConfig,
     private readonly store: Store,
@@ -67,7 +106,22 @@ export class ExecutionGrantService {
       input: JsonObject,
       auth: AuthContext,
     ) => Promise<void> | void,
+    private readonly nativeExecutionAuthorizations?: NativeExecutionAuthorizationVerifier,
   ) {}
+
+  installPreparedNativeWriteRequirement(classifier: (toolName: string) => boolean): void {
+    if (this.preparedNativeWriteRequired && this.preparedNativeWriteRequired !== classifier) {
+      throw new Error('Prepared native-write grant requirement is already installed.');
+    }
+    this.preparedNativeWriteRequired = classifier;
+  }
+
+  installGrantDispatchCoordinator(coordinator: GrantDispatchCoordinator): void {
+    if (this.grantDispatchCoordinator) {
+      throw new Error('Grant dispatch coordinator is already installed.');
+    }
+    this.grantDispatchCoordinator = coordinator;
+  }
 
   async createGrant(input: {
     actor: string;
@@ -76,27 +130,7 @@ export class ExecutionGrantService {
     toolCall: ToolCallRecord;
     ttlSeconds?: number;
   }): Promise<ExecutionGrantRecord> {
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + (input.ttlSeconds ?? this.config.ttlSeconds) * 1000).toISOString();
-    const grant: ExecutionGrantRecord = {
-      actor: input.actor,
-      approvedEnvelopeHash: input.receipt?.approvedEnvelopeHash,
-      approvedInputHash: input.receipt?.approvedInputHash,
-      auth: input.auth,
-      createdAt: now.toISOString(),
-      expiresAt,
-      id: `grant_${randomUUID()}`,
-      inputHash: input.toolCall.inputHash ?? hashJson(input.toolCall.input),
-      nonce: randomToken(18),
-      policyVersionHash: input.toolCall.policyVersionHash,
-      receiptHash: input.receipt?.receiptHash,
-      receiptId: input.receipt?.id,
-      signature: '',
-      toolCallId: input.toolCall.id,
-      toolName: input.toolCall.toolName,
-      workspaceId: input.toolCall.workspaceId ?? input.auth?.workspaceId ?? 'default',
-    };
-    const signed = { ...grant, signature: signGrant(this.config.secret, grant) };
+    const signed = this.prepareGrant(input);
     await this.store.createExecutionGrant(signed);
     const attempt = await this.store.getExecutionAttemptByToolCallId(signed.workspaceId, signed.toolCallId);
     if (!attempt || attempt.state !== 'reserved' || !attemptMatchesGrant(attempt, signed, { requireGrantBinding: false })) {
@@ -106,7 +140,7 @@ export class ExecutionGrantService {
       attemptId: attempt.id,
       grantId: signed.id,
       reservationOwner: attempt.reservationOwner,
-      updatedAt: now.toISOString(),
+      updatedAt: signed.createdAt,
       workspaceId: signed.workspaceId,
     });
     if (
@@ -115,6 +149,47 @@ export class ExecutionGrantService {
     ) {
       throw new ConflictError('Execution grant could not bind its reserved execution attempt.');
     }
+    await this.recordPreparedGrantCreated(signed, input);
+    return signed;
+  }
+
+  /** Builds and signs a grant without persisting it, for one atomic lifecycle publication. */
+  prepareGrant(input: PrepareExecutionGrantInput): ExecutionGrantRecord {
+    const now = new Date(input.issuedAt ?? Date.now());
+    if (!Number.isFinite(now.getTime())) throw new Error('Execution grant issuedAt must be a valid timestamp.');
+    const expiresAt = new Date(now.getTime() + (input.ttlSeconds ?? this.config.ttlSeconds) * 1000).toISOString();
+    const deterministic = input.deterministicSeed
+      ? hmacSha256Hex(this.config.secret, `prepared-execution-grant:${input.deterministicSeed}`)
+      : undefined;
+    const grant: ExecutionGrantRecord = {
+      actor: input.actor,
+      approvedEnvelopeHash: input.receipt?.approvedEnvelopeHash,
+      approvedInputHash: input.receipt?.approvedInputHash,
+      auth: input.auth,
+      createdAt: now.toISOString(),
+      expiresAt,
+      id: deterministic ? `grant_${deterministic.slice(0, 32)}` : `grant_${randomUUID()}`,
+      inputHash: input.toolCall.inputHash ?? hashJson(input.toolCall.input),
+      nonce: deterministic ? deterministic.slice(32) : randomToken(18),
+      policyVersionHash: input.toolCall.policyVersionHash,
+      receiptHash: input.receipt?.receiptHash,
+      receiptId: input.receipt?.id,
+      signature: '',
+      toolCallId: input.toolCall.id,
+      toolName: input.toolCall.toolName,
+      workspaceId: input.toolCall.workspaceId ?? input.auth?.workspaceId ?? 'default',
+    };
+    return { ...grant, signature: signGrant(this.config.secret, grant) };
+  }
+
+  /** Emits the post-commit audit/telemetry for a grant published by a store transaction. */
+  async recordPreparedGrantCreated(
+    signed: ExecutionGrantRecord,
+    input: Pick<PrepareExecutionGrantInput, 'actor' | 'auth'> & {
+      auditId?: string;
+      emitTelemetry?: boolean;
+    },
+  ): Promise<void> {
     await this.auditStore.append({
       actor: input.actor,
       auth: input.auth,
@@ -126,23 +201,27 @@ export class ExecutionGrantService {
         inputHash: signed.inputHash,
         toolName: signed.toolName,
       },
-      id: `audit_${randomUUID()}`,
+      id: input.auditId ?? `audit_${randomUUID()}`,
       inputHash: signed.inputHash,
       policyVersionHash: signed.policyVersionHash,
-      timestamp: new Date().toISOString(),
+      timestamp: signed.createdAt,
       toolCallId: signed.toolCallId,
       type: 'execution_grant.created',
       workspaceId: signed.workspaceId,
     });
-    this.recordTelemetry('execution_grant.created', telemetryForGrant(signed, { 'grant.status': 'created' }));
-    return signed;
+    if (input.emitTelemetry !== false) {
+      this.recordTelemetry('execution_grant.created', telemetryForGrant(signed, { 'grant.status': 'created' }));
+    }
   }
 
   async consumeGrant(
     grantId: string,
     input: ConsumeExecutionGrantInput,
     auth: AuthContext,
-    continuation: { wrapperSessionId?: string } = {},
+    continuation: {
+      nativeExecutionAuthorization?: NativeExecutionAuthorization;
+      wrapperSessionId?: string;
+    } = {},
   ): Promise<ExecutionGrantRecord> {
     let dispatchedAttempt: ExecutionAttemptRecordV1 | undefined;
     let consumedGrant: ExecutionGrantRecord | undefined;
@@ -198,7 +277,48 @@ export class ExecutionGrantService {
       }
       const toolCall = await this.store.getToolCall(grant.toolCallId);
       if (!toolCall) throw new ForbiddenError('Execution grant tool call was not found.');
-      assertMcpAdapterAuthorization(toolCall, auth, continuation.wrapperSessionId);
+      if (this.preparedNativeWriteRequired?.(toolCall.toolName) && !toolCall.actionEnvelope?.preparedAction) {
+        throw new ForbiddenError(
+          'Legacy native-write grants cannot execute in prepared-action mode. Reject and resubmit the action.',
+        );
+      }
+      if (toolCall.actionEnvelope?.preparedAction && !this.grantDispatchCoordinator) {
+        throw new ForbiddenError(
+          'Prepared action dispatch is unavailable because its server dispatch coordinator is not installed.',
+        );
+      }
+      if (continuation.nativeExecutionAuthorization) {
+        const intentHash = toolCall.actionEnvelope?.preparedAction?.intentHash;
+        if (!intentHash || !this.nativeExecutionAuthorizations) {
+          throw new ForbiddenError('Native execution authorization is unavailable for this action.');
+        }
+        try {
+          this.nativeExecutionAuthorizations.consume(
+            continuation.nativeExecutionAuthorization,
+            {
+              attemptId: attempt.id,
+              grantId: grant.id,
+              intentHash,
+              phase: 'dispatch',
+              toolCallId: toolCall.id,
+              version: 'actionproxy.native-execution-binding.v1',
+              workspaceId: grant.workspaceId,
+            },
+          );
+        } catch (error) {
+          if (error instanceof NativeExecutionAuthorizationError) {
+            throw new ForbiddenError(`Native execution authorization was rejected: ${error.code}.`);
+          }
+          throw error;
+        }
+      } else {
+        if (toolCall.actionEnvelope?.preparedAction) {
+          throw new ForbiddenError(
+            'Prepared native actions require server-owned native execution authorization.',
+          );
+        }
+        assertMcpAdapterAuthorization(toolCall, auth, continuation.wrapperSessionId);
+      }
       const toolCallMismatch = currentToolCallMismatch(toolCall, attempt, grant);
       if (toolCallMismatch) {
         throw new ForbiddenError(`Execution grant tool-call authorization is no longer current: ${toolCallMismatch}.`);
@@ -237,16 +357,18 @@ export class ExecutionGrantService {
         }
         throw error;
       }
-      const dispatchedAt = new Date().toISOString();
-      const dispatch = await this.store.consumeExecutionGrantAndDispatchAttemptAtomically({
+      const atomicInput: AtomicGrantDispatchInput = {
         attemptId: attempt.id,
-        dispatchedAt,
+        dispatchedAt: new Date().toISOString(),
         grantId: grant.id,
         reservationOwner: attempt.reservationOwner,
         toolCallId: grant.toolCallId,
         workspaceId: grant.workspaceId,
         contentExposureRevision: contentExposureRevisionGuard(toolCall),
-      });
+      };
+      const dispatch = this.grantDispatchCoordinator
+        ? await this.grantDispatchCoordinator.dispatch({ atomicInput, attempt, grant, toolCall })
+        : await this.store.consumeExecutionGrantAndDispatchAttemptAtomically(atomicInput);
       if (dispatch.outcome === 'grant_not_found') throw new NotFoundError(`Execution grant not found: ${grantId}`);
       if (dispatch.outcome === 'grant_already_consumed') {
         throw new ConflictError('Execution grant has already been consumed.');
@@ -352,7 +474,10 @@ export class ExecutionGrantService {
     grantId: string,
     input: ReportExecutionGrantOutcomeInput,
     auth: AuthContext,
-    continuation: { wrapperSessionId?: string } = {},
+    continuation: {
+      nativeExecutionAuthorization?: NativeExecutionAuthorization;
+      wrapperSessionId?: string;
+    } = {},
   ): Promise<{
     attempt: ExecutionAttemptRecordV1;
     grant: ExecutionGrantRecord;
@@ -370,10 +495,46 @@ export class ExecutionGrantService {
     const toolCall = await this.store.getToolCall(grant.toolCallId);
     if (!toolCall) throw new NotFoundError(`Tool call not found: ${grant.toolCallId}`);
     if ((toolCall.workspaceId ?? 'default') !== auth.workspaceId) throw new ForbiddenError('Tool call is not in this workspace.');
-    assertMcpAdapterAuthorization(toolCall, auth, continuation.wrapperSessionId);
+    if (this.preparedNativeWriteRequired?.(toolCall.toolName) && !toolCall.actionEnvelope?.preparedAction) {
+      throw new ForbiddenError(
+        'Legacy native-write grants cannot record an outcome in prepared-action mode. Reject and resubmit the action.',
+      );
+    }
     const attempt = await this.store.getExecutionAttemptByToolCallId(grant.workspaceId, grant.toolCallId);
     if (!attempt || !attemptMatchesGrant(attempt, grant, { requireGrantBinding: true })) {
       throw new ConflictError('Execution grant is not bound to its execution attempt.');
+    }
+    if (continuation.nativeExecutionAuthorization) {
+      const intentHash = toolCall.actionEnvelope?.preparedAction?.intentHash;
+      if (!intentHash || !this.nativeExecutionAuthorizations) {
+        throw new ForbiddenError('Native execution outcome authorization is unavailable for this action.');
+      }
+      try {
+        this.nativeExecutionAuthorizations.consume(
+          continuation.nativeExecutionAuthorization,
+          {
+            attemptId: attempt.id,
+            grantId: grant.id,
+            intentHash,
+            phase: 'outcome',
+            toolCallId: toolCall.id,
+            version: 'actionproxy.native-execution-binding.v1',
+            workspaceId: grant.workspaceId,
+          },
+        );
+      } catch (error) {
+        if (error instanceof NativeExecutionAuthorizationError) {
+          throw new ForbiddenError(`Native execution outcome authorization was rejected: ${error.code}.`);
+        }
+        throw error;
+      }
+    } else {
+      if (toolCall.actionEnvelope?.preparedAction) {
+        throw new ForbiddenError(
+          'Prepared native action outcomes require server-owned native execution authorization.',
+        );
+      }
+      assertMcpAdapterAuthorization(toolCall, auth, continuation.wrapperSessionId);
     }
     const toolCallMismatch = currentToolCallMismatch(toolCall, attempt, grant, {
       allowAuthorizedTerminalRecovery: attempt.state !== 'dispatched',
@@ -381,7 +542,7 @@ export class ExecutionGrantService {
     if (toolCallMismatch) {
       throw new ForbiddenError(`Execution grant tool-call authorization is no longer current: ${toolCallMismatch}.`);
     }
-    const classifiedMcpOutcome = requiresMcpResultDelivery(toolCall);
+    const classifiedMcpOutcome = !continuation.nativeExecutionAuthorization && requiresMcpResultDelivery(toolCall);
     if (
       classifiedMcpOutcome &&
       (input.status === 'cancelled' || input.status === 'timed_out' || input.status === 'unknown_outcome')
@@ -438,69 +599,20 @@ export class ExecutionGrantService {
       result: input.status === 'succeeded' ? input.result ?? { ok: true } : input.result,
       resultDelivery,
     });
-    const transition = await this.store.transitionExecutionAttemptAtomically({
-      attemptId: attempt.id,
-      expectedState: 'dispatched',
-      nextState: terminalState,
-      outcome: normalizedOutcome,
-      reservationOwner: attempt.reservationOwner,
-      transitionedAt: now,
-      workspaceId: attempt.workspaceId,
-    });
-    if (transition.outcome === 'not_found') throw new NotFoundError(`Execution attempt not found: ${attempt.id}`);
-    if (transition.outcome === 'owner_mismatch') {
-      throw new ForbiddenError('Execution attempt reservation owner does not match.');
-    }
-    if (transition.outcome === 'state_mismatch') {
-      throw new ConflictError('Execution attempt has not been dispatched.');
-    }
-    let completedAttempt = transition.attempt;
-    let replay = transition.outcome === 'replay';
-    if (transition.outcome === 'already_terminal') {
-      const current = await this.store.getExecutionAttempt(attempt.id);
-      if (!current || !sameAttemptOutcome(current, normalizedOutcome)) {
-        throw new ConflictError('Execution outcome has already been recorded.');
-      }
-      completedAttempt = current;
-      replay = true;
-    }
-    if (
-      (transition.outcome !== 'transitioned' && transition.outcome !== 'replay' && transition.outcome !== 'already_terminal') ||
-      !completedAttempt
-    ) {
-      throw new ConflictError('Execution outcome could not be recorded.');
-    }
     const candidateReceiptOutcome: NonNullable<ActionReceiptRecord['outcome']> = {
       auth,
       error: legacyOutcome.status === 'failed' ? legacyOutcome.error : undefined,
-      recordedAt: completedAttempt.outcome?.recordedAt ?? now,
+      recordedAt: now,
       recordedBy: auth.email ?? auth.principalId,
       remediation: input.status === 'succeeded' ? input.remediation : undefined,
       result: input.status === 'succeeded' ? input.result ?? { ok: true } : undefined,
       resultDelivery,
       status: legacyOutcome.status,
     };
-    const receiptOutcomeWrite = existingReceipt
-      ? await this.store.recordActionReceiptOutcomeAtomically({
-          outcome: candidateReceiptOutcome,
-          receiptId: existingReceipt.id,
-        })
-      : undefined;
-    if (receiptOutcomeWrite?.outcome === 'not_found') {
-      throw new ForbiddenError('Execution grant receipt disappeared while recording its outcome.');
-    }
-    const updatedReceipt = receiptOutcomeWrite?.receipt;
-    if (
-      updatedReceipt?.outcome &&
-      (!sameLegacyOutcome(updatedReceipt.outcome, legacyOutcome) ||
-        stableStringify(updatedReceipt.outcome.resultDelivery ?? null) !== stableStringify(resultDelivery ?? null))
-    ) {
-      throw new ConflictError('Execution outcome has already been recorded.');
-    }
     const exposureRequired = requiresContentExposureBeforeDelivery(toolCall, resultDelivery);
-    const updatedToolCall: ToolCallRecord = {
+    const terminalToolCall: ToolCallRecord = {
       ...toolCall,
-      error: legacyOutcome.status === 'failed' ? legacyOutcome.error : toolCall.error,
+      error: legacyOutcome.status === 'failed' ? legacyOutcome.error : undefined,
       resultDelivery,
       resultWithheld: exposureRequired,
       result:
@@ -511,42 +623,138 @@ export class ExecutionGrantService {
             }
           : toolCall.result,
       status: input.status === 'succeeded' ? 'executed' : 'failed',
-      updatedAt: completedAttempt.outcome?.recordedAt ?? now,
+      updatedAt: now,
     };
-    const terminalToolCallAlreadyPersisted = replay && toolCall.status !== 'authorized';
-    const classifiedResultAlreadyReleased = exposureRequired && terminalToolCallAlreadyPersisted && toolCall.resultWithheld === false;
-    let deliveredToolCall = terminalToolCallAlreadyPersisted ? toolCall : updatedToolCall;
-    if (!terminalToolCallAlreadyPersisted || (exposureRequired && !classifiedResultAlreadyReleased)) {
-      await this.store.updateToolCall(updatedToolCall);
-      deliveredToolCall = updatedToolCall;
-      if (exposureRequired) {
-        let withheldReason = 'content_exposure_persistence_failed';
-        try {
-          await this.recordContentExposureBeforeDelivery(updatedToolCall, resultDelivery, auth);
-          withheldReason = 'result_release_state_persistence_failed';
-          deliveredToolCall = { ...updatedToolCall, resultWithheld: false, updatedAt: new Date().toISOString() };
-          await this.store.updateToolCall(deliveredToolCall);
-        } catch {
-          await this.appendAuditBestEffort({
-            actor: 'actionproxy:content-influence',
-            auth,
-            data: {
-              influenceScopeId: updatedToolCall.influenceScopeId ?? null,
-              reason: withheldReason,
-              sourceToolCallId: updatedToolCall.id,
-            },
-            id: `audit_${randomUUID()}`,
-            inputHash: grant.inputHash,
-            policyVersionHash: grant.policyVersionHash,
-            timestamp: new Date().toISOString(),
-            toolCallId: grant.toolCallId,
-            type: 'content.result_withheld',
-            workspaceId: grant.workspaceId,
+    let completedAttempt: ExecutionAttemptRecordV1;
+    let updatedReceipt: ActionReceiptRecord | undefined;
+    let deliveredToolCall: ToolCallRecord;
+    const recordPreparedKnownOutcome = Boolean(
+      toolCall.actionEnvelope?.preparedAction &&
+      (terminalState === 'succeeded' || terminalState === 'failed_after_dispatch'),
+    );
+    if (recordPreparedKnownOutcome) {
+      if (!existingReceipt) {
+        throw new ForbiddenError('Prepared native action receipt is unavailable.');
+      }
+      const recording = attempt.state === 'dispatched'
+        ? await this.store.recordKnownExternalExecutionOutcomeAtomically({
+            attemptId: attempt.id,
+            attemptOutcome: normalizedOutcome,
+            receiptOutcome: candidateReceiptOutcome,
+            reservationOwner: attempt.reservationOwner,
+            toolCall: terminalToolCall,
+            workspaceId: attempt.workspaceId,
+          })
+        : await this.store.adoptKnownExternalExecutionOutcomeAtomically({
+            attemptId: attempt.id,
+            receipt: { ...existingReceipt, outcome: candidateReceiptOutcome },
+            toolCall: terminalToolCall,
+            workspaceId: attempt.workspaceId,
           });
-          throw new ConflictError(
-            'The downstream outcome is known, but ActionProxy withheld the result because content-exposure evidence could not be recorded.',
-          );
+      if (recording.outcome === 'not_found') throw new NotFoundError(`Execution attempt not found: ${attempt.id}`);
+      if (recording.outcome === 'owner_mismatch') {
+        throw new ForbiddenError('Execution attempt reservation owner does not match.');
+      }
+      if (recording.outcome === 'binding_mismatch') {
+        throw new ForbiddenError('Prepared native outcome no longer matches its signed execution binding.');
+      }
+      if (recording.outcome === 'reconciliation_required') {
+        throw new ConflictError('Execution outcome requires reconciliation and will not be retried automatically.');
+      }
+      if (recording.outcome === 'state_mismatch') {
+        throw new ConflictError('Execution attempt has not been dispatched.');
+      }
+      if (recording.outcome === 'conflict') {
+        throw new ConflictError('Execution outcome has already been recorded.');
+      }
+      if (!recording.attempt || !recording.receipt || !recording.toolCall) {
+        throw new ConflictError('Prepared native outcome could not be recorded atomically.');
+      }
+      completedAttempt = recording.attempt;
+      updatedReceipt = recording.receipt;
+      deliveredToolCall = recording.toolCall;
+    } else {
+      const transition = await this.store.transitionExecutionAttemptAtomically({
+        attemptId: attempt.id,
+        expectedState: 'dispatched',
+        nextState: terminalState,
+        outcome: normalizedOutcome,
+        reservationOwner: attempt.reservationOwner,
+        transitionedAt: now,
+        workspaceId: attempt.workspaceId,
+      });
+      if (transition.outcome === 'not_found') throw new NotFoundError(`Execution attempt not found: ${attempt.id}`);
+      if (transition.outcome === 'owner_mismatch') {
+        throw new ForbiddenError('Execution attempt reservation owner does not match.');
+      }
+      if (transition.outcome === 'state_mismatch') {
+        throw new ConflictError('Execution attempt has not been dispatched.');
+      }
+      let replay = transition.outcome === 'replay';
+      let transitionedAttempt = transition.attempt;
+      if (transition.outcome === 'already_terminal') {
+        const current = await this.store.getExecutionAttempt(attempt.id);
+        if (!current || !sameAttemptOutcome(current, normalizedOutcome)) {
+          throw new ConflictError('Execution outcome has already been recorded.');
         }
+        transitionedAttempt = current;
+        replay = true;
+      }
+      if (
+        (transition.outcome !== 'transitioned' && transition.outcome !== 'replay' && transition.outcome !== 'already_terminal') ||
+        !transitionedAttempt
+      ) {
+        throw new ConflictError('Execution outcome could not be recorded.');
+      }
+      completedAttempt = transitionedAttempt;
+      const receiptOutcomeWrite = existingReceipt
+        ? await this.store.recordActionReceiptOutcomeAtomically({
+            outcome: candidateReceiptOutcome,
+            receiptId: existingReceipt.id,
+          })
+        : undefined;
+      if (receiptOutcomeWrite?.outcome === 'not_found') {
+        throw new ForbiddenError('Execution grant receipt disappeared while recording its outcome.');
+      }
+      updatedReceipt = receiptOutcomeWrite?.receipt;
+      if (
+        updatedReceipt?.outcome &&
+        (!sameLegacyOutcome(updatedReceipt.outcome, legacyOutcome) ||
+          stableStringify(updatedReceipt.outcome.resultDelivery ?? null) !== stableStringify(resultDelivery ?? null))
+      ) {
+        throw new ConflictError('Execution outcome has already been recorded.');
+      }
+      const terminalToolCallAlreadyPersisted = replay && toolCall.status !== 'authorized';
+      deliveredToolCall = terminalToolCallAlreadyPersisted ? toolCall : terminalToolCall;
+      if (!terminalToolCallAlreadyPersisted) await this.store.updateToolCall(terminalToolCall);
+    }
+    if (exposureRequired && deliveredToolCall.resultWithheld !== false) {
+      let withheldReason = 'content_exposure_persistence_failed';
+      try {
+        await this.recordContentExposureBeforeDelivery(deliveredToolCall, resultDelivery, auth);
+        withheldReason = 'result_release_state_persistence_failed';
+        deliveredToolCall = { ...deliveredToolCall, resultWithheld: false, updatedAt: new Date().toISOString() };
+        await this.store.updateToolCall(deliveredToolCall);
+      } catch {
+        await this.appendAuditBestEffort({
+          actor: 'actionproxy:content-influence',
+          auth,
+          data: {
+            influenceScopeId: deliveredToolCall.influenceScopeId ?? null,
+            reason: withheldReason,
+            sourceToolCallId: deliveredToolCall.id,
+          },
+          id: `audit_${randomUUID()}`,
+          inputHash: grant.inputHash,
+          policyVersionHash: grant.policyVersionHash,
+          timestamp: new Date().toISOString(),
+          toolCallId: grant.toolCallId,
+          type: 'content.result_withheld',
+          workspaceId: grant.workspaceId,
+        });
+        throw new ConflictError(
+          'The downstream outcome is known, but ActionProxy withheld the result because content-exposure evidence could not be recorded.',
+        );
       }
     }
     // A terminal attempt is authoritative even if the previous process stopped
