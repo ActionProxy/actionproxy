@@ -10,9 +10,7 @@ on:
         type: choice
         options:
           - none
-          - bootstrap-next
-          - resume-bootstrap-next
-          - promote-latest
+          - publish-latest
       npm_confirmation:
         description: Exact confirmation printed by the release runbook
         required: false
@@ -345,24 +343,15 @@ jobs:
         with:
           name: actionproxy-npm-${{ github.ref_name }}-${{ github.sha }}
           path: npm-release-bundle
-      - name: Bootstrap both new packages under next
-        if: inputs.npm_operation == 'bootstrap-next' || inputs.npm_operation == 'resume-bootstrap-next'
+      - name: Publish both packages directly to latest with trusted publishing
+        if: inputs.npm_operation == 'publish-latest'
         run: node packages/mcp-wrapper/src/npm-release-artifacts.mjs write npm-release-bundle
         env:
           ACTIONPROXY_NPM_CONFIRMATION: ${{ inputs.npm_confirmation }}
-          ACTIONPROXY_NPM_OPERATION: ${{ inputs.npm_operation }}
-          ACTIONPROXY_NPM_TARGET_TAG: next
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
-      - name: Promote both verified packages to latest
-        if: inputs.npm_operation == 'promote-latest'
-        run: node packages/mcp-wrapper/src/npm-release-artifacts.mjs write npm-release-bundle
-        env:
-          ACTIONPROXY_NPM_CONFIRMATION: ${{ inputs.npm_confirmation }}
-          ACTIONPROXY_NPM_OPERATION: promote-latest
+          ACTIONPROXY_NPM_OPERATION: publish-latest
           ACTIONPROXY_NPM_TARGET_TAG: latest
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
       - name: Verify direct publication anonymously
         run: node packages/mcp-wrapper/src/npm-release-artifacts.mjs registry-verify npm-release-bundle
         env:
           ACTIONPROXY_NPM_OPERATION: ${{ inputs.npm_operation }}
-          NODE_AUTH_TOKEN: ""
+          ACTIONPROXY_NPM_TARGET_TAG: latest

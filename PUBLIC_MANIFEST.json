@@ -48,7 +48,7 @@
     {
       "mode": "100644",
       "path": ".github/workflows/security.yml",
-      "sha256": "5524a60eb30bf9d7d2af91c130b939a600deff5bb4a26f970738069aef04526f"
+      "sha256": "ec64c0db15e7edfbfbc9c215697ad3949d6f45e63d29083e6d25d6c6681704b7"
     },
     {
       "mode": "100644",
@@ -1503,12 +1503,12 @@
     {
       "mode": "100644",
       "path": "packages/mcp-wrapper/src/npm-release-artifacts.mjs",
-      "sha256": "e5c0f2556d5cdc536ff7b15e25cf61f009c6bd2b59f9e0feb764cf66d2de8fb5"
+      "sha256": "6b2d8a91abf350b8957de67bb6cc3ea4b45d5761778ad70188546d513d3cc86b"
     },
     {
       "mode": "100644",
       "path": "packages/mcp-wrapper/src/npm-release-artifacts.test.mjs",
-      "sha256": "8af8bae1f618fc31ca19d7b8b326359279b613a3a05bf2e1830b69eac38f8bbb"
+      "sha256": "e1a88df0e7610749bc5accada30241f20a26f7ddf5d06ff9c04b5621fd6ce53e"
     },
     {
       "mode": "100644",
@@ -1743,7 +1743,7 @@
     {
       "mode": "100644",
       "path": "scripts/verify-public-export.mjs",
-      "sha256": "4c44984cc5ebc3e9b821aa6fd16db2d7fef6a45b4f0bf3995b8b55286eaffa82"
+      "sha256": "1284a83f6c3d20a82fcbdeb38b62278867dd558123d4544bb5e02a95c9761648"
     },
     {
       "mode": "100644",

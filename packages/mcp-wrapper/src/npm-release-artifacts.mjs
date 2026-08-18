@@ -18,9 +18,7 @@ export const SUPPORTED_NPM_RELEASE_COMMANDS = Object.freeze([
   "write",
 ]);
 export const SUPPORTED_NPM_RELEASE_OPERATIONS = Object.freeze([
-  "bootstrap-next",
-  "promote-latest",
-  "resume-bootstrap-next",
+  "publish-latest",
 ]);
 
 const repositoryRoot = path.resolve(
@@ -97,42 +95,26 @@ const secretNamePattern =
   /(?:^|_)(?:AUTH|CREDENTIAL|KEY|PASSWORD|SECRET|TOKEN)(?:_|$)|_authToken$/iu;
 
 export function expectedConfirmation(operation, version, targetTag) {
-  const effectiveTargetTag =
-    targetTag ?? (operation === "promote-latest" ? "latest" : "next");
+  const effectiveTargetTag = targetTag ?? "latest";
   assertOperationTarget(operation, effectiveTargetTag);
-  assertSemanticVersion(version);
-  if (operation === "bootstrap-next") {
-    return `PUBLISH @actionproxy ${version} TO NEXT`;
-  }
-  if (operation === "resume-bootstrap-next") {
-    return `RESUME @actionproxy ${version} TO NEXT`;
-  }
-  if (operation === "promote-latest") {
-    return `PROMOTE @actionproxy ${version} TO LATEST`;
+  assertStableSemanticVersion(version);
+  if (operation === "publish-latest") {
+    return `PUBLISH @actionproxy ${version} TO LATEST`;
   }
   throw new Error("Unsupported npm release operation.");
 }
 
 export function assertOperationTarget(operation, targetTag) {
   assertOperation(operation);
-  if (!["latest", "next"].includes(targetTag)) {
-    throw new Error("npm target tag must be exactly next or latest.");
-  }
-  if (
-    ["bootstrap-next", "resume-bootstrap-next"].includes(operation) &&
-    targetTag !== "next"
-  ) {
-    throw new Error(`${operation} requires the next npm target tag.`);
-  }
-  if (operation === "promote-latest" && targetTag !== "latest") {
-    throw new Error("promote-latest requires the latest npm target tag.");
+  if (operation !== "publish-latest" || targetTag !== "latest") {
+    throw new Error("publish-latest requires the latest npm target tag.");
   }
   return true;
 }
 
 export function sanitizeChildEnvironment(
   environment = process.env,
-  { includeGitHubOidc = false, includeNpmToken = false } = {},
+  { includeGitHubOidc = false } = {},
 ) {
   const sanitized = {};
   for (const [name, value] of Object.entries(environment)) {
@@ -142,9 +124,7 @@ export function sanitizeChildEnvironment(
     }
     if (["BASH_ENV", "ENV", "NODE_OPTIONS"].includes(name)) continue;
     if (secretNamePattern.test(name)) {
-      if (includeNpmToken && name === "NODE_AUTH_TOKEN") {
-        sanitized[name] = value;
-      } else if (
+      if (
         includeGitHubOidc &&
         (name === "ACTIONS_ID_TOKEN_REQUEST_TOKEN" ||
           name === "ACTIONS_ID_TOKEN_REQUEST_URL")
@@ -176,12 +156,7 @@ export function createSensitiveNpmContext(
     const npmConfigPath = path.join(npmConfigRoot, "user-npmrc");
     const npmGlobalConfigPath = path.join(npmConfigRoot, "global-npmrc");
     const npmProjectConfigPath = path.join(npmConfigRoot, ".npmrc");
-    writeFileExclusive(
-      npmConfigPath,
-      credentialScope.includeNpmToken
-        ? "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}\n"
-        : "",
-    );
+    writeFileExclusive(npmConfigPath, "");
     writeFileExclusive(npmGlobalConfigPath, "");
     writeFileExclusive(npmProjectConfigPath, "");
     const childEnvironment = sanitizeChildEnvironment(
@@ -250,6 +225,18 @@ export function hasExactRegistryManifestMetadata(metadata, expectedManifest) {
   for (const field of exactRegistryManifestFields) {
     const actualHasField = Object.hasOwn(metadata, field);
     const expectedHasField = Object.hasOwn(expectedManifest, field);
+    if (field === "files" && expectedHasField && !actualHasField) {
+      continue;
+    }
+    if (
+      field === "directories" &&
+      !expectedHasField &&
+      actualHasField &&
+      isPlainObject(metadata[field]) &&
+      Object.keys(metadata[field]).length === 0
+    ) {
+      continue;
+    }
     if (
       actualHasField !== expectedHasField ||
       (actualHasField &&
@@ -262,41 +249,49 @@ export function hasExactRegistryManifestMetadata(metadata, expectedManifest) {
   return true;
 }
 
-export function assertBootstrapRegistryState(operation, states, version) {
+export function planPublishLatestRegistryState(states, version) {
   if (
-    !["bootstrap-next", "resume-bootstrap-next"].includes(operation) ||
     !Array.isArray(states) ||
     states.length !== packageSpecifications.length
   ) {
-    throw new Error("Bootstrap registry state is malformed.");
+    throw new Error("Publish-latest registry state is malformed.");
   }
-  assertSemanticVersion(version);
-  if (operation === "bootstrap-next") {
-    if (states.some(({ packageExists }) => packageExists)) {
-      throw new Error(
-        "Bootstrap requires both package namespaces to be absent.",
-      );
-    }
-    return true;
-  }
-  if (states.every(({ packageExists }) => !packageExists)) {
-    throw new Error(
-      "Resume requires at least one exact package from a partial bootstrap.",
-    );
-  }
-  if (
-    states.some(
-      (state) =>
-        (state.exists && !state.exact) ||
-        (state.packageExists && !state.exists) ||
-        (state.exists && !hasExpectedTagState(state, version, "next")),
-    )
-  ) {
-    throw new Error(
-      "Resume found a package namespace, version, or tag outside the exact partial bootstrap.",
-    );
-  }
-  return true;
+  assertStableSemanticVersion(version);
+  return Object.freeze(
+    states.map((state) => {
+      if (
+        !isPlainObject(state) ||
+        typeof state.exact !== "boolean" ||
+        typeof state.exists !== "boolean" ||
+        typeof state.packageExists !== "boolean" ||
+        !isPlainObject(state.tags) ||
+        (state.exists && !state.packageExists) ||
+        (!state.exists && state.exact) ||
+        (!state.packageExists && Object.keys(state.tags).length > 0)
+      ) {
+        throw new Error("Publish-latest registry state is malformed.");
+      }
+      if (state.exists) {
+        if (!state.exact || state.tags.latest !== version) {
+          throw new Error(
+            "Publish-latest found an existing target outside the exact latest state.",
+          );
+        }
+        return "skip";
+      }
+      if (state.packageExists) {
+        if (
+          typeof state.tags.latest !== "string" ||
+          compareSemanticVersions(state.tags.latest, version) >= 0
+        ) {
+          throw new Error(
+            "Publish-latest refuses to replace or downgrade the current latest release.",
+          );
+        }
+      }
+      return "publish";
+    }),
+  );
 }
 
 export function parseNpmTarball(bytes) {
@@ -647,11 +642,11 @@ async function main() {
 
 async function verifyRegistryRelease(bundle, directory) {
   const operation = process.env.ACTIONPROXY_NPM_OPERATION ?? "";
-  const impliedTargetTag = operation === "promote-latest" ? "latest" : "next";
-  const targetTag = process.env.ACTIONPROXY_NPM_TARGET_TAG ?? impliedTargetTag;
+  const targetTag = process.env.ACTIONPROXY_NPM_TARGET_TAG ?? "latest";
   assertOperationTarget(operation, targetTag);
+  assertStableSemanticVersion(bundle.version);
   let states;
-  for (let attempt = 0; attempt < 15; attempt += 1) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
     try {
       states = await Promise.all(
         bundle.packages.map((record) =>
@@ -659,8 +654,8 @@ async function verifyRegistryRelease(bundle, directory) {
         ),
       );
     } catch (error) {
-      if (attempt === 14) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      if (attempt === 59) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
       continue;
     }
     const exact = states.every((state) => state.exact);
@@ -668,8 +663,8 @@ async function verifyRegistryRelease(bundle, directory) {
       hasExpectedTagState(state, bundle.version, targetTag),
     );
     if (exact && tagged) break;
-    if (attempt < 14)
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    if (attempt < 59)
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
   }
   if (
     !states?.every((state) => state.exact) ||
@@ -689,59 +684,24 @@ async function verifyRegistryRelease(bundle, directory) {
 
 async function writeRegistry(bundle, directory) {
   const operation = process.env.ACTIONPROXY_NPM_OPERATION ?? "";
-  const targetTag = process.env.ACTIONPROXY_NPM_TARGET_TAG ?? "next";
+  const targetTag = process.env.ACTIONPROXY_NPM_TARGET_TAG ?? "latest";
   assertOperationTarget(operation, targetTag);
   const expected = expectedConfirmation(operation, bundle.version, targetTag);
   if (process.env.ACTIONPROXY_NPM_CONFIRMATION !== expected) {
     throw new Error(`Confirmation mismatch. Required: ${expected}`);
   }
-  assertRuntimeToken(process.env.NODE_AUTH_TOKEN);
+  assertTrustedPublishingRuntime(process.env);
   const states = await Promise.all(
     bundle.packages.map((record) => registryPackageState(record, directory)),
   );
-  if (["bootstrap-next", "resume-bootstrap-next"].includes(operation)) {
-    assertBootstrapRegistryState(operation, states, bundle.version);
-  }
-  if (operation === "promote-latest") {
-    for (const [index, state] of states.entries()) {
-      if (!state.exact || state.tags.next !== bundle.version) {
-        throw new Error(
-          `${bundle.packages[index].name} is not an exact verified next release.`,
-        );
-      }
-      if (
-        state.tags.latest &&
-        state.tags.latest !== bundle.version &&
-        compareSemanticVersions(state.tags.latest, bundle.version) >= 0
-      ) {
-        throw new Error(
-          `${bundle.packages[index].name} already has a latest release that is not older.`,
-        );
-      }
-    }
-    for (const [index, record] of bundle.packages.entries()) {
-      if (states[index].tags.latest === bundle.version) continue;
-      runSensitive(
-        npmExecutable(),
-        [
-          "dist-tag",
-          "add",
-          `${record.name}@${bundle.version}`,
-          "latest",
-          "--registry",
-          NPM_RELEASE_REGISTRY,
-        ],
-        `promote ${record.name}`,
-        { includeNpmToken: true },
-      );
-    }
-    process.stdout.write(
-      `${JSON.stringify({ ok: true, operation, promoted: bundle.packages.map(({ name }) => name) })}\n`,
-    );
-    return;
-  }
+  const actions = planPublishLatestRegistryState(states, bundle.version);
+  const published = [];
+  const skipped = [];
   for (const [index, record] of bundle.packages.entries()) {
-    if (states[index].exists) continue;
+    if (actions[index] === "skip") {
+      skipped.push(record.name);
+      continue;
+    }
     runSensitive(
       npmExecutable(),
       [
@@ -751,16 +711,17 @@ async function writeRegistry(bundle, directory) {
         "--access",
         "public",
         "--tag",
-        "next",
+        "latest",
         "--registry",
         NPM_RELEASE_REGISTRY,
       ],
       `publish ${record.name}`,
-      { includeGitHubOidc: true, includeNpmToken: true },
+      { includeGitHubOidc: true },
     );
+    published.push(record.name);
   }
   process.stdout.write(
-    `${JSON.stringify({ ok: true, operation, published: bundle.packages.map(({ name }) => name), tag: "next" })}\n`,
+    `${JSON.stringify({ ok: true, operation, published, skipped, tag: "latest" })}\n`,
   );
 }
 
@@ -824,15 +785,16 @@ async function registryPackageState(record, directory) {
 }
 
 function hasExpectedTagState(state, version, targetTag) {
-  if (targetTag === "latest") {
-    return state.tags.latest === version && state.tags.next === version;
-  }
-  return state.tags.next === version && state.tags.latest !== version;
+  return targetTag === "latest" && state.tags.latest === version;
 }
 
 function fetchRegistry(url, options = {}) {
+  const headers = new Headers(options.headers);
+  headers.set("cache-control", "no-cache");
+  headers.set("pragma", "no-cache");
   return fetch(url, {
     ...options,
+    headers,
     redirect: "error",
     signal: AbortSignal.timeout(registryFetchTimeoutMs),
   });
@@ -1251,6 +1213,12 @@ function assertSemanticVersion(version) {
   parseSemanticVersion(version);
 }
 
+function assertStableSemanticVersion(version) {
+  if (parseSemanticVersion(version).prerelease.length > 0) {
+    throw new Error("npm publish-latest requires a stable semantic version.");
+  }
+}
+
 function parseSemanticVersion(version) {
   const match =
     /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u.exec(
@@ -1277,16 +1245,42 @@ function parseSemanticVersion(version) {
   };
 }
 
-function assertRuntimeToken(value) {
-  if (
-    typeof value !== "string" ||
-    value.trim() !== value ||
-    value.length < 1 ||
-    value.length > 8192 ||
-    /[\u0000-\u001f\u007f]/u.test(value)
-  ) {
-    throw new Error("Bootstrap npm credential is missing or malformed.");
+export function assertTrustedPublishingRuntime(environment) {
+  if (!isPlainObject(environment)) {
+    throw new Error("GitHub trusted-publishing OIDC is missing or malformed.");
   }
+  const token = environment.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  const urlValue = environment.ACTIONS_ID_TOKEN_REQUEST_URL;
+  if (
+    environment.GITHUB_ACTIONS !== "true" ||
+    typeof token !== "string" ||
+    token.trim() !== token ||
+    token.length < 1 ||
+    token.length > 8192 ||
+    /[\u0000-\u001f\u007f]/u.test(token)
+  ) {
+    throw new Error("GitHub trusted-publishing OIDC is missing or malformed.");
+  }
+  let url;
+  try {
+    url = new URL(urlValue);
+  } catch {
+    throw new Error("GitHub trusted-publishing OIDC is missing or malformed.");
+  }
+  if (
+    url.protocol !== "https:" ||
+    !url.hostname.endsWith(".actions.githubusercontent.com") ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    (typeof environment.NODE_AUTH_TOKEN === "string" &&
+      environment.NODE_AUTH_TOKEN.length > 0)
+  ) {
+    throw new Error(
+      "Trusted publishing requires GitHub OIDC without an npm token.",
+    );
+  }
+  return true;
 }
 
 function safeRegistryTarballUrl(value) {
