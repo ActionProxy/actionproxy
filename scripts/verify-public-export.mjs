@@ -3418,16 +3418,19 @@ function isUnscopedRegistryPackageGuidance(text, packageSpec) {
   ) {
     return true;
   }
-  const claimWindow = text.slice(
-    Math.max(0, packageSpec.index - 120),
+  // The package scanner has already identified the exact package token. Check
+  // only the bounded suffix instead of matching the package name again with
+  // nested separator quantifiers, which can backtrack exponentially.
+  const claimSuffix = text.slice(
+    packageSpec.index + packageSpec.packageName.length,
     packageSpec.index + packageSpec.packageName.length + 160,
   );
   return (
-    /\baction[-_]?proxy(?:[-_][a-z0-9._-]+)*(?:@[^\s`'"]+)?\s+(?:npm\s+)?package\b.{0,100}\b(?:npm|registry|published|available|installable)\b/iu.test(
-      claimWindow,
+    /^(?:@[^\s`'"]+)?\s+(?:npm\s+)?package\b.{0,100}\b(?:npm|registry|published|available|installable)\b/iu.test(
+      claimSuffix,
     ) ||
-    /\baction[-_]?proxy(?:[-_][a-z0-9._-]+)*(?:@[^\s`'"]+)?\b.{0,40}\b(?:is|are)\s+(?:published|available|installable)\b.{0,80}\b(?:npm|registry)\b/iu.test(
-      claimWindow,
+    /^(?:@[^\s`'"]+)?\b.{0,40}\b(?:is|are)\s+(?:published|available|installable)\b.{0,80}\b(?:npm|registry)\b/iu.test(
+      claimSuffix,
     )
   );
 }
