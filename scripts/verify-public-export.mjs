@@ -594,6 +594,204 @@ const narrativeRules = [
   ],
 ];
 
+const approvedPublishedNpmPackages = [
+  "@actionproxy/sdk-js",
+  "@actionproxy/mcp-wrapper",
+];
+
+// Registry/package/container prose is intentionally fail-closed. Each digest
+// binds one normalized Markdown logical unit to its reviewed public path and
+// exact occurrence count. New wording must update this inventory in the same
+// reviewed change; the verifier does not try to infer whether a new natural-
+// language claim is true.
+const reviewedRegistryNarrativeInventory = [
+  [
+    "AGENTS.md",
+    "0080f58a860cbc326bf46c939ba4ed0992ae2bd19fb660d7f68546f6bf97d1f8",
+    1,
+  ],
+  [
+    "AGENTS.md",
+    "80c3386d88ba92518a19215d292a413c6de45ed769ecb23de782ff46efdb6e3e",
+    1,
+  ],
+  [
+    "README.md",
+    "039404ad4b3eab148ee6f086f1352eba25746f53be5d2cbb9b693b543ec11d9a",
+    1,
+  ],
+  [
+    "README.md",
+    "cfab7f673beea1e8bf89df4773e7c9240296618d76c15adcc1471da066c57302",
+    1,
+  ],
+  [
+    "README.md",
+    "fcf6bb2112b0f2ca20f8a391bf60728bb95b992f4746c4216258ffff39ebb135",
+    1,
+  ],
+  [
+    "README.md",
+    "ef2c70060651114603a2793e3a603ecd867088d77e4ff0ef394cf7bc0f1c143b",
+    1,
+  ],
+  [
+    "README.md",
+    "b3ff502d4fe0601372de05b7ab251ec0fb50a4422f6eab19ecb2a48329c6d72a",
+    1,
+  ],
+  [
+    "README.md",
+    "e3c9634ed1393f66d32a665c3b630ad5e2c0597c3a905f841f890ebb98473658",
+    1,
+  ],
+  [
+    "docs/ADOPTING.md",
+    "3317ff7a147ac3eb537afd7a952e96e985eeb1d84c29bb77a46c02204778ec76",
+    1,
+  ],
+  [
+    "docs/ADOPTING.md",
+    "c37c79c05b56409c1556d1e9bee77e102806c6480fd4944057f78838a75d8f57",
+    1,
+  ],
+  [
+    "docs/ADOPTING.md",
+    "b8ae5fbb5801e819b64f096b706eb37f6e335044ba6b2e3920334a8f02333473",
+    1,
+  ],
+  [
+    "docs/ADOPTING.md",
+    "80b205d3ccd3c1f1cb05bdf8778329a663668fc1fbf019d2a93ea19906deac20",
+    1,
+  ],
+  [
+    "docs/ADOPTING.md",
+    "45f99590a3e7f28cf5fd5f86da56ac670212ed0a2c65b49b088daed9ab2a77b3",
+    1,
+  ],
+  [
+    "docs/COMMUNITY_CAPABILITIES.md",
+    "43e1d6b0569f1bdc85f78d00ee6b444ca5f26d8e55dbd3c1ec9d75365933c370",
+    1,
+  ],
+  [
+    "docs/COMMUNITY_CAPABILITIES.md",
+    "1d672a37539f7b12f01116e30f40d7c5ad8ab3b07e17066dcbbd5a6f7f3cadfa",
+    1,
+  ],
+  [
+    "docs/EXTERNAL_RUNNERS_MCP.md",
+    "b928cca5f81769622fbcdeb3c7bdc3dedf1892eabec5ab4900fee7604ad5bd6c",
+    1,
+  ],
+  [
+    "docs/OSS_TEST_STATUS.md",
+    "f26e69a80c092a272da135a2d1155cd2dd591bacff8f08d6698361e4e276b9a9",
+    1,
+  ],
+  [
+    "docs/OSS_TEST_STATUS.md",
+    "9d2c1920e1a90545b1c32c7a13117055eb03eb149b09b27d8f6ebebd70162eaf",
+    1,
+  ],
+  [
+    "docs/OSS_TEST_STATUS.md",
+    "97e339dc896189b67a4d8de1574d4abae90383596c4d33923b159da67c039bc7",
+    1,
+  ],
+  [
+    "docs/OSS_TEST_STATUS.md",
+    "56555fc131625854f06d75e17524652919e1fc69d563f0cf705627f2d68773dc",
+    1,
+  ],
+  [
+    "docs/OSS_TEST_STATUS.md",
+    "771c8d79c7d550faaf27bb6cb417a0060b59ba11f7d60841eabdc70acee7f167",
+    1,
+  ],
+  [
+    "CHANGELOG.md",
+    "8c91220676bb21e252f7ce3434f94947ffa2814200bf1addaedcb0006e0fd72f",
+    1,
+  ],
+  [
+    "CHANGELOG.md",
+    "e0417abf49f32eeffd31cc6363a7b5108e414bbc2146c09cdd489754ec8c3cf3",
+    1,
+  ],
+  [
+    "CHANGELOG.md",
+    "c1a2855f5d7fee3020534c4107a12155b0c4a966ede0b92ec51bc49ea3ea8b18",
+    1,
+  ],
+  [
+    "CHANGELOG.md",
+    "11f56d800e768b85aa04eac05c71cfdb0dc9536280615ed71927fdfba0c38caa",
+    1,
+  ],
+  [
+    "packages/sdk-js/README.md",
+    "71bbde949e333d09e1cdca6d028dec586287c60f235d115c04a2d2c317b3f34e",
+    1,
+  ],
+  [
+    "packages/mcp-wrapper/README.md",
+    "71bbde949e333d09e1cdca6d028dec586287c60f235d115c04a2d2c317b3f34e",
+    1,
+  ],
+  [
+    "packages/mcp-wrapper/README.md",
+    "4041f018ec60af8c6419e5e10db147b95b8ce5a8ffe3dc44a381afea098804ec",
+    1,
+  ],
+];
+
+// Dynamic shell examples are also fail-closed. The Community export contains
+// only these two reviewed operational commands; new variable/substitution
+// syntax must be reviewed and digest-bound instead of relying on partial shell
+// interpretation. A single source-bound local .tgz install remains a
+// structural fallback allowance below.
+const reviewedDynamicShellUnitInventory = [
+  [
+    "docs/CHATGPT_MCP.md",
+    "1654e898e50cdf981e5caa8cee192e6792dfe7f9be5c40d7222075f414469622",
+    1,
+  ],
+  [
+    "docs/CHATGPT_MCP.md",
+    "a118d2de757f394cfd2786e41917b435b629d0840bee59d8faeb674276556c7a",
+    1,
+  ],
+];
+
+const dynamicShellTokenPattern =
+  /\$\{[^}\r\n]*\}|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*#?$!-]|\$\(|`/gu;
+
+const historicalChangelogNpmNarrativeExemptions = new Map([
+  [
+    "- Prepared `@actionproxy/sdk-js` and `@actionproxy/mcp-wrapper` for their first public npm release with exact-install guidance, focused registry metadata, protected publication gates, and anonymous consumer verification.",
+    { release: "0.1.1", subsection: "Added" },
+  ],
+  [
+    "- Versioned JavaScript SDK and MCP-wrapper source-package candidates, an OpenAPI 3.1 contract, policy and MCP-wrapper JSON Schemas, and an isolated packed-consumer conformance suite.",
+    { release: "0.1.0", subsection: "Added" },
+  ],
+  [
+    "- `@actionproxy/sdk-js@0.1.0` and `@actionproxy/mcp-wrapper@0.1.0` are packable source-package candidates. The packages are not currently published to npm.",
+    { release: "0.1.0", subsection: "Distribution" },
+  ],
+]);
+
+const scopedActionProxyPackagePattern =
+  /(?<![A-Za-z0-9._/@-])(@actionproxy\/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)(?:@([^\s`'"<>\[\](){},;]+))?/giu;
+const lookalikeScopedActionProxyPackagePattern =
+  /(?<![A-Za-z0-9._/@-])(@(?:action[._-]+proxy[a-z0-9._-]*|actionproxy[a-z0-9._-]+)\/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)(?:@([^\s`'"<>\[\](){},;]+))?/giu;
+const unofficialScopedActionProxyPackagePattern =
+  /(?<![A-Za-z0-9._/@-])(@[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?\/action[._-]*proxy(?:[._-][a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)*)(?:@([^\s`'"<>\[\](){},;]+))?/giu;
+const unscopedActionProxyPackagePattern =
+  /(?<![A-Za-z0-9._/@-])(action[._-]*proxy(?:[._-][a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)*)(?:@([^\s`'"<>\[\](){},;]+))?/gu;
+
 if (!(await exists(destination))) {
   fail(`Public export directory does not exist: ${destination}`);
 }
@@ -2288,8 +2486,7 @@ async function verifyDocumentation() {
   }
   if (adoptionGuide) {
     for (const requirement of [
-      "records and their release evidence are independently verified",
-      "does not yet publish an npm package or a registry container image",
+      "published to npm with verified provenance",
       "corepack pnpm --filter @actionproxy/sdk-js pack --out",
       "runExternalAction",
       "MCP consumer path",
@@ -2306,7 +2503,15 @@ async function verifyDocumentation() {
         );
       }
     }
+    if (
+      !/does not publish a\s+registry container image/iu.test(adoptionGuide)
+    ) {
+      failures.push(
+        "docs/ADOPTING.md must state that ActionProxy does not publish a registry container image",
+      );
+    }
   }
+  await verifyPublishedNpmNarratives({ adoptionGuide, readme });
   for (const relativePath of await getVerificationFiles()) {
     if (path.extname(relativePath) !== ".md") continue;
     const body = await fs.readFile(
@@ -2375,6 +2580,1081 @@ async function verifyDocumentation() {
       }
     }
   }
+}
+
+async function verifyPublishedNpmNarratives({ adoptionGuide, readme }) {
+  if (!verifiedManifest) return;
+  const exactVersion = verifiedManifest.releaseTag.slice(1);
+  const exactSpecs = new Map(
+    approvedPublishedNpmPackages.map((packageName) => [
+      packageName,
+      `${packageName}@${exactVersion}`,
+    ]),
+  );
+  const canonicalCommands = [
+    `npm view ${exactSpecs.get("@actionproxy/sdk-js")} version dist.integrity repository.url dist.attestations`,
+    `npm view ${exactSpecs.get("@actionproxy/mcp-wrapper")} version dist.integrity repository.url dist.attestations`,
+    `npm install --save-exact ${exactSpecs.get("@actionproxy/sdk-js")}`,
+    `npm install --save-exact ${exactSpecs.get("@actionproxy/mcp-wrapper")}`,
+  ];
+
+  for (const [relativePath, body] of [
+    ["README.md", readme],
+    ["docs/ADOPTING.md", adoptionGuide],
+  ]) {
+    if (!body) continue;
+    for (const command of canonicalCommands) {
+      if (!body.includes(command)) {
+        failures.push(
+          `${relativePath} is missing exact npm adoption guidance: ${command}`,
+        );
+      }
+    }
+  }
+
+  const approvedNames = new Set(approvedPublishedNpmPackages);
+  const reviewedNarrativeByPathAndDigest = new Map(
+    reviewedRegistryNarrativeInventory.map(
+      ([relativePath, digest, expectedCount]) => [
+        `${relativePath}\0${digest}`,
+        { digest, expectedCount, relativePath },
+      ],
+    ),
+  );
+  const reviewedNarrativeCounts = new Map(
+    [...reviewedNarrativeByPathAndDigest.keys()].map((key) => [key, 0]),
+  );
+  const reviewedDynamicShellByPathAndDigest = new Map(
+    reviewedDynamicShellUnitInventory.map(
+      ([relativePath, digest, expectedCount]) => [
+        `${relativePath}\0${digest}`,
+        { digest, expectedCount, relativePath },
+      ],
+    ),
+  );
+  const reviewedDynamicShellCounts = new Map(
+    [...reviewedDynamicShellByPathAndDigest.keys()].map((key) => [key, 0]),
+  );
+  for (const relativePath of await getVerificationFiles()) {
+    if (path.extname(relativePath).toLowerCase() !== ".md") continue;
+    const body = await readTextIfPresent(relativePath);
+    if (!body) continue;
+    let changelogSection;
+    let changelogSubsection;
+    let npmMarkdownContext;
+    const historicalExemptionCounts = new Map(
+      [...historicalChangelogNpmNarrativeExemptions.keys()].map((text) => [
+        text,
+        0,
+      ]),
+    );
+    for (const unit of markdownLogicalUnits(body)) {
+      if (relativePath === "CHANGELOG.md") {
+        const releaseHeading = /^##\s+(.+)$/u.exec(unit.text);
+        if (releaseHeading) {
+          changelogSection = releaseHeading[1];
+          changelogSubsection = undefined;
+        }
+        const subsectionHeading = /^###\s+(.+)$/u.exec(unit.text);
+        if (subsectionHeading) changelogSubsection = subsectionHeading[1];
+      }
+      const narrativeText = normalizeMarkdownNarrative(unit.text);
+      const digest = createHash("sha256").update(narrativeText).digest("hex");
+      const inventoryKey = `${relativePath}\0${digest}`;
+      if (reviewedNarrativeByPathAndDigest.has(inventoryKey)) {
+        reviewedNarrativeCounts.set(
+          inventoryKey,
+          (reviewedNarrativeCounts.get(inventoryKey) ?? 0) + 1,
+        );
+      } else if (isRegistryOrContainerNarrative(unit, narrativeText)) {
+        failures.push(
+          `Public narrative copy in ${relativePath}:${unit.line}: unreviewed registry/container claim; stale pre-publication npm wording and unpublished registry-image claims require reviewed inventory`,
+        );
+      }
+      const expectedHistoricalLocation =
+        historicalChangelogNpmNarrativeExemptions.get(unit.text);
+      if (
+        relativePath === "CHANGELOG.md" &&
+        expectedHistoricalLocation !== undefined &&
+        expectedHistoricalLocation.release === changelogSection &&
+        expectedHistoricalLocation.subsection === changelogSubsection
+      ) {
+        historicalExemptionCounts.set(
+          unit.text,
+          (historicalExemptionCounts.get(unit.text) ?? 0) + 1,
+        );
+        npmMarkdownContext = undefined;
+        continue;
+      }
+      const shellCommandScanText =
+        unit.kind === "shell"
+          ? normalizeShellQuoteConcatenation(unit.text)
+              .replace(/\s+/gu, " ")
+              .trim()
+          : normalizeShellQuoteConcatenation(unit.text);
+      const packageScanText = normalizeMarkdownNarrative(shellCommandScanText);
+      let reviewedDynamicShellUnit = false;
+      const sourceBoundDynamicTarball =
+        isSourceBoundDynamicTarballCommand(shellCommandScanText);
+      if (unit.kind === "shell" && hasDynamicShellToken(unit.text)) {
+        const dynamicShellDigest = createHash("sha256")
+          .update(unit.text.replace(/\s+/gu, " ").trim())
+          .digest("hex");
+        const dynamicShellKey = `${relativePath}\0${dynamicShellDigest}`;
+        if (reviewedDynamicShellByPathAndDigest.has(dynamicShellKey)) {
+          reviewedDynamicShellUnit = true;
+          reviewedDynamicShellCounts.set(
+            dynamicShellKey,
+            (reviewedDynamicShellCounts.get(dynamicShellKey) ?? 0) + 1,
+          );
+        } else if (!sourceBoundDynamicTarball) {
+          failures.push(
+            `Public shell guidance in ${relativePath}:${unit.line} uses unreviewed variable or substitution syntax with digest ${dynamicShellDigest}`,
+          );
+        }
+      }
+      const shellExpansionText = shellCommandScanText.replace(
+        /\[::1\](?::\d+)?(?=\/)/giu,
+        "ipv6-loopback",
+      );
+      if (
+        (unit.kind === "shell" &&
+          !reviewedDynamicShellUnit &&
+          !sourceBoundDynamicTarball &&
+          /\\[^\s]|[{}*?\[]/u.test(shellExpansionText)) ||
+        (unit.kind === "code" &&
+          /\\[^\s]/u.test(shellExpansionText) &&
+          (findActionProxyPackageSpecs(packageScanText).length > 0 ||
+            findActionProxyImageReferences(shellCommandScanText).length > 0))
+      ) {
+        failures.push(
+          `Public distribution guidance in ${relativePath}:${unit.line} must not use unreviewed shell expansion syntax`,
+        );
+      }
+      if (
+        (unit.kind === "shell" || unit.kind === "code") &&
+        hasUnapprovedDynamicShellExecutable(shellCommandScanText)
+      ) {
+        failures.push(
+          `Public distribution guidance in ${relativePath}:${unit.line} must use a literal package or container command executable`,
+        );
+      }
+      if (
+        (unit.kind === "shell" || unit.kind === "code") &&
+        hasUnapprovedShellExecutableExpansion(shellCommandScanText)
+      ) {
+        failures.push(
+          `Public distribution guidance in ${relativePath}:${unit.line} must not use shell expansion in a command executable`,
+        );
+      }
+      const packageManagerCommand =
+        isPackageManagerCommandShaped(shellCommandScanText);
+      const imageCommand = isImageCommandShaped(shellCommandScanText);
+      if (
+        (packageManagerCommand || imageCommand) &&
+        hasUnapprovedDistributionWordExpansion(shellCommandScanText)
+      ) {
+        failures.push(
+          `Public distribution guidance in ${relativePath}:${unit.line} must not use shell expansion in package or container command words`,
+        );
+      }
+      if (
+        (unit.kind === "shell" || imageCommand) &&
+        hasUnapprovedRemoteActionProxyImageCommand(shellCommandScanText)
+      ) {
+        failures.push(
+          `Public narrative copy in ${relativePath}:${unit.line}: unpublished registry-image claim; remote ActionProxy image commands are not published`,
+        );
+      }
+      const inheritedNpmPackageContext = inheritsNpmMarkdownContext(
+        npmMarkdownContext,
+        unit,
+      );
+      const npmCommand =
+        /\b(?:npm|pnpm|yarn|bun)\b.{0,160}\b(?:add|i|in|ins|inst|insta|instal|install|isnt|isnta|isntal|isntall|update|up|upgrade|view|info|show)\b/iu.test(
+          packageScanText,
+        );
+      const npmInstallProse = /\b(?:install|add|fetch|download)\b/iu.test(
+        packageScanText,
+      );
+      const npmRegistryClaim =
+        /\b(?:npm|package\s+registry|registry\s+(?:package|record|release|download|install)|published|available|installable|dist-tag|provenance|attestations?|integrity)\b/iu.test(
+          packageScanText,
+        );
+      if (
+        (unit.kind === "shell" || packageManagerCommand) &&
+        hasDynamicRegistryPackageSpecifier(shellCommandScanText)
+      ) {
+        failures.push(
+          `Public npm guidance in ${relativePath}:${unit.line} must use a literal or same-fence exact ActionProxy package spec`,
+        );
+      }
+      const packageSpecs = findActionProxyPackageSpecs(packageScanText).filter(
+        (packageSpec) => {
+          if (
+            unit.kind !== "shell" &&
+            unit.kind !== "code" &&
+            isStructuralPostInstallImportNarrative(narrativeText)
+          ) {
+            return false;
+          }
+          if (isWorkspaceFilterSpecifier(packageScanText, packageSpec)) {
+            return false;
+          }
+          if (
+            (unit.kind === "shell" &&
+              isShellPackageDistributionGuidance(
+                packageScanText,
+                packageSpec,
+              )) ||
+            (unit.kind === "shell" && packageSpec.kind !== "unscoped") ||
+            inheritedNpmPackageContext ||
+            isRegistryExecutionGuidance(packageScanText, packageSpec)
+          ) {
+            return true;
+          }
+          if (!(npmCommand || npmInstallProse || npmRegistryClaim)) {
+            return false;
+          }
+          return (
+            packageSpec.kind !== "unscoped" ||
+            isUnscopedRegistryPackageGuidance(packageScanText, packageSpec)
+          );
+        },
+      );
+      if (packageSpecs.length > 0) {
+        for (const { packageName, version } of packageSpecs) {
+          if (!approvedNames.has(packageName)) {
+            failures.push(
+              `Public npm guidance in ${relativePath}:${unit.line} references unapproved package ${packageName}`,
+            );
+            continue;
+          }
+          if (version !== exactVersion) {
+            failures.push(
+              `Public npm guidance in ${relativePath}:${unit.line} must pin ${packageName}@${exactVersion}`,
+            );
+          }
+        }
+      }
+
+      npmMarkdownContext = nextNpmMarkdownContext({
+        context: npmMarkdownContext,
+        inherited: inheritedNpmPackageContext,
+        text: narrativeText,
+        unit,
+      });
+    }
+    if (relativePath === "CHANGELOG.md") {
+      for (const [
+        text,
+        expectedLocation,
+      ] of historicalChangelogNpmNarrativeExemptions) {
+        const count = historicalExemptionCounts.get(text) ?? 0;
+        if (count !== 1) {
+          failures.push(
+            `CHANGELOG.md must preserve exactly one reviewed historical npm narrative in ${expectedLocation.release}/${expectedLocation.subsection}`,
+          );
+        }
+      }
+    }
+  }
+  for (const [inventoryKey, inventory] of reviewedNarrativeByPathAndDigest) {
+    const actualCount = reviewedNarrativeCounts.get(inventoryKey) ?? 0;
+    if (actualCount !== inventory.expectedCount) {
+      failures.push(
+        `${inventory.relativePath} must preserve exactly ${inventory.expectedCount} reviewed registry/container narrative unit with digest ${inventory.digest}; found ${actualCount}`,
+      );
+    }
+  }
+  for (const [inventoryKey, inventory] of reviewedDynamicShellByPathAndDigest) {
+    const actualCount = reviewedDynamicShellCounts.get(inventoryKey) ?? 0;
+    if (actualCount !== inventory.expectedCount) {
+      failures.push(
+        `${inventory.relativePath} must preserve exactly ${inventory.expectedCount} reviewed dynamic shell unit with digest ${inventory.digest}; found ${actualCount}`,
+      );
+    }
+  }
+}
+
+function normalizeMarkdownNarrative(text) {
+  return text
+    .replace(/<[^>]*>/gu, " ")
+    .replace(/(?<![\p{L}\p{N}])[*_~`]+|[*_~`]+(?![\p{L}\p{N}])/gu, "")
+    .replace(/\\([\\`*_{}\[\]()#+.!>|-])/gu, "$1")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function isRegistryOrContainerNarrative(unit, text) {
+  if (unit.kind === "shell" || unit.kind === "code" || !text) return false;
+  if (isStructuralPostInstallImportNarrative(text)) return false;
+
+  const hasNpmClaim =
+    /\bnpm\b/iu.test(text) &&
+    (/^\s*(?:on\s+)?npm\s*:?\s*$/iu.test(text) ||
+      /\b(?:attestations?|available|availability|candidates?|dist-tag|download|exact|exists?|fetch|find|found|404|install(?:ation|able|ed|ing)?|integrity|launch|list|lookup|missing|packages?|provenance|publish(?:ed|es|ing)?|publication|records?|registry|release[ds]?|rollout|signatures?|source-bound|tarball|unavailable|unpublished|unreleased|versions?)\b/iu.test(
+        text,
+      ));
+  const hasPackageRegistryClaim =
+    /\b(?:package\s+registry|registry\s+(?:availability|download|install(?:ation)?|lookup|metadata|package|publication|publish(?:ing)?|records?|release|rollout))\b/iu.test(
+      text,
+    );
+  const hasDistributionMetadataClaim =
+    /\b(?:dist-tag|registry\s+integrity|registry\s+metadata|registry\s+record|SLSA\s+provenance)\b/iu.test(
+      text,
+    );
+  const hasPackageIdentityNarrative =
+    !isSourceBoundPackageReferenceOnly(text) &&
+    !isWorkspaceSelectionNarrative(text) &&
+    ((hasScopedActionProxyLikePackageIdentity(text) &&
+      /\b(?:add|available|candidate|dependency|dist-tag|download|fetch|install(?:ation|able|ed|ing)?|package|provenance|publish(?:ed|es|ing)?|publication|registry|release[ds]?)\b/iu.test(
+        text,
+      )) ||
+      hasUnscopedActionProxyPackageNarrative(text));
+  const hasRegistryImageNarrative =
+    /\bregistry\s+(?:container|docker|oci)?\s*image\b/iu.test(text) ||
+    hasActionProxyRegistryImageNarrative(text);
+
+  return (
+    hasNpmClaim ||
+    hasPackageRegistryClaim ||
+    hasDistributionMetadataClaim ||
+    hasPackageIdentityNarrative ||
+    hasRegistryImageNarrative
+  );
+}
+
+function isStructuralPostInstallImportNarrative(text) {
+  return (
+    /\bafter\s+npm\s+installation\b/iu.test(text) &&
+    /\bimport\b.{0,160}\bfrom\s+@actionproxy\/(?:sdk-js|mcp-wrapper)\b/iu.test(
+      text,
+    ) &&
+    !/\b(?:available|dist-tag|provenance|publish(?:ed|es|ing)?|publication|registry|release[ds]?)\b/iu.test(
+      text,
+    )
+  );
+}
+
+function isSourceBoundPackageReferenceOnly(text) {
+  return (
+    /\b(?:file\s+dependency|local[-\s]+(?:package[-\s]+)?tarball|source[-\s]+bound|vendor\/)\b/iu.test(
+      text,
+    ) &&
+    !/\b(?:available|dist-tag|provenance|publish(?:ed|es|ing)?|publication|registry\s+(?:availability|record|release)|release[ds]?)\b/iu.test(
+      text,
+    )
+  );
+}
+
+function isWorkspaceSelectionNarrative(text) {
+  return /\b(?:corepack\s+)?pnpm\s+--filter\b/iu.test(text);
+}
+
+function hasScopedActionProxyLikePackageIdentity(text) {
+  return /(?<![A-Za-z0-9._/@-])@(?:action[._-]*proxy|action[._-]*proxy[a-z0-9._-]*)\/[a-z0-9][a-z0-9._-]*/iu.test(
+    text,
+  );
+}
+
+function hasUnscopedActionProxyPackageNarrative(text) {
+  const packageIdentity =
+    "action[._-]*proxy(?:[._-]+(?:agent|client|mcp|package|sdk|server|wrapper))(?:[._-]+[a-z0-9][a-z0-9._-]*)*";
+  return (
+    new RegExp(
+      `\\b(?:npm|registry|packages?)\\b.{0,48}\\b${packageIdentity}\\b|\\b${packageIdentity}\\b.{0,48}\\b(?:npm|registry|packages?)\\b`,
+      "iu",
+    ).test(text) ||
+    new RegExp(
+      `\\b(?:add|download|fetch|install)\\b.{0,80}\\b${packageIdentity}\\b`,
+      "iu",
+    ).test(text)
+  );
+}
+
+function hasActionProxyRegistryImageNarrative(text) {
+  if (
+    /\b(?:localhost|127\.0\.0\.1|::1)(?::\d+)?\/[^\s`'"]*action[._-]*proxy\b/iu.test(
+      text,
+    ) ||
+    /\baction[._-]*proxy(?:\/action[._-]*proxy)?\s*:\s*local\b/iu.test(text)
+  ) {
+    return false;
+  }
+  const actionProxyReference =
+    /\baction[._-]*proxy\b/iu.test(text) ||
+    /\baction[._-]*proxy(?:\/action[._-]*proxy)?\s*:\s*[a-z0-9][a-z0-9._-]*\b/iu.test(
+      text,
+    );
+  if (!actionProxyReference) return false;
+  const actionProxyImageReference =
+    /\baction[._-]*proxy\b.{0,60}\b(?:container|docker|oci)?\s*image\b|\b(?:container|docker|oci)?\s*image\b.{0,60}\baction[._-]*proxy\b/iu.test(
+      text,
+    );
+  return (
+    (actionProxyImageReference &&
+      /\b(?:available|download|fetch|host(?:ed|s)?|provide[ds]?|publish(?:ed|es)?|pull|release[ds]?|registry)\b/iu.test(
+        text,
+      )) ||
+    (/\b(?:container|docker|oci)\s+image\b/iu.test(text) &&
+      /\b(?:available|download|fetch|host(?:ed|s)?|provide[ds]?|publish(?:ed|es)?|pull|release[ds]?|registry)\b/iu.test(
+        text,
+      )) ||
+    /\bregistry\s+container\s+image\b/iu.test(text) ||
+    /\b(?:Docker\s*Hub|GHCR|GitHub\s+Container\s+Registry|Quay(?:\.io)?|Harbor\s+registry|Amazon\s+ECR|public\s+ECR|container\s+registry|OCI\s+registry)\b/iu.test(
+      text,
+    ) ||
+    (/\bOCI\s+artifact\b/iu.test(text) &&
+      /\b(?:available|download|fetch|host(?:ed|s)?|provide[ds]?|publish(?:ed|es)?|pull|release[ds]?)\b/iu.test(
+        text,
+      )) ||
+    /\b(?:ghcr\.io|docker\.io|quay\.io|public\.ecr\.aws|registry\.[a-z0-9.-]+|icr\.io|[a-z0-9-]+\.azurecr\.io|\d{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com|[a-z0-9-]+-docker\.pkg\.dev)\//iu.test(
+      text,
+    ) ||
+    (hasRemoteImageCommand(text) &&
+      /\baction[._-]*proxy(?:\/action[._-]*proxy)?\s*:\s*(?!local\b)[a-z0-9][a-z0-9._-]*\b/iu.test(
+        text,
+      )) ||
+    (/\bskopeo\s+copy\b/iu.test(text) &&
+      /\baction[._-]*proxy(?:\/action[._-]*proxy)?\b/iu.test(text))
+  );
+}
+
+function normalizeShellQuoteConcatenation(text) {
+  return text
+    .replace(/\$'([^'\r\n]*)'/gu, "$1")
+    .replace(/(?<=[A-Za-z0-9@/._-])["']+(?=[A-Za-z0-9@/._-])/gu, "");
+}
+
+function findDynamicShellTokens(text) {
+  return [...text.matchAll(dynamicShellTokenPattern)];
+}
+
+function hasDynamicShellToken(text) {
+  return findDynamicShellTokens(text).length > 0;
+}
+
+function hasDynamicRegistryPackageSpecifier(text) {
+  const dynamicTokens = findDynamicShellTokens(text);
+  if (dynamicTokens.length === 0) return false;
+  if (isSourceBoundDynamicTarballCommand(text)) return false;
+  return [
+    ...text.matchAll(
+      /\b(?:npm|pnpm|yarn|bun|npx|pnpx|bunx)\b[^;&|]{0,280}/giu,
+    ),
+  ].some((command) =>
+    dynamicTokens.some(
+      (token) =>
+        token.index >= command.index &&
+        token.index < command.index + command[0].length,
+    ),
+  );
+}
+
+function isSourceBoundDynamicTarballCommand(text) {
+  const dynamicTokens = findDynamicShellTokens(text);
+  if (dynamicTokens.length !== 1) return false;
+  return /^(?:\$\s+)?(?:corepack\s+)?(?:npm|pnpm|yarn|bun)\s+(?:add|i|install)(?:\s+--?[A-Za-z0-9][A-Za-z0-9-]*(?:=[A-Za-z0-9._/:,@%+-]+)?)*\s+["']?(?:file:)?\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)\/[A-Za-z0-9._/-]+\.tgz["']?$/u.test(
+    text,
+  );
+}
+
+function hasUnapprovedDynamicShellExecutable(text) {
+  for (const executable of shellCommandExecutables(text)) {
+    if (!hasDynamicShellToken(executable)) continue;
+    const normalized = stripShellWordQuotes(executable);
+    if (
+      /^\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)\/actionproxy$/u.test(
+        normalized,
+      )
+    ) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+function hasUnapprovedShellExecutableExpansion(text) {
+  const distributionExecutables = [
+    "bun",
+    "bunx",
+    "crane",
+    "crictl",
+    "ctr",
+    "docker",
+    "nerdctl",
+    "npm",
+    "npx",
+    "oras",
+    "pnpm",
+    "pnpx",
+    "podman",
+    "skopeo",
+    "yarn",
+  ];
+  return shellCommandExecutables(text).some((executable) => {
+    if (!/\\[^\s]|[{}*?\[]/u.test(executable)) return false;
+    const normalized = stripShellWordQuotes(executable)
+      .replace(/\\(.)/gu, "$1")
+      .split("/")
+      .at(-1);
+    if (!normalized) return false;
+    return expandSimpleShellBraces(normalized).some((candidate) => {
+      const globPattern = shellGlobPattern(candidate);
+      return distributionExecutables.some((name) => globPattern.test(name));
+    });
+  });
+}
+
+function expandSimpleShellBraces(word) {
+  const brace = /\{([^{}]*)\}/u.exec(word);
+  if (!brace) return [word];
+  const [whole, body] = brace;
+  let alternatives;
+  const sequence = /^(.)\.\.(.)$/u.exec(body);
+  if (sequence) {
+    const start = sequence[1].codePointAt(0);
+    const end = sequence[2].codePointAt(0);
+    const distance = Math.abs(end - start);
+    alternatives =
+      distance <= 32
+        ? Array.from({ length: distance + 1 }, (_, index) =>
+            String.fromCodePoint(start + Math.sign(end - start) * index),
+          )
+        : [body];
+  } else {
+    alternatives = body.split(",");
+  }
+  return alternatives.flatMap((alternative) =>
+    expandSimpleShellBraces(
+      `${word.slice(0, brace.index)}${alternative}${word.slice(
+        brace.index + whole.length,
+      )}`,
+    ),
+  );
+}
+
+function shellGlobPattern(word) {
+  let pattern = "^";
+  for (let index = 0; index < word.length; index += 1) {
+    const character = word[index];
+    if (character === "*") {
+      pattern += ".*";
+    } else if (character === "?") {
+      pattern += ".";
+    } else if (character === "[") {
+      const end = word.indexOf("]", index + 1);
+      if (end === -1) {
+        pattern += "\\[";
+      } else {
+        const body = word.slice(index + 1, end).replace(/[\\\]^-]/gu, "\\$&");
+        pattern += `[${body}]`;
+        index = end;
+      }
+    } else {
+      pattern += character.replace(/[\\^$.*+?()[\]{}|]/gu, "\\$&");
+    }
+  }
+  return new RegExp(`${pattern}$`, "u");
+}
+
+function hasUnapprovedDistributionWordExpansion(text) {
+  const withoutIpv6Loopback = text.replace(
+    /\[::1\](?::\d+)?(?=\/)/giu,
+    "ipv6-loopback",
+  );
+  return /\\[^\s]|[{}*?\[]/u.test(withoutIpv6Loopback);
+}
+
+function shellCommandExecutables(text) {
+  const executables = [];
+  for (const segment of shellCommandSegments(text)) {
+    const words = shellWords(segment);
+    if (words[0] === "$") words.shift();
+    let unwrap = true;
+    while (unwrap && words.length > 0) {
+      while (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[0] ?? "")) {
+        words.shift();
+      }
+      if (words.length === 0) break;
+      unwrap = false;
+      const wrapper =
+        stripShellWordQuotes(words[0]).toLowerCase().split("/").at(-1) ?? "";
+      if (wrapper === "command" || wrapper === "exec") {
+        words.shift();
+        while ((words[0] ?? "").startsWith("-")) words.shift();
+        unwrap = true;
+      } else if (wrapper === "env") {
+        words.shift();
+        while (words.length > 0) {
+          const option = stripShellWordQuotes(words[0]);
+          if (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(option)) {
+            words.shift();
+          } else if (/^-(?:u|C|S)$/u.test(option)) {
+            words.splice(0, Math.min(2, words.length));
+          } else if (option.startsWith("-")) {
+            words.shift();
+          } else {
+            break;
+          }
+        }
+        unwrap = true;
+      } else if (wrapper === "sudo") {
+        words.shift();
+        while (words.length > 0) {
+          const option = stripShellWordQuotes(words[0]);
+          if (/^-(?:C|D|g|h|p|R|r|t|T|u)$/u.test(option)) {
+            words.splice(0, Math.min(2, words.length));
+          } else if (option.startsWith("-")) {
+            words.shift();
+          } else {
+            break;
+          }
+        }
+        unwrap = true;
+      } else if (wrapper === "time") {
+        words.shift();
+        while ((words[0] ?? "").startsWith("-")) {
+          const option = stripShellWordQuotes(words[0]);
+          if (/^(?:-f|-o|--format|--output)$/u.test(option)) {
+            words.splice(0, Math.min(2, words.length));
+          } else {
+            words.shift();
+          }
+        }
+        unwrap = true;
+      } else if (wrapper === "nohup") {
+        words.shift();
+        while ((words[0] ?? "").startsWith("-")) words.shift();
+        unwrap = true;
+      } else if (wrapper === "nice") {
+        words.shift();
+        if (/^-n$/u.test(words[0] ?? "")) words.splice(0, 2);
+        while ((words[0] ?? "").startsWith("-")) words.shift();
+        unwrap = true;
+      } else if (wrapper === "timeout") {
+        words.shift();
+        while ((words[0] ?? "").startsWith("-")) {
+          const option = stripShellWordQuotes(words[0]);
+          if (/^(?:-k|-s|--kill-after|--signal)$/u.test(option)) {
+            words.splice(0, Math.min(2, words.length));
+          } else {
+            words.shift();
+          }
+        }
+        if (words[0]) words.shift();
+        unwrap = true;
+      }
+    }
+    if (words[0]) executables.push(words[0]);
+  }
+  return executables;
+}
+
+function shellCommandSegments(text) {
+  const segments = [];
+  let start = 0;
+  let quote;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      quote = character;
+      continue;
+    }
+    if (character === "#" && (index === 0 || /\s/u.test(text[index - 1]))) {
+      segments.push(text.slice(start, index));
+      return segments;
+    }
+    if (character === ";" || character === "&" || character === "|") {
+      segments.push(text.slice(start, index));
+      if (text[index + 1] === character) index += 1;
+      start = index + 1;
+    }
+  }
+  segments.push(text.slice(start));
+  return segments;
+}
+
+function shellWords(segment) {
+  return segment.match(/(?:"(?:\\.|[^"\\])*"|'[^']*'|`[^`]*`|\S+)/gu) ?? [];
+}
+
+function stripShellWordQuotes(word) {
+  return word.replace(/["']/gu, "");
+}
+
+function isPackageManagerCommandShaped(text) {
+  return shellCommandExecutables(text).some((word) =>
+    /^(?:npm|pnpm|yarn|bun|npx|pnpx|bunx)$/iu.test(
+      stripShellWordQuotes(word).split("/").at(-1) ?? "",
+    ),
+  );
+}
+
+function isImageCommandShaped(text) {
+  return shellCommandExecutables(text).some((word) =>
+    /^(?:crane|crictl|oras|ctr|docker|nerdctl|podman|skopeo)$/iu.test(
+      stripShellWordQuotes(word).split("/").at(-1) ?? "",
+    ),
+  );
+}
+
+function hasUnapprovedRemoteActionProxyImageCommand(text) {
+  if (isImageCommandShaped(text) && hasDynamicShellToken(text)) {
+    return true;
+  }
+  const command = hasRemoteImageCommand(text);
+  const references = findActionProxyImageReferences(text);
+  if (!command) {
+    return (
+      hasDynamicShellToken(text) &&
+      references.some(isTaggedActionProxyImageReference)
+    );
+  }
+
+  const commandVerb = /\b(?:create|pull|push|run|copy)\b/iu.exec(text);
+  if (!commandVerb) return false;
+  if (
+    references.some((reference) => !isLocalActionProxyImageReference(reference))
+  ) {
+    return true;
+  }
+  if (
+    /^(?:pull|push|copy)$/iu.test(commandVerb[0]) &&
+    references.some((reference) => !isLoopbackImageReference(reference))
+  ) {
+    return true;
+  }
+  const commandArguments = text.slice(
+    commandVerb.index + commandVerb[0].length,
+  );
+  return hasDynamicShellToken(commandArguments);
+}
+
+function findActionProxyImageReferences(text) {
+  return (
+    text.match(
+      /(?:(?:[a-z0-9.-]+(?::\d+)?|\[::1\](?::\d+)?)\/)*action[._-]*proxy(?:\/action[._-]*proxy)?(?::[a-z0-9][a-z0-9._-]*)?/giu,
+    ) ?? []
+  );
+}
+
+function isLocalActionProxyImageReference(reference) {
+  const normalized = reference.toLowerCase();
+  return (
+    isLoopbackImageReference(normalized) ||
+    /^action[._-]*proxy(?:\/action[._-]*proxy)?:local$/u.test(normalized)
+  );
+}
+
+function isTaggedActionProxyImageReference(reference) {
+  return /:[a-z0-9][a-z0-9._-]*$/iu.test(reference);
+}
+
+function isLoopbackImageReference(reference) {
+  return /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\//iu.test(reference);
+}
+
+function hasRemoteImageCommand(text) {
+  return /\b(?:crane|crictl|oras)\b[^;&|]{0,160}\b(?:pull|push)\b|\bctr\b[^;&|]{0,160}\bimages?\s+(?:pull|push)\b|\b(?:docker|nerdctl|podman)\b[^;&|]{0,160}\b(?:create|pull|push|run)\b|\bskopeo\b[^;&|]{0,160}\bcopy\b/iu.test(
+    text,
+  );
+}
+
+function findActionProxyPackageSpecs(text) {
+  const matches = [];
+  for (const [kind, pattern] of [
+    ["approved-scope", scopedActionProxyPackagePattern],
+    ["lookalike-scope", lookalikeScopedActionProxyPackagePattern],
+    ["unofficial-scope", unofficialScopedActionProxyPackagePattern],
+    ["unscoped", unscopedActionProxyPackagePattern],
+  ]) {
+    pattern.lastIndex = 0;
+    for (const match of text.matchAll(pattern)) {
+      const packageName = match[1];
+      if (packageName.toLowerCase().endsWith(".tgz")) continue;
+      matches.push({
+        index: match.index,
+        kind,
+        packageName,
+        version: normalizePackageSpecVersion(match[2]),
+      });
+    }
+  }
+  return matches
+    .sort((left, right) => left.index - right.index)
+    .filter(
+      (candidate, index, all) =>
+        index === 0 ||
+        candidate.index !== all[index - 1].index ||
+        candidate.packageName !== all[index - 1].packageName,
+    );
+}
+
+function isUnscopedRegistryPackageGuidance(text, packageSpec) {
+  const beforePackage = text.slice(
+    Math.max(0, packageSpec.index - 240),
+    packageSpec.index,
+  );
+  if (
+    /\b(?:npm|pnpm|yarn|bun)\b.{0,160}\b(?:view|info|show|install|i|add)\b[^;&|]{0,100}$/iu.test(
+      beforePackage,
+    )
+  ) {
+    return true;
+  }
+  const claimWindow = text.slice(
+    Math.max(0, packageSpec.index - 120),
+    packageSpec.index + packageSpec.packageName.length + 160,
+  );
+  return (
+    /\baction[-_]?proxy(?:[-_][a-z0-9._-]+)*(?:@[^\s`'"]+)?\s+(?:npm\s+)?package\b.{0,100}\b(?:npm|registry|published|available|installable)\b/iu.test(
+      claimWindow,
+    ) ||
+    /\baction[-_]?proxy(?:[-_][a-z0-9._-]+)*(?:@[^\s`'"]+)?\b.{0,40}\b(?:is|are)\s+(?:published|available|installable)\b.{0,80}\b(?:npm|registry)\b/iu.test(
+      claimWindow,
+    )
+  );
+}
+
+function isRegistryExecutionGuidance(text, packageSpec) {
+  const beforePackage = text.slice(
+    Math.max(0, packageSpec.index - 240),
+    packageSpec.index,
+  );
+  if (isWorkspaceFilterSpecifier(text, packageSpec)) return false;
+  if (
+    /\b(?:npx|pnpx|bunx)\b[^;&|]{0,180}$/iu.test(beforePackage) ||
+    /\b(?:npm|bun)\b[^;&|]{0,120}\bx\b[^;&|]{0,120}$/iu.test(beforePackage) ||
+    /\b(?:pnpm|yarn|bun)\b[^;&|]{0,160}\bdlx\b[^;&|]{0,120}$/iu.test(
+      beforePackage,
+    )
+  ) {
+    return true;
+  }
+  if (
+    !/\b(?:npm|pnpm|yarn|bun)\b[^;&|]{0,160}\bexec\b[^;&|]{0,120}$/iu.test(
+      beforePackage,
+    )
+  ) {
+    return false;
+  }
+  return (
+    packageSpec.kind !== "unscoped" ||
+    packageSpec.version !== undefined ||
+    /--package(?:=|\s+)\s*$/iu.test(beforePackage)
+  );
+}
+
+function isShellPackageDistributionGuidance(text, packageSpec) {
+  if (isWorkspaceFilterSpecifier(text, packageSpec)) return false;
+  const beforePackage = text.slice(
+    Math.max(0, packageSpec.index - 280),
+    packageSpec.index,
+  );
+  return (
+    /\bnpm\b[^;&|]{0,180}\b(?:add|i|in|ins|inst|insta|instal|install|isnt|isnta|isntal|isntall|update|up|upgrade|view|info|show)\b[^;&|]{0,120}$/iu.test(
+      beforePackage,
+    ) ||
+    /\bpnpm\b[^;&|]{0,180}\b(?:add|i|install|update|up|upgrade|view|info|show)\b[^;&|]{0,120}$/iu.test(
+      beforePackage,
+    ) ||
+    /\byarn\b[^;&|]{0,180}\b(?:add|install|update|up|upgrade|info)\b[^;&|]{0,120}$/iu.test(
+      beforePackage,
+    ) ||
+    /\bbun\b[^;&|]{0,180}\b(?:add|i|install|update|view)\b[^;&|]{0,120}$/iu.test(
+      beforePackage,
+    ) ||
+    isRegistryExecutionGuidance(text, packageSpec)
+  );
+}
+
+function isWorkspaceFilterSpecifier(text, packageSpec) {
+  const beforePackage = text.slice(
+    Math.max(0, packageSpec.index - 80),
+    packageSpec.index,
+  );
+  return /(?:^|\s)(?:--filter|-F|--workspace|-w)(?:=|\s+)\s*["']?(?:!|\.\.\.)?$/u.test(
+    beforePackage,
+  );
+}
+
+function isNpmPackageListLeadIn(text) {
+  const label = text.replace(/^(?:#{1,6}\s+|[-*+]|\d+[.)])\s*/u, "").trim();
+  if (
+    /^(?:(?:available\s+)?on\s+)?npm(?:\s+(?:registry\s+)?packages?|\s+installation)?\s*:?$/iu.test(
+      label,
+    ) ||
+    /^(?:package\s+)?registry(?:\s+packages?)?\s*:?$/iu.test(label)
+  ) {
+    return true;
+  }
+  if (!/\b(?:npm|package\s+registry|registry)\b/iu.test(label)) return false;
+  if (
+    !/\b(?:install(?:ation)?|add|fetch|download|published|available)\b/iu.test(
+      label,
+    )
+  ) {
+    return false;
+  }
+  return (
+    /:\s*$/u.test(label) || /\b(?:packages?|dependencies)\.?\s*$/iu.test(label)
+  );
+}
+
+function isNpmPackageTableLeadIn(text) {
+  return (
+    /\b(?:npm|package\s+registry|registry)\b/iu.test(text) &&
+    /\b(?:packages?|install(?:ation)?|availability|source|registry|npm)\b/iu.test(
+      text,
+    )
+  );
+}
+
+function inheritsNpmMarkdownContext(context, unit) {
+  if (!context || unit.kind === "shell" || unit.kind === "code") return false;
+  if (unit.kind === "heading") return false;
+  if (context.kind === "adjacent") return true;
+  if (context.kind === "list-block") return unit.kind === "list";
+  if (context.kind === "nested-list") {
+    return unit.kind === "list" && unit.listIndent > context.listIndent;
+  }
+  if (context.kind === "table-block") return unit.kind === "table";
+  if (context.kind === "definition-block") return unit.kind === "definition";
+  return false;
+}
+
+function nextNpmMarkdownContext({ context, inherited, text, unit }) {
+  if (unit.kind !== "shell" && unit.kind !== "code") {
+    const isLeadIn =
+      isNpmPackageListLeadIn(text) ||
+      (unit.kind === "table" && isNpmPackageTableLeadIn(text));
+    if (isLeadIn) {
+      if (unit.kind === "list") {
+        return { kind: "nested-list", listIndent: unit.listIndent };
+      }
+      if (unit.kind === "table") return { kind: "table-block" };
+      if (unit.kind === "definition") return { kind: "definition-block" };
+      return { kind: "adjacent" };
+    }
+  }
+  if (!inherited) return undefined;
+  if (context.kind !== "adjacent") return context;
+  if (unit.kind === "list") return { kind: "list-block" };
+  if (unit.kind === "table") return { kind: "table-block" };
+  if (unit.kind === "definition") return { kind: "definition-block" };
+  return undefined;
+}
+
+function normalizePackageSpecVersion(version) {
+  return version?.replace(/\.$/u, "");
+}
+
+function markdownLogicalUnits(body) {
+  const units = [];
+  const lines = body.split(/\r?\n/gu);
+  let inFence = false;
+  let shellFence = false;
+  let currentFenceId;
+  let nextFenceId = 1;
+  let buffered = [];
+  let bufferedLine = 1;
+  let bufferedMetadata;
+
+  const flush = () => {
+    if (buffered.length === 0) return;
+    const text = buffered
+      .join("\n")
+      .replace(/\\\s*\n\s*/gu, " ")
+      .replace(/\s+/gu, " ")
+      .trim();
+    if (text) units.push({ line: bufferedLine, text, ...bufferedMetadata });
+    buffered = [];
+    bufferedMetadata = undefined;
+  };
+  const start = (line, lineNumber) => {
+    if (buffered.length === 0) {
+      bufferedLine = lineNumber;
+      bufferedMetadata = inFence
+        ? {
+            kind: shellFence ? "shell" : "code",
+            shellFenceId: shellFence ? currentFenceId : undefined,
+          }
+        : markdownUnitMetadata(line);
+    }
+    buffered.push(line);
+  };
+
+  for (const [index, line] of lines.entries()) {
+    const lineNumber = index + 1;
+    const fence = /^\s*```\s*([A-Za-z0-9_-]*)\s*$/u.exec(line);
+    if (fence) {
+      flush();
+      if (inFence) {
+        inFence = false;
+        shellFence = false;
+        currentFenceId = undefined;
+      } else {
+        inFence = true;
+        shellFence = /^(?:ba|z)?sh$|^shell$|^console$/iu.test(fence[1]);
+        currentFenceId = nextFenceId;
+        nextFenceId += 1;
+      }
+      continue;
+    }
+
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+
+    if (inFence && shellFence) {
+      const continuesPrevious =
+        buffered.length > 0 &&
+        (/\\\s*$/u.test(buffered.at(-1)) || /^\s+/u.test(line));
+      if (buffered.length > 0 && !continuesPrevious) flush();
+      start(line, lineNumber);
+      continue;
+    }
+
+    const startsMarkdownBlock =
+      !inFence &&
+      /^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|:\s+|\|.*\|\s*$)/u.test(line);
+    if (startsMarkdownBlock && buffered.length > 0) flush();
+    start(line, lineNumber);
+  }
+  flush();
+  return units;
+}
+
+function markdownUnitMetadata(line) {
+  const list = /^(\s*)(?:[-*+]|\d+[.)])\s+/u.exec(line);
+  if (list) {
+    const listIndent = [...list[1]].reduce(
+      (width, character) => width + (character === "\t" ? 4 : 1),
+      0,
+    );
+    return { kind: "list", listIndent };
+  }
+  if (/^\s*#{1,6}\s+/u.test(line)) return { kind: "heading" };
+  if (/^\s*\|.*\|\s*$/u.test(line)) return { kind: "table" };
+  if (/^\s*:\s+/u.test(line)) return { kind: "definition" };
+  return { kind: "prose" };
 }
 
 async function markdownHasAnchor(relativePath, fragment) {
@@ -2451,19 +3731,6 @@ async function verifyStrictBoundary() {
         pattern.lastIndex = 0;
         if (pattern.test(body))
           failures.push(`Public narrative copy in ${relativePath}: ${reason}`);
-      }
-      const positiveClaims = body.replace(
-        /\bnot\s+(?:currently\s+)?(?:published|available)\s+(?:to|on|from|via)\s+(?:the\s+)?npm(?:\s+registry)?\b/giu,
-        "",
-      );
-      if (
-        /\b(?:available|published|installable)\s+(?:on|from|via|to)\s+(?:the\s+)?npm(?:\s+registry)?\b/iu.test(
-          positiveClaims,
-        )
-      ) {
-        failures.push(
-          `Public narrative copy in ${relativePath}: unpublished npm distribution claim`,
-        );
       }
       if (
         /\b(?:ghcr\.io|docker\.io|quay\.io)\/[^\s`'"]*actionproxy\b/iu.test(

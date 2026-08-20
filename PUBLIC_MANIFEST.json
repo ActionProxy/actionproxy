@@ -68,7 +68,7 @@
     {
       "mode": "100644",
       "path": "AGENTS.md",
-      "sha256": "216f2a878ff97c02fdc3c18a1c511201b5f0b532746c511449ea9eaf069bf57e"
+      "sha256": "cdbae15001169dd7ad6e1e8ce008c25c78ec93a90dc728c92e94f7bff633793b"
     },
     {
       "mode": "100644",
@@ -98,7 +98,7 @@
     {
       "mode": "100644",
       "path": "README.md",
-      "sha256": "38546816bfe6cd63ebfeebb141f9fd67e74e156d6bc282c1f758b1b3837b4cef"
+      "sha256": "8630f2accb1ff6c77dba7ae33eab9e975b26953be08f5879c2a5fba75b674dee"
     },
     {
       "mode": "100644",
@@ -1053,7 +1053,7 @@
     {
       "mode": "100644",
       "path": "docs/ADOPTING.md",
-      "sha256": "0d818a9de30be7a2956ad3149a7b0483ebded464dc3d6ceb4b19df5ba54c0f45"
+      "sha256": "48c9eacde7aefe3c54de389a816c6d1b02d81e2c235498483a62a9517376ad90"
     },
     {
       "mode": "100644",
@@ -1078,7 +1078,7 @@
     {
       "mode": "100644",
       "path": "docs/COMMUNITY_CAPABILITIES.md",
-      "sha256": "7b3216a4ff35145e9191e3093774236e1081f360a669c37ecb5757d3f77a43c7"
+      "sha256": "e0cfc704cf7007a56f5010ccdb92b2e7043369b76ff1f88166f03ee759239870"
     },
     {
       "mode": "100644",
@@ -1108,7 +1108,7 @@
     {
       "mode": "100644",
       "path": "docs/OSS_TEST_STATUS.md",
-      "sha256": "fab6397a1b016fcd53065f7c97b840ef19e783740526b6633fc10738b723ddd2"
+      "sha256": "1f55878df9bd82c8f45ae518a7b07dbc27101a113e4b7a3a6627d78ede62d0c0"
     },
     {
       "mode": "100644",
@@ -1658,12 +1658,12 @@
     {
       "mode": "100644",
       "path": "scripts/first-run.mjs",
-      "sha256": "2dda98a900af5a7749e48a9903b37d8f49f2ef50459448f4c22039009992d717"
+      "sha256": "2fff7520c0748528aaff57b7f21bf04a2f356b45b42eb359e54dfc90682fe944"
     },
     {
       "mode": "100644",
       "path": "scripts/first-run.test.mjs",
-      "sha256": "b723af1bd1da29c34708c98725d47bc3c5b079ae993c24128bec47ce1f0334f3"
+      "sha256": "0b97a193ab635aa8d4576e9f2bb8065a2abff7c15bdad64ac82b5d5f42a5d26d"
     },
     {
       "mode": "100644",
@@ -1743,7 +1743,7 @@
     {
       "mode": "100644",
       "path": "scripts/verify-public-export.mjs",
-      "sha256": "1284a83f6c3d20a82fcbdeb38b62278867dd558123d4544bb5e02a95c9761648"
+      "sha256": "ba01ef059f83ff239023db5b5598b277241b9b39ebb7dd0db6bf57e3fa8b3d9c"
     },
     {
       "mode": "100644",

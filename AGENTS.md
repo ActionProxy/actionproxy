@@ -37,12 +37,19 @@ Choose exactly one execution boundary: the MCP wrapper for an existing MCP
 server, `runExternalAction` for a JavaScript or TypeScript runner, or the
 documented HTTP grant lifecycle for another runtime. Begin with a simulated
 effect and prove zero dispatch before approval, exactly one after approval,
-zero after denial, and a valid audit chain. The coordinated package candidates
-are exactly `@actionproxy/sdk-js@0.1.1` and
-`@actionproxy/mcp-wrapper@0.1.1`. Use them from npm only after both exact
-records resolve with reviewed repository metadata, integrity values, and
-provenance; otherwise use the guide's explicit local-tarball workflow. Never
-invent a registry dependency, dist-tag, or cross-repository import.
+zero after denial, and a valid audit chain. The two published npm packages are
+exactly `@actionproxy/sdk-js@0.1.1` and
+`@actionproxy/mcp-wrapper@0.1.1`; both have verified registry integrity and
+provenance. Install only those exact versions after running the verification
+commands in the adoption guide. Its explicit local-tarball workflow remains the
+source-bound and offline fallback. Never invent a registry dependency,
+dist-tag, or cross-repository import.
+
+Registry and container-distribution wording is fail-closed in the public
+verifier. Reuse the exact reviewed guidance. Any new or changed npm
+availability, package-identity, provenance, or registry-image claim must update
+the path-bound reviewed-claim inventory and receive review; do not add an
+unreviewed paraphrase.
 
 ## Repository map
 

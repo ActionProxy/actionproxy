@@ -334,15 +334,19 @@ test("integration starters are deterministic, local-only, and machine-readable",
   const sdkStarter = createIntegrationStarter("sdk");
   assert.deepEqual(sdkStarter.packageSource, {
     archive: "vendor/actionproxy-sdk-js-0.1.1.tgz",
-    availability: "local_source_tarball_required",
+    availability: "local_source_tarball_selected",
     kind: "local_tarball",
     packageName: "@actionproxy/sdk-js",
-    registryInstallAvailable: false,
+    registryInstallAvailable: true,
     version: "0.1.1",
   });
   assert.match(
     sdkStarter.files.find((file) => file.path === "README.md").content,
-    /does not claim or probe npm registry availability/u,
+    /exact package is also available from npm/u,
+  );
+  assert.match(
+    sdkStarter.files.find((file) => file.path === "README.md").content,
+    /generated starter stays bound to the reviewed source checkout and does not probe the registry/u,
   );
   const mcpConfig = createIntegrationStarter("mcp").files.find(
     (file) => file.path === "actionproxy.mcp.yaml",
