@@ -6,38 +6,34 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   SUPPORTED_NPM_RELEASE_COMMANDS,
-  assertBootstrapRegistryState,
+  SUPPORTED_NPM_RELEASE_OPERATIONS,
   assertOperationTarget,
   assertReleaseRef,
+  assertTrustedPublishingRuntime,
   compareSemanticVersions,
   createSensitiveNpmContext,
   expectedConfirmation,
   hasExactRegistryManifestMetadata,
   parseNpmTarball,
+  planPublishLatestRegistryState,
   resolveWorkspaceYamlDependency,
   sanitizeChildEnvironment,
 } from "./npm-release-artifacts.mjs";
 
 describe("npm release artifacts", () => {
   it("requires exact operation-specific owner confirmations", () => {
-    expect(expectedConfirmation("bootstrap-next", "0.1.1")).toBe(
-      "PUBLISH @actionproxy 0.1.1 TO NEXT",
-    );
-    expect(expectedConfirmation("resume-bootstrap-next", "0.1.1")).toBe(
-      "RESUME @actionproxy 0.1.1 TO NEXT",
-    );
-    expect(expectedConfirmation("promote-latest", "0.1.1")).toBe(
-      "PROMOTE @actionproxy 0.1.1 TO LATEST",
+    expect(expectedConfirmation("publish-latest", "0.1.2")).toBe(
+      "PUBLISH @actionproxy 0.1.2 TO LATEST",
     );
     expect(() => expectedConfirmation("publish", "0.1.1")).toThrow(
       /Unsupported npm release operation/u,
     );
     expect(() =>
-      expectedConfirmation("bootstrap-next", "0.1.1", "latest"),
-    ).toThrow(/requires the next/u);
-    expect(() =>
-      expectedConfirmation("promote-latest", "0.1.1", "next"),
+      expectedConfirmation("publish-latest", "0.1.2", "next"),
     ).toThrow(/requires the latest/u);
+    expect(() =>
+      expectedConfirmation("publish-latest", "0.1.2-rc.1"),
+    ).toThrow(/stable semantic version/u);
     expect(() => assertOperationTarget("trusted-stage", "next")).toThrow(
       /Unsupported npm release operation/u,
     );
@@ -52,9 +48,10 @@ describe("npm release artifacts", () => {
       "verify",
       "write",
     ]);
+    expect(SUPPORTED_NPM_RELEASE_OPERATIONS).toEqual(["publish-latest"]);
   });
 
-  it("strips credentials from child environments and narrowly restores only the npm token", () => {
+  it("strips credentials and narrowly restores only GitHub OIDC", () => {
     const environment = {
       ACTIONPROXY_SECRET: "placeholder-actionproxy-secret",
       ACTIONS_ID_TOKEN_REQUEST_TOKEN: "placeholder-oidc-token",
@@ -104,15 +101,6 @@ describe("npm release artifacts", () => {
       "NODE_OPTIONS",
     );
     expect(
-      sanitizeChildEnvironment(environment, { includeNpmToken: true }),
-    ).toMatchObject({
-      NODE_AUTH_TOKEN: "placeholder-npm-token",
-      PATH: "/usr/bin",
-    });
-    expect(
-      sanitizeChildEnvironment(environment, { includeNpmToken: true }),
-    ).not.toHaveProperty("GITHUB_TOKEN");
-    expect(
       sanitizeChildEnvironment(environment, { includeGitHubOidc: true }),
     ).toMatchObject({
       ACTIONS_ID_TOKEN_REQUEST_TOKEN: "placeholder-oidc-token",
@@ -122,16 +110,6 @@ describe("npm release artifacts", () => {
     expect(
       sanitizeChildEnvironment(environment, { includeGitHubOidc: true }),
     ).not.toHaveProperty("NODE_AUTH_TOKEN");
-    expect(
-      sanitizeChildEnvironment(environment, {
-        includeGitHubOidc: true,
-        includeNpmToken: true,
-      }),
-    ).toMatchObject({
-      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "placeholder-oidc-token",
-      ACTIONS_ID_TOKEN_REQUEST_URL: "https://example.invalid/oidc",
-      NODE_AUTH_TOKEN: "placeholder-npm-token",
-    });
   });
 
   it("isolates sensitive npm commands from project and inherited npm configuration", () => {
@@ -139,14 +117,20 @@ describe("npm release artifacts", () => {
       path.dirname(fileURLToPath(import.meta.url)),
       "../../..",
     );
+    const oidcUrl = [
+      "https://pipelines",
+      "actions.githubusercontent.com/example",
+    ].join(".");
     const context = createSensitiveNpmContext(
       {
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: "placeholder-oidc-token",
+        ACTIONS_ID_TOKEN_REQUEST_URL: oidcUrl,
         NODE_AUTH_TOKEN: "placeholder-npm-token",
         NPM_CONFIG_REGISTRY: "https://attacker.invalid/",
         NPM_CONFIG_USERCONFIG: "/tmp/untrusted-user-npmrc",
         PATH: "/usr/bin",
       },
-      { includeNpmToken: true },
+      { includeGitHubOidc: true },
     );
     try {
       expect(fs.statSync(context.cwd).mode & 0o777).toBe(0o700);
@@ -176,14 +160,46 @@ describe("npm release artifacts", () => {
       ).toBe("");
       expect(
         fs.readFileSync(path.join(context.cwd, "user-npmrc"), "utf8"),
-      ).toBe("//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}\n");
-      expect(
-        fs.readFileSync(path.join(context.cwd, "user-npmrc"), "utf8"),
-      ).not.toContain("placeholder-npm-token");
+      ).toBe("");
+      expect(context.environment).not.toHaveProperty("NODE_AUTH_TOKEN");
+      expect(context.environment).toMatchObject({
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: "placeholder-oidc-token",
+        ACTIONS_ID_TOKEN_REQUEST_URL: oidcUrl,
+      });
     } finally {
       context.cleanup();
     }
     expect(fs.existsSync(context.cwd)).toBe(false);
+  });
+
+  it("requires GitHub OIDC and rejects token fallback", () => {
+    const valid = {
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "placeholder-oidc-token",
+      ACTIONS_ID_TOKEN_REQUEST_URL: [
+        "https://pipelines",
+        "actions.githubusercontent.com/example",
+      ].join("."),
+      GITHUB_ACTIONS: "true",
+    };
+    expect(assertTrustedPublishingRuntime(valid)).toBe(true);
+    expect(() =>
+      assertTrustedPublishingRuntime({
+        ...valid,
+        NODE_AUTH_TOKEN: "placeholder-npm-token",
+      }),
+    ).toThrow(/without an npm token/u);
+    expect(() =>
+      assertTrustedPublishingRuntime({
+        ...valid,
+        ACTIONS_ID_TOKEN_REQUEST_URL: "https://placeholder.invalid/oidc",
+      }),
+    ).toThrow(/without an npm token/u);
+    expect(() =>
+      assertTrustedPublishingRuntime({
+        ...valid,
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: "",
+      }),
+    ).toThrow(/OIDC is missing or malformed/u);
   });
 
   it("accepts only workflow dispatch on the exact version tag", () => {
@@ -268,6 +284,7 @@ describe("npm release artifacts", () => {
       scripts: { build: "tsup", test: "vitest run" },
       dependencies: { yaml: "^2.5.1" },
       engines: { node: ">=22 <25" },
+      files: ["dist"],
       license: "Apache-2.0",
       repository: {
         directory: "packages/mcp-wrapper",
@@ -282,6 +299,22 @@ describe("npm release artifacts", () => {
       maintainers: [{ name: "actionproxy" }],
     };
     expect(hasExactRegistryManifestMetadata(metadata, expected)).toBe(true);
+    const normalized = structuredClone(metadata);
+    delete normalized.files;
+    normalized.directories = {};
+    expect(hasExactRegistryManifestMetadata(normalized, expected)).toBe(true);
+    expect(
+      hasExactRegistryManifestMetadata(
+        { ...structuredClone(metadata), files: ["lib"] },
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      hasExactRegistryManifestMetadata(
+        { ...structuredClone(normalized), directories: { lib: "dist" } },
+        expected,
+      ),
+    ).toBe(false);
     expect(
       hasExactRegistryManifestMetadata(
         {
@@ -322,50 +355,85 @@ describe("npm release artifacts", () => {
     );
   });
 
-  it("allows only absent bootstrap namespaces or exact next-tagged resume state", () => {
+  it("plans a resumable direct-latest publish without downgrade or replacement", () => {
     const absent = {
       exact: false,
       exists: false,
       packageExists: false,
       tags: {},
     };
-    const exactNext = {
+    const exactLatest = {
       exact: true,
       exists: true,
       packageExists: true,
-      tags: { next: "0.1.1" },
+      tags: { latest: "0.1.2", next: "0.1.1" },
     };
     expect(
-      assertBootstrapRegistryState("bootstrap-next", [absent, absent], "0.1.1"),
-    ).toBe(true);
+      planPublishLatestRegistryState([absent, absent], "0.1.2"),
+    ).toEqual(["publish", "publish"]);
     expect(
-      assertBootstrapRegistryState(
-        "resume-bootstrap-next",
-        [exactNext, absent],
-        "0.1.1",
+      planPublishLatestRegistryState([exactLatest, absent], "0.1.2"),
+    ).toEqual(["skip", "publish"]);
+    expect(
+      planPublishLatestRegistryState(
+        [
+          {
+            ...absent,
+            packageExists: true,
+            tags: { latest: "0.1.1", next: "0.1.1" },
+          },
+          absent,
+        ],
+        "0.1.2",
       ),
-    ).toBe(true);
+    ).toEqual(["publish", "publish"]);
     expect(() =>
-      assertBootstrapRegistryState(
-        "bootstrap-next",
-        [exactNext, absent],
-        "0.1.1",
+      planPublishLatestRegistryState(
+        [{ ...exactLatest, exact: false }, absent],
+        "0.1.2",
       ),
-    ).toThrow(/namespaces to be absent/u);
+    ).toThrow(/outside the exact latest/u);
     expect(() =>
-      assertBootstrapRegistryState(
-        "resume-bootstrap-next",
-        [{ ...exactNext, tags: { latest: "0.1.1", next: "0.1.1" } }, absent],
-        "0.1.1",
+      planPublishLatestRegistryState(
+        [{ ...exactLatest, tags: { latest: "0.1.1" } }, absent],
+        "0.1.2",
       ),
-    ).toThrow(/version, or tag/u);
+    ).toThrow(/outside the exact latest/u);
     expect(() =>
-      assertBootstrapRegistryState(
-        "resume-bootstrap-next",
-        [{ ...exactNext, tags: { next: "0.1.0" } }, absent],
-        "0.1.1",
+      planPublishLatestRegistryState(
+        [
+          {
+            ...absent,
+            packageExists: true,
+            tags: { latest: "0.1.2" },
+          },
+          absent,
+        ],
+        "0.1.2",
       ),
-    ).toThrow(/version, or tag/u);
+    ).toThrow(/replace or downgrade/u);
+    expect(() =>
+      planPublishLatestRegistryState(
+        [
+          {
+            ...absent,
+            packageExists: true,
+            tags: { latest: "0.2.0" },
+          },
+          absent,
+        ],
+        "0.1.2",
+      ),
+    ).toThrow(/replace or downgrade/u);
+    expect(() =>
+      planPublishLatestRegistryState([absent, absent], "0.1.2-rc.1"),
+    ).toThrow(/stable semantic version/u);
+    expect(() =>
+      planPublishLatestRegistryState(
+        [{ ...absent, exact: true }, absent],
+        "0.1.2",
+      ),
+    ).toThrow(/malformed/u);
   });
 
   it("parses safe npm tarballs and rejects path traversal, symlinks, and checksum drift", () => {

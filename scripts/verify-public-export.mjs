@@ -2082,9 +2082,9 @@ async function verifyDockerAndWorkflow() {
         'test "$(npm --version)" = 11.6.1',
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         "npm-release-artifacts.mjs write npm-release-bundle",
-        "ACTIONPROXY_NPM_TARGET_TAG: next",
+        "inputs.npm_operation == 'publish-latest'",
+        "ACTIONPROXY_NPM_OPERATION: publish-latest",
         "ACTIONPROXY_NPM_TARGET_TAG: latest",
-        'NODE_AUTH_TOKEN: ""',
         "npm-release-artifacts.mjs registry-verify npm-release-bundle",
         "path: npm-release-bundle",
       ]) {
@@ -2092,12 +2092,12 @@ async function verifyDockerAndWorkflow() {
           failures.push(`Public npm registry job is missing: ${requirement}`);
         }
       }
-      const registryTokenBindings = npmReleaseJob.match(
-        /NODE_AUTH_TOKEN:\s*\$\{\{ secrets\.NPM_BOOTSTRAP_TOKEN \}\}/gu,
-      );
-      if ((registryTokenBindings?.length ?? 0) !== 2) {
+      if (
+        npmReleaseJob.includes("NODE_AUTH_TOKEN") ||
+        npmReleaseJob.includes("NPM_BOOTSTRAP_TOKEN")
+      ) {
         failures.push(
-          "Public npm registry job must bind the bootstrap token to exactly two direct-write steps",
+          "Public npm registry job must use trusted-publisher OIDC without an npm token",
         );
       }
       if (npmReleaseJob.includes("registry-url:")) {
@@ -2105,9 +2105,9 @@ async function verifyDockerAndWorkflow() {
           "Public npm registry job must not inherit setup-node's placeholder registry credential",
         );
       }
-      if ((npmReleaseJob.match(/NODE_AUTH_TOKEN:\s*""/gu)?.length ?? 0) !== 1) {
+      if (npmReleaseJob.includes("dist-tag")) {
         failures.push(
-          "Public npm registry job must explicitly clear the token for anonymous verification",
+          "Public npm registry job must publish directly and must not mutate npm dist-tags",
         );
       }
       if (
@@ -2120,6 +2120,30 @@ async function verifyDockerAndWorkflow() {
         );
       }
     }
+    const npmOperationInput =
+      /^ {6}npm_operation:\s*\n(?<body>[\s\S]*?)^ {6}npm_confirmation:/mu.exec(
+        workflow,
+      )?.groups?.body;
+    const npmOperationOptions = npmOperationInput
+      ? /^ {8}options:\s*\n(?<choices>(?: {10}- [^\n]+\n)+)/mu
+          .exec(npmOperationInput)
+          ?.groups?.choices.trim()
+          .split("\n")
+          .map((line) => line.trim().slice(2))
+      : undefined;
+    if (
+      JSON.stringify(npmOperationOptions) !==
+      JSON.stringify(["none", "publish-latest"])
+    ) {
+      failures.push(
+        "Public workflow must expose only the direct trusted-publisher publish-latest operation",
+      );
+    }
+    if (workflow.includes("NPM_BOOTSTRAP_TOKEN")) {
+      failures.push(
+        "Public workflow must not retain the retired npm bootstrap credential",
+      );
+    }
     if (!npmReleaseHelper) {
       failures.push("Public npm release artifact helper is missing");
     } else {
@@ -2129,10 +2153,13 @@ async function verifyDockerAndWorkflow() {
         "SUPPORTED_NPM_RELEASE_COMMANDS",
         '"registry-verify"',
         "assertOperationTarget",
-        "assertBootstrapRegistryState",
+        "planPublishLatestRegistryState",
+        "assertTrustedPublishingRuntime",
         '"--provenance"',
         '"--access"',
         '"public"',
+        '"--tag"',
+        '"latest"',
         "hasExactRegistryAttestations",
         "hasExactRegistryManifestMetadata",
         "hasExpectedTagState",
@@ -2152,14 +2179,13 @@ async function verifyDockerAndWorkflow() {
         "/^npm_config_/",
         '["BASH_ENV", "ENV", "NODE_OPTIONS"]',
         "packaged manifest differs from the reviewed workspace manifest",
-        "package namespaces to be absent",
-        "partial bootstrap",
+        "Publish-latest found an existing target outside the exact latest state",
+        "Publish-latest refuses to replace or downgrade the current latest release",
         '"dist/index.d.ts"',
         '"dist/index.js"',
         "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
         "ACTIONS_ID_TOKEN_REQUEST_URL",
-        "{ includeGitHubOidc: true, includeNpmToken: true }",
-        "{ includeNpmToken: true }",
+        "{ includeGitHubOidc: true }",
         "installPackageTarball",
         "The frozen workspace yaml dependency is outside node_modules",
         "data after its terminator",
@@ -2168,6 +2194,20 @@ async function verifyDockerAndWorkflow() {
       ]) {
         if (!npmReleaseHelper.includes(requirement)) {
           failures.push(`Public npm release helper is missing: ${requirement}`);
+        }
+      }
+      for (const forbidden of [
+        "bootstrap-next",
+        "resume-bootstrap-next",
+        "promote-latest",
+        "includeNpmToken",
+        '"dist-tag"',
+        "_authToken=",
+      ]) {
+        if (npmReleaseHelper.includes(forbidden)) {
+          failures.push(
+            `Public npm release helper retains forbidden token or promotion flow: ${forbidden}`,
+          );
         }
       }
     }
