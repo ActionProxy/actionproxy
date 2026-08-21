@@ -1,6 +1,6 @@
 # ActionProxy Community test status
 
-Last reviewed: **2026-08-17**
+Last reviewed: **2026-08-18**
 
 This page records what the Community/OSS boundary tests automatically, what has
 been exercised only with local fixtures or mocks, and what still needs manual or
@@ -9,20 +9,24 @@ complete production authorization or compliance boundary.
 
 ## Current release status
 
-Community v0.1.1 is **not published yet**. The exact PR2 source checkpoint and
-generated Community tree passed the complete local release matrix described
-below. The remaining release gates are the owner-controlled public PR workflow,
-CodeQL on the exact public head, synchronization-ledger closure, and separately
-authorized tag, GitHub Release, and npm publication steps.
+Community v0.1.1 is published as a protected annotated tag and a normal/latest
+[GitHub Release](https://github.com/ActionProxy/actionproxy/releases/tag/v0.1.1).
+Its two integration packages are published to npm with verified registry
+integrity, signatures, and SLSA provenance:
 
-Until those steps finish, the public release remains a source-only developer
-preview and the two `@actionproxy` packages remain unavailable from npm.
+```bash
+npm view @actionproxy/sdk-js@0.1.1 version dist.integrity repository.url dist.attestations
+npm view @actionproxy/mcp-wrapper@0.1.1 version dist.integrity repository.url dist.attestations
+```
+
+Logged-out installs, SDK imports, and MCP `doctor --json` passed on Node
+22.15.0 and 24.11.0. ActionProxy does not publish a registry container image;
+the Community gateway remains a source-built distribution.
+
 A live ChatGPT Secure MCP Tunnel run, a live Google Workspace downstream-MCP
-run, and an uninvolved-user
-walkthrough remain post-release validation—not core source-release blockers—so
-long as those paths stay explicitly experimental/unvalidated and no live
-interoperability, provider-effect, or usability-completion claim is made. npm
-publication is a later, separate owner-authorized phase.
+run, and an uninvolved-user walkthrough remain post-release validation. Those
+paths stay explicitly experimental or unvalidated, with no live
+interoperability, provider-effect, or usability-completion claim.
 
 An older passing candidate does not validate source or generated artifacts that
 changed afterward. Required test skips, stale evidence, or a result from a
@@ -48,11 +52,12 @@ Stripe, Teams, and managed Mailgun/Resend delivery are outside the Community
 boundary. OSS release testing must prove those modules remain excluded and
 unreachable; their provider behavior is not an OSS release gate.
 
-## Exact PR2 candidate validation
+## Pre-release PR2 candidate validation (historical)
 
 The committed PR2 source regenerated a 350-entry Community manifest (351
-physical tracked files including `PUBLIC_MANIFEST.json`). The exact generated
-tree passed these local gates on 2026-08-17:
+physical tracked files including `PUBLIC_MANIFEST.json`). These exact counts
+record the local gates that passed on 2026-08-17; they are preserved as dated
+evidence rather than represented as reruns against later release changes:
 
 | Area | Result | What it covered |
 | --- | ---: | --- |
@@ -147,38 +152,28 @@ authorization step. Automated failure and timeout isolation does not establish
 that a live Telegram message was edited; deployments must retain the web console
 as the canonical review/status surface and audit presentation-update failures.
 
-## Formal release blockers
+## Completed v0.1.1 release evidence
 
-These are release blockers for the exact final Community tree:
-
-1. Preserve the exact attributable PR2 source checkpoint and regenerate an
-   identical Community tree after these evidence-only documentation updates.
-2. Run the public PR workflow and CodeQL against the exact reviewed PR2 head;
-   do not substitute local evidence from another tree.
-3. Close the private synchronization ledger with the exact squash topology,
-   merged-main checks, and restored-protection evidence before any release tag.
-4. From a fresh generated Mac tree with no `.git`, `node_modules`, or
-   `.actionproxy`, prove exact approval, rejection, edited approval, denial,
-   SQLite persistence, HTTP, SDK, MCP, and audit integrity.
-5. Run the public workflow on the exact release commit, including full-history
-   secret scanning and public-only CodeQL before the release tag, and confirm
-   the intended repository protections and release settings.
-6. Preserve the locally verified package tarballs, public manifest, OpenAPI and
-   schema artifacts, license report, SBOM, and their digests as one immutable
-   evidence set; these local package artifacts test the shipped source and do
-   not imply npm availability. Download the evidence again and recheck every
-   hash before release.
-7. Verify every advertised OpenAPI and JSON Schema URL returns the exact
-   attested bytes with the intended content type, CORS, cache behavior, and
-   locally resolvable references.
-8. Obtain owner/legal signoff for the final project/source-release and trademark
-   names before publishing `v0.1.1`. Package-name clearance belongs to the later
-   npm phase.
-
-After PR2 merges, explicitly pass the public workflow/CodeQL on exact `main`,
-then create the tag, verify the logged-out commit and tagged archives, publish
-the GitHub Release, and only then deploy the indexable landing artifact. npm
-package links are not part of this critical path.
+- Signed release commit `d867b933ed8481d5fe31109bc91a9a8c506f0180` is
+  bound by protected annotated tag `v0.1.1`; the tag and logged-out GitHub
+  archives passed exact readback.
+- Exact-main workflow run `32116431304` passed all nine required jobs. Release
+  run `32117199694` successfully prepared and independently compared the
+  artifacts, passed Node 22 and 24 consumption, and completed both registry
+  publishes. Its overall conclusion was `failure` because the built-in
+  post-publish verifier rejected npm's first-publication dist-tag behavior and
+  registry-normalized omission of the packed `files` field.
+- No retry, republish, unpublish, or separate dist-tag mutation followed that
+  verifier result. Later independent anonymous verification established that
+  both registry downloads are byte-identical to workflow artifact `9317268826`;
+  their signatures and provenance bind the release workflow, tag, commit, and
+  run.
+- Logged-out exact-version installs, SDK imports, and MCP static doctor passed
+  on both supported Node majors. Local tarballs remain the source-bound and
+  offline fallback, not evidence of a different distribution.
+- The GitHub Release exposes exactly seven checksum-bound source and
+  supply-chain assets. Public export attestation continues to enforce the
+  350-entry Community boundary and exclusion of private modules and secrets.
 
 ## Post-release validation for experimental paths
 
@@ -208,9 +203,9 @@ release blocker unless the corresponding public claim or release scope changes:
   the user-owned executor; start with discovery or a read-only call; require an
   explicit simulated-to-real transition; and verify one-use execution plus
   audit evidence without auto-approval or an ungoverned bypass claim;
-- keep npm publication as a separate owner-authorized phase; for the coordinated
-  v0.1.1 npm launch, registry provenance and clean consumer installation are
-  release gates;
+- keep future npm publication owner-authorized, trusted-publisher-only, and
+  bound to the exact protected release; continue scheduled provenance,
+  integrity, and clean-install checks for both packages;
 - add fake-SMTP protocol coverage and a secret-backed Telegram terminal-card
   edit acceptance without making PR CI depend on third-party availability;
 - maintain optional secret-backed Slack, Telegram, SMTP, external OAuth, and

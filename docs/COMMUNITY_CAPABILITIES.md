@@ -19,12 +19,19 @@ authority, and records the outcome.
 | Self-hosted security | API-key and OIDC JWT modes, scoped routes, approval groups, response redaction, and hash-chained audit                                                                                                    |
 | Content consequences | Source-aware influence scopes and fail-closed policy narrowing for calls routed through supported MCP paths                                                                                               |
 
-The SDK and MCP wrapper are independently packable as
-`@actionproxy/sdk-js@0.1.1` and `@actionproxy/mcp-wrapper@0.1.1`. Registry
-availability is a separately verified release fact; until both exact npm
-records resolve with the reviewed repository metadata, integrity values, and
-provenance, consumers use the reviewed local tarballs described in [the
-adoption guide](ADOPTING.md).
+The SDK and MCP wrapper are published to npm with verified provenance as
+`@actionproxy/sdk-js@0.1.1` and `@actionproxy/mcp-wrapper@0.1.1`. Verify the
+exact registry metadata before installing:
+
+```bash
+npm view @actionproxy/sdk-js@0.1.1 version dist.integrity repository.url dist.attestations
+npm view @actionproxy/mcp-wrapper@0.1.1 version dist.integrity repository.url dist.attestations
+```
+
+The reviewed local tarballs described in [the adoption guide](ADOPTING.md)
+remain the source-bound and offline fallback. ActionProxy does not publish a
+registry container image; the Community gateway is built from the reviewed
+source checkout.
 
 The optional `tunnel-client` binary is downloaded only after explicit install
 intent and is not part of the ActionProxy repository or its SBOM. Its checked-in

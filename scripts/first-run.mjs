@@ -507,10 +507,10 @@ function integrationPackageSource(mode, packageVersion) {
       : `actionproxy-mcp-wrapper-${packageVersion}.tgz`;
   return {
     archive: `vendor/${archiveName}`,
-    availability: "local_source_tarball_required",
+    availability: "local_source_tarball_selected",
     kind: "local_tarball",
     packageName,
-    registryInstallAvailable: false,
+    registryInstallAvailable: true,
     version: packageVersion,
   };
 }
@@ -775,14 +775,14 @@ function integrationPolicy() {
 function integrationReadme(mode, proofChecklist, packageSource) {
   const packagePreparation = packageSource
     ? [
-        `Build the unpublished \`${packageSource.packageName}@${packageSource.version}\` candidate from the reviewed ActionProxy source checkout:`,
+        `Build the source-bound \`${packageSource.packageName}@${packageSource.version}\` package from the reviewed ActionProxy checkout:`,
         "",
         "```bash",
         "node prepare-local-package.mjs",
         "npm install",
         "```",
         "",
-        `This creates only \`${packageSource.archive}\` in this starter before npm installs it. It does not claim or probe npm registry availability.`,
+        `This starter deliberately selects the local \`${packageSource.archive}\` fallback before npm installs it. The exact package is also available from npm, but this generated starter stays bound to the reviewed source checkout and does not probe the registry.`,
       ]
     : ["This HTTP starter has no runtime package dependency."];
   const modeInstructions = {

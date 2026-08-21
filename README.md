@@ -182,8 +182,22 @@ external OAuth 2.1 authorization server.
 
 If a developer or AI coding agent is adding ActionProxy to an existing
 application, start with the [third-party adoption guide](docs/ADOPTING.md), not
-the contribution workflow. Generate a credential-free starter from the
-consumer project's directory with one deterministic command:
+the contribution workflow. The SDK and MCP wrapper are published to npm with
+verified provenance. Verify both coordinated records, then install only the
+exact package needed by the consumer:
+
+```bash
+npm view @actionproxy/sdk-js@0.1.1 version dist.integrity repository.url dist.attestations
+npm view @actionproxy/mcp-wrapper@0.1.1 version dist.integrity repository.url dist.attestations
+
+npm install --save-exact @actionproxy/sdk-js@0.1.1
+# or
+npm install --save-exact @actionproxy/mcp-wrapper@0.1.1
+```
+
+ActionProxy does not publish a registry container image. Run the separate
+gateway from its reviewed source checkout. For a credential-free, source-bound
+starter, invoke the generator from the consumer project's directory:
 
 ```bash
 /absolute/path/to/actionproxy/actionproxy integrate --mode sdk --json
@@ -196,14 +210,16 @@ The default directory is `actionproxy-<mode>-integration`. Use
 directory only, refuses to overwrite any existing entry, targets a loopback
 gateway, and includes a machine-readable descriptor plus a mode-specific proof
 checklist. SDK and MCP starters build a versioned local package tarball from the
-reviewed checkout; they do not assume or probe npm registry availability. The
-HTTP starter has no runtime dependency. The generated descriptor records the
-package and source-binding contract. A private `actionproxy-source.json` stores
-the reviewed checkout's local path so the starter can find it after `cd`; its
-contents and absolute path are omitted from command output. `--json` reports
-generated filenames, hashes, and next commands without credentials or absolute
-paths. The starter's `.gitignore` excludes that binding, local package
-tarballs, and installed dependencies.
+reviewed checkout. This is an intentional source-bound selection even though
+the exact registry packages are available; the generated starter does not
+probe npm or switch dependency sources. The HTTP starter has no runtime
+dependency. The generated descriptor records the package and source-binding
+contract. A private `actionproxy-source.json` stores the reviewed checkout's
+local path so the starter can find it after `cd`; its contents and absolute
+path are omitted from command output. `--json` reports generated filenames,
+hashes, and next commands without credentials or absolute paths. The starter's
+`.gitignore` excludes that binding, local package tarballs, and installed
+dependencies.
 
 Each starter rechecks `./actionproxy status --json` immediately before it runs,
 requires a healthy loopback-only gateway, and uses the live Docker-assigned
@@ -219,16 +235,12 @@ boundaries:
   downstream function; or
 - implement the documented HTTP grant lifecycle from another runtime.
 
-The SDK and MCP-wrapper package candidates are independently versioned at
-`0.1.1`. Their manifests and isolated packed-consumer tests are release-ready,
-but this document does not claim that either package exists in npm until both
-exact registry records, repository metadata, integrity values, and provenance
-are independently verified. The guide includes the
-truthful local-tarball fallback, machine-readable OpenAPI and JSON Schema
-contracts, a mock-first completion contract, and a prompt developers can give
-directly to a coding agent. Do not let an agent invent package availability,
-bypass grant consumption, or replace an unknown downstream outcome with an
-automatic retry.
+The exact published packages are `@actionproxy/sdk-js@0.1.1` and
+`@actionproxy/mcp-wrapper@0.1.1`. The guide includes the source-tarball fallback,
+machine-readable OpenAPI and JSON Schema contracts, a mock-first completion
+contract, and a prompt developers can give directly to a coding agent. Do not
+let an agent invent another package or dist-tag, bypass grant consumption, or
+replace an unknown downstream outcome with an automatic retry.
 
 ### Develop from source
 
@@ -319,13 +331,10 @@ The expected behavior is:
 
 ## SDK and external runners
 
-The JavaScript SDK is a workspace component in `packages/sdk-js/`. It contains
-the HTTP client, polling helper, gated-tool helper, and external-runner
-authority flow. Its independently packable candidate is
-`@actionproxy/sdk-js@0.1.1`. This README does not infer registry availability
-from the manifest; use it from npm only after both coordinated package records
-and their release evidence are independently verified, or use the pinned
-local-tarball workflow in
+The JavaScript SDK is published as `@actionproxy/sdk-js@0.1.1`. It contains the
+HTTP client, polling helper, gated-tool helper, and external-runner authority
+flow. Verify its exact registry metadata with the commands above before
+installing it, or use the source-tarball fallback in
 [the adoption guide](docs/ADOPTING.md#javascript-consumer-path).
 
 Start ActionProxy without local tool execution before testing an external
@@ -348,9 +357,9 @@ See [External runners and MCP](docs/EXTERNAL_RUNNERS_MCP.md).
 ## MCP wrapper
 
 The stdio wrapper in `packages/mcp-wrapper/` lets an MCP host expose downstream
-tools only through ActionProxy policy and approval. Its independently packable
-candidate is `@actionproxy/mcp-wrapper@0.1.1`; the same coordinated
-registry-verification rule and local-tarball fallback apply.
+tools only through ActionProxy policy and approval. It is published as
+`@actionproxy/mcp-wrapper@0.1.1`; the same exact registry-verification rule and
+source-tarball fallback apply.
 
 ```bash
 corepack pnpm dev:proxy
