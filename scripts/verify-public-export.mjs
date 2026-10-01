@@ -247,7 +247,7 @@ const reviewedNpmPackageSurfaces = {
       "@types/node": "^22.7.4",
       tsup: "^8.3.0",
       typescript: "^5.6.3",
-      vitest: "^3.2.6",
+      vitest: "^4.1.11",
     },
     publishConfig: {
       access: "public",
@@ -284,7 +284,7 @@ const reviewedNpmPackageSurfaces = {
       "@types/node": "^22.7.4",
       tsup: "^8.3.0",
       typescript: "^5.6.3",
-      vitest: "^3.2.6",
+      vitest: "^4.1.11",
     },
     publishConfig: {
       access: "public",

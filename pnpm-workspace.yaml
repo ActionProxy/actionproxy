@@ -6,7 +6,10 @@ packages:
 overrides:
   "brace-expansion@1.1.16": "1.1.18"
   "bundle-require>esbuild": "^0.28.1"
-  "fast-uri": "3.1.5"
+  "fast-uri": "3.1.8"
+  "baseline-browser-mapping": "2.11.0"
+  "browserslist": "4.28.7"
+  "js-yaml": "4.3.2"
   "fastify>find-my-way": "9.7.0"
   "ip-address": "10.3.1"
   "nanoid": "3.3.18"
