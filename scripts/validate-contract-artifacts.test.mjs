@@ -62,7 +62,7 @@ test("standards validators are exact dependency pins in both root manifests", ()
     if (!fs.existsSync(path.join(repositoryRoot, relativePath))) continue;
     assert.match(
       fs.readFileSync(path.join(repositoryRoot, relativePath), "utf8"),
-      /^\s*"fast-uri": "3\.1\.5"\s*$/mu,
+      /^\s*"fast-uri": "3\.1\.8"\s*$/mu,
       `${relativePath} must pin the patched validator URI dependency`,
     );
   }

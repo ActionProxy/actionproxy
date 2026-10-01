@@ -118,7 +118,7 @@
     {
       "mode": "100644",
       "path": "apps/server/package.json",
-      "sha256": "19c51359b815689f933827f00f275aaff5646fccf1a72f6632f8199ddb715cd4"
+      "sha256": "a3e2d70d8945be046b2a32139f13d079b06c3e4f5ef590efcf7cca0377e89955"
     },
     {
       "mode": "100644",
@@ -913,7 +913,7 @@
     {
       "mode": "100644",
       "path": "apps/web/package.json",
-      "sha256": "eec918f48792190e8b9486197ae0393e0b57cede1c9061dfd004d66c42b9be42"
+      "sha256": "f4373655626b22d3155564a67ace831baa7e811b6c1c07b28ceadb31c8b73ad8"
     },
     {
       "mode": "100644",
@@ -1043,7 +1043,7 @@
     {
       "mode": "100644",
       "path": "apps/web/vite.config.ts",
-      "sha256": "c7ef290bc9a82b142d5d30a43f2d519c9ceea21978a417ce73c94433f66d158f"
+      "sha256": "468e15f7c047da7415f844d15d6d773eab2482860e16e5dcaf72cf160d4ec6d3"
     },
     {
       "mode": "100644",
@@ -1468,7 +1468,7 @@
     {
       "mode": "100644",
       "path": "packages/mcp-wrapper/package.json",
-      "sha256": "9e92e4047a411b7424e4da10f003dca1ba226f2eda131b17d9aa0cdd565703c0"
+      "sha256": "f45cf4ee3cc90380d3f80156edefb2cf172d44fba6c507c467b5e5f2b5d29f7d"
     },
     {
       "mode": "100644",
@@ -1543,7 +1543,7 @@
     {
       "mode": "100644",
       "path": "packages/sdk-js/package.json",
-      "sha256": "012fc3345c1c662062c9ca55de80cbef9a171cd6c22570ca9cbc9fab75e3b0b7"
+      "sha256": "ecb5c1b7001fe53b355e8d43a43c43dad150f1630f131a8edc7d1d98d887375f"
     },
     {
       "mode": "100644",
@@ -1593,12 +1593,12 @@
     {
       "mode": "100644",
       "path": "pnpm-lock.yaml",
-      "sha256": "c2a4bbe36d661ca1dbc71e3320582d31f2a877d729177e693b6587334adbd2b8"
+      "sha256": "b2d5b043a5bc3fa3e2b3dc48edf006a10b6ec185994276d7a666aa4b1899b907"
     },
     {
       "mode": "100644",
       "path": "pnpm-workspace.yaml",
-      "sha256": "b4854041fa946ef7269b121472613e6ffefbeba3c2d1e52ad707c5fb14182725"
+      "sha256": "2e4e202416e9549d00a53823647c6a04fe6d07d17e239825a71545a92fe8f6e2"
     },
     {
       "mode": "100644",
@@ -1733,7 +1733,7 @@
     {
       "mode": "100644",
       "path": "scripts/validate-contract-artifacts.test.mjs",
-      "sha256": "d11023ce83b6b9c546314f1afff52c0c427622707738f2c2909650c20a960f5f"
+      "sha256": "b53572c8b62323a8924e8694084b008072d7fe46739dc392d29f3f4d3eddad25"
     },
     {
       "mode": "100644",
@@ -1743,7 +1743,7 @@
     {
       "mode": "100644",
       "path": "scripts/verify-public-export.mjs",
-      "sha256": "660095f56751f62969082e255df04d997e57b2acce90dd4232cd5c347af672d6"
+      "sha256": "9d45e5ccf39f55cf8b0ec7ea7b8b3f0b78a25f0a0e3b850b57f16dfcf62f9fd5"
     },
     {
       "mode": "100644",
